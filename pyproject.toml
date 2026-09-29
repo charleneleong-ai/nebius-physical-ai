@@ -1,0 +1,31 @@
+[project]
+name = "nebius-physical-ai"
+version = "0.1.0"
+description = "Nebius Global AI Hackathon — Physical AI track entry"
+readme = "README.md"
+authors = [{ name = "Charlene Leong", email = "charleneleong84@gmail.com" }]
+requires-python = ">=3.13"
+dependencies = ["typer>=0.19", "rich>=14"]
+
+[project.scripts]
+npai = "nebius_physical_ai.cli:app"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.16", "pre-commit>=4"]
+
+[build-system]
+requires = ["uv_build>=0.8.22,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+extend-select = ["C901", "PLR0915"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-statements = 50
