@@ -25,4 +25,4 @@ uv run npai info
 uv run pytest
 ```
 
-Design specs live in [`docs/specs/`](docs/specs/).
+Hackathon rules digest: [`docs/hackathon-rules.md`](docs/hackathon-rules.md). Design specs live in [`docs/specs/`](docs/specs/).
