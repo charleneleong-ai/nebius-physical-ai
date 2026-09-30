@@ -45,7 +45,7 @@ verifier's job.
 |---|---|---|---|
 | Orchestration agent | Nemotron 3 Super (fast calls) / Ultra (explanations) | **Token Factory** | Nemotron + agent runtime |
 | Scene perception | Cosmos Reason 2 (container) | **Serverless Endpoint** | Cosmos, real-time inference |
-| Policy | GR00T N1.x, fine-tuned on SO-101 sim demos | **Serverless Endpoint** (inference) | GR00T |
+| Policy | GR00T **N1.6** (`nvidia/GR00T-N1.6-3B`, `NEW_EMBODIMENT`, SO-100/101 modality config), fine-tuned on SO-101 sim demos | **Serverless Endpoint** (inference) | GR00T |
 | Rehearsal fan-out | MuJoCo + GR00T client, N parallel rollouts | **Serverless Jobs** | sim + policy eval at scale |
 | Object/spec lookup | Tavily search (object dimensions, grasp affordances) | Tavily API | Best Use of Tavily bonus |
 | Capture + UI | Phone web app: camera stream, verdict card, teleop on ASK HUMAN; desktop dashboard: twin render · rollout grid | local / Nebius | Design criterion |
@@ -53,6 +53,20 @@ verifier's job.
 Agent runtime: **NVIDIA NeMo Agent Toolkit** wrapping a LangGraph graph
 (perceive → twin → rehearse → judge → explain). NeMo is NVIDIA-native, which should land well with
 the NVIDIA judges, and LangGraph is what we already know. *Open decision.*
+
+## Hardware
+
+**Robonine SO-ARM101 kit** (ordered 2026-09-30, ships unassembled from China): standard Feetech
+STS3215 follower + leader arm + follower wrist camera. Standard motors matter — LeRobot's SO-101
+driver, NVIDIA's [SO-101 sim-to-real course](https://docs.nvidia.com/learning/physical-ai/sim-to-real-so-101/latest/10-groot.html)
+and the community checkpoint
+[`quangnd58/GR00T-N1.6-3B-so101-multitask`](https://huggingface.co/quangnd58/GR00T-N1.6-3B-so101-multitask)
+all assume them. GR00T N1.6 is pinned because the SO-101 examples live on the `n1d6` branch
+(main now defaults to N1.7). The leader arm is insurance: if sim-to-real transfer is poor, record
+20–50 real demos. Execution after GO runs through LeRobot (`--policy.type=gr00t`).
+
+Hardware is additive: if the arm is late or misbehaves, the submission falls back to sim-only
+("key application modules in action"), which the rules allow.
 
 ## Compute plan
 
@@ -86,9 +100,9 @@ Assets are imported, or copied with a note on their origin. They are never neste
 | Week | Dates | Deliverable (exit criterion) |
 |---|---|---|
 | 0 | Sep 30–Oct 4 | Spikes: a Token Factory Nemotron call, a Serverless Job hello-world, phone web app streaming frames to the backend with ArUco pose, Cosmos Reason 2 on the A100 returning scene JSON from a frame, and an SO-101 MuJoCo scene built from that JSON. Pick the agent runtime. |
-| 1 | Oct 5–11 | GR00T zero-shot baseline in the twin; scripted demos → LeRobot dataset → fine-tune on the A100; single rollout client. |
+| 1 | Oct 5–11 | GR00T N1.6 community SO-101 checkpoint baseline in the twin; scripted demos → LeRobot dataset → fine-tune on the A100; single rollout client. |
 | 2 | Oct 12–18 | Serverless Job fan-out (N=200) and results aggregation; trust score and calibration on a held-out scene set (reliability diagram). |
-| 3 | Oct 19–25 | Agent graph working end to end, Tavily lookup, dashboard, endpoints deployed on Nebius; first full live run. |
+| 3 | Oct 19–25 | Arm assembled + calibrated (leader/follower teleop sanity, LeRobot driver); agent graph working end to end, Tavily lookup, dashboard, endpoints deployed on Nebius; first full live run. |
 | 4 | Oct 26–30 | Record the video, pitch first, naming Token Factory, AI Cloud, Nemotron, GR00T and Cosmos aloud. Write the README and feedback section, make the repo public under Apache-2.0, and submit by Oct 29. |
 
 ## Evaluation
@@ -113,5 +127,5 @@ What we claim, and how we'd know it's true:
 ## Open decisions
 
 - Agent runtime: NeMo Agent Toolkit or plain LangGraph.
-- GR00T version, and an SO-101 or Franka/Panda twin, whichever has the best pretrained checkpoint.
+- Stretch goal: simulated Unitree G1 humanoid rehearsed with GR00T + **GEAR-SONIC** whole-body control (NVlabs/GR00T-WholeBodyControl) — covers all four named track models.
 - Stretch goal: phone-teleop takeover on ASK HUMAN (same phone page, IMU or touch control).
