@@ -5,13 +5,26 @@ description = "Nebius Global AI Hackathon — Physical AI track entry"
 readme = "README.md"
 authors = [{ name = "Charlene Leong", email = "charleneleong84@gmail.com" }]
 requires-python = ">=3.13"
-dependencies = ["typer>=0.19", "rich>=14"]
+dependencies = [
+    "typer>=0.19",
+    "rich>=14",
+    "fastapi>=0.142.1",
+    "uvicorn[standard]>=0.54.0",
+    "opencv-python-headless>=5.0.0.93",
+    "numpy>=2.5.3",
+    "pillow>=12.3.0",
+]
 
 [project.scripts]
 npai = "nebius_physical_ai.cli:app"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.16", "pre-commit>=4"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.16",
+    "pre-commit>=4",
+    "httpx2>=2.13.1",
+]
 
 [build-system]
 requires = ["uv_build>=0.8.22,<0.9.0"]

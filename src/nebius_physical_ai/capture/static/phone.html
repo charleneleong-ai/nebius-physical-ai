@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preflight capture</title>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+  video { width: 100%; display: block; }
+  #bar { padding: 12px 16px; display: flex; gap: 12px; align-items: center; }
+  button { font-size: 1rem; padding: 10px 18px; border-radius: 8px; border: 0; }
+  #status.ok { color: #6d6; } #status.bad { color: #f77; }
+  ul { margin: 0; padding: 0 16px 16px 32px; }
+</style>
+</head>
+<body>
+<video id="video" playsinline muted></video>
+<div id="bar"><button id="start">Start</button><span id="status">idle</span></div>
+<ul id="objects"></ul>
+<canvas id="canvas" hidden></canvas>
+<script>
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const statusEl = document.getElementById("status");
+const list = document.getElementById("objects");
+const INTERVAL_MS = 500;
+const MAX_WIDTH = 960;
+let ctx;
+
+async function sendFrame() {
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.7));
+  const res = await fetch("frame", { method: "POST", body: blob });
+  const obs = await res.json();
+  statusEl.className = obs.ok ? "ok" : "bad";
+  statusEl.textContent = obs.ok ? `markers ${obs.markers_found.length}/4` : obs.error;
+  list.innerHTML = obs.objects
+    .map((o) => `<li>${o.label} at (${o.x_mm}, ${o.y_mm}) mm</li>`).join("");
+}
+
+document.getElementById("start").onclick = async () => {
+  video.srcObject = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment", width: { ideal: 1280 } }, audio: false,
+  });
+  await video.play();
+  const scale = Math.min(1, MAX_WIDTH / video.videoWidth);
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+  ctx = canvas.getContext("2d");
+  const loop = async () => {
+    try { await sendFrame(); } catch (e) { statusEl.className = "bad"; statusEl.textContent = e; }
+    setTimeout(loop, INTERVAL_MS);
+  };
+  loop();
+};
+</script>
+</body>
+</html>
