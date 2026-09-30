@@ -105,14 +105,54 @@ Assets are imported, or copied with a note on their origin. They are never neste
 | 3 | Oct 19–25 | Arm assembled + calibrated (leader/follower teleop sanity, LeRobot driver); agent graph working end to end, Tavily lookup, dashboard, endpoints deployed on Nebius; first full live run. |
 | 4 | Oct 26–30 | Record the video, pitch first, naming Token Factory, AI Cloud, Nemotron, GR00T and Cosmos aloud. Write the README and feedback section, make the repo public under Apache-2.0, and submit by Oct 29. |
 
+## Related work and positioning
+
+Twin-based policy evaluation already exists; the simulation is not the novelty.
+
+| Work | What it does | Gap Preflight fills |
+|---|---|---|
+| [SIMPLER](https://simpler-env.github.io/), [PolaRiS](https://arxiv.org/pdf/2512.16881), [Real-to-Sim Eval](https://real2sim-eval.github.io/) | Scanned twins whose sim success rates track real ones across **policies** (r ≈ 0.9) | They rank policies offline, on average. Preflight decides on **one attempt in one scene**. |
+| [Real-is-Sim](https://huggingface.co/papers/2504.03597), [TwinRL](https://arxiv.org/pdf/2602.09023) | Digital twin inside training and deployment pipelines | Train/evaluate, not a per-attempt go/no-go |
+| [FIPER](https://arxiv.org/abs/2510.09459), [SAFE](https://openreview.net/forum?id=XPyAukgsFf), [VLA-Scope](https://arxiv.org/html/2609.21246) | Conformally calibrated failure alarms **during** execution | They fire after the robot moves. Preflight predicts **before**. |
+
+Claim: a calibrated, pre-execution probability that *this* attempt succeeds, with abstention
+(RETRY vs ASK HUMAN) and an agent that acts on it. [RoboMonitor](https://arxiv.org/html/2609.30715v1)
+lists conformal abstention as future work. Never claim "accurate simulation" or "first digital
+twin". Stretch: FIPER-style drift alarm after GO, so the attempt is covered before and during.
+
+## Trust score
+
+Two separate questions, kept separate on purpose:
+
+- **p: will it work?** Successes over N randomised rehearsals, with a Wilson interval, then
+  calibrated against real outcomes (isotonic regression, or conformal as in FIPER).
+- **f: can I trust the twin for this scene?** Weakest-link combination of perception confidence
+  (markers, detector), scene match (twin render vs phone frame), variant disagreement,
+  out-of-distribution distance from validation scenes, and execution drift (`boundary_cusum.py`).
+
+| Verdict | Rule (thresholds tuned on validation data, not hand-picked) |
+|---|---|
+| GO | lower bound of p ≥ 0.7 and f ≥ 0.6 |
+| RETRY | f ≥ 0.6 but p low: Nemotron proposes a rearrangement, re-rehearse |
+| ASK HUMAN | f < 0.6: the twin is not trustworthy here, so don't guess |
+
+Week 2 builds p with its interval, perception confidence and variant disagreement; the other
+fidelity signals follow once the core loop works.
+
 ## Evaluation
 
-What we claim, and how we'd know it's true:
+What we claim, and how we'd know it's true. Report absolute counts; no ratio metrics on small samples.
 
-- **Trust calibration:** ECE of predicted success against actual sim success on held-out scenes.
-- **Decision value:** failures avoided against attempts forgone, compared with always-execute and
-  random-gate baselines.
+- **Real-arm validation (week 3):** 20–30 mat layouts, each with a Preflight prediction and a real
+  attempt. Reliability diagram, Brier score, and rank agreement (does higher p mean more successes?).
+- **Sim-to-sim stress test (week 1–2, before the arm):** a deliberately mismatched "reality" twin
+  (friction, mass, gains, camera pose). Does domain randomisation keep p calibrated there?
+- **Decision value (headline number):** failures avoided against attempts wrongly skipped, versus
+  always-execute and random-gate baselines.
+- **Fidelity check:** low-f scenes should show larger prediction error; if not, drop that signal.
 - **Latency:** phone frame to verdict in under 60 s (the fan-out is bounded).
+- **Demo moment:** Preflight predicts RETRY, an override fails on the real arm; after the suggested
+  rearrangement it predicts GO and the arm succeeds.
 
 ## Risks
 
