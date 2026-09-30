@@ -1,7 +1,7 @@
 # Preflight — design spec
 
 > **Know whether a robot will succeed before it moves.**
-> A live webcam scene is rebuilt as a sim twin. A GR00T policy is rehearsed hundreds of times across
+> A phone pointed at a real workspace streams the scene, which is rebuilt as a sim twin. A GR00T policy is rehearsed hundreds of times across
 > randomised variants on Nebius Serverless Jobs. A Nemotron agent turns the rehearsal into a
 > calibrated go / retry / ask-a-human verdict it can explain.
 
@@ -22,7 +22,9 @@ verifier's job.
 
 ## Demo loop (what the video shows, ≥1 min live)
 
-1. Hands rearrange 3–5 known objects (coloured blocks, a mug) on a marked mat under a fixed webcam.
+1. Hands rearrange 3–5 known objects (coloured blocks, a mug) on a mat with ArUco markers at the
+   corners. A phone streams the scene from a browser page (no app install); Continuity Camera is the
+   fallback. The markers give camera pose per frame, so the phone can be hand-held.
 2. **Perceive.** Cosmos Reason 2 parses the frame into a scene graph (objects, poses, relations)
    and flags physically implausible layouts.
 3. **Twin.** The scene graph becomes a MuJoCo SO-101 scene, reusing the nebius/nebius-physical-ai
@@ -46,7 +48,7 @@ verifier's job.
 | Policy | GR00T N1.x, fine-tuned on SO-101 sim demos | **Serverless Endpoint** (inference) | GR00T |
 | Rehearsal fan-out | MuJoCo + GR00T client, N parallel rollouts | **Serverless Jobs** | sim + policy eval at scale |
 | Object/spec lookup | Tavily search (object dimensions, grasp affordances) | Tavily API | Best Use of Tavily bonus |
-| UI | Web dashboard: webcam · twin render · rollout grid · verdict | local / Nebius | Design criterion |
+| Capture + UI | Phone web app: camera stream, verdict card, teleop on ASK HUMAN; desktop dashboard: twin render · rollout grid | local / Nebius | Design criterion |
 
 Agent runtime: **NVIDIA NeMo Agent Toolkit** wrapping a LangGraph graph
 (perceive → twin → rehearse → judge → explain). NeMo is NVIDIA-native, which should land well with
@@ -83,7 +85,7 @@ Assets are imported, or copied with a note on their origin. They are never neste
 
 | Week | Dates | Deliverable (exit criterion) |
 |---|---|---|
-| 0 | Sep 30–Oct 4 | Spikes: a Token Factory Nemotron call, a Serverless Job hello-world, Cosmos Reason 2 on the A100 returning scene JSON from a webcam frame, and an SO-101 MuJoCo scene built from that JSON. Pick the agent runtime. |
+| 0 | Sep 30–Oct 4 | Spikes: a Token Factory Nemotron call, a Serverless Job hello-world, phone web app streaming frames to the backend with ArUco pose, Cosmos Reason 2 on the A100 returning scene JSON from a frame, and an SO-101 MuJoCo scene built from that JSON. Pick the agent runtime. |
 | 1 | Oct 5–11 | GR00T zero-shot baseline in the twin; scripted demos → LeRobot dataset → fine-tune on the A100; single rollout client. |
 | 2 | Oct 12–18 | Serverless Job fan-out (N=200) and results aggregation; trust score and calibration on a held-out scene set (reliability diagram). |
 | 3 | Oct 19–25 | Agent graph working end to end, Tavily lookup, dashboard, endpoints deployed on Nebius; first full live run. |
@@ -96,13 +98,13 @@ What we claim, and how we'd know it's true:
 - **Trust calibration:** ECE of predicted success against actual sim success on held-out scenes.
 - **Decision value:** failures avoided against attempts forgone, compared with always-execute and
   random-gate baselines.
-- **Latency:** webcam frame to verdict in under 60 s (the fan-out is bounded).
+- **Latency:** phone frame to verdict in under 60 s (the fan-out is bounded).
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| Webcam → twin fidelity | Fixed camera, marked mat and a small set of known objects. Perception reports its confidence, which feeds the trust score. |
+| Phone → twin fidelity | ArUco-marked mat for camera pose, small set of known objects, stable frame selection (skip blurred frames). Perception reports its confidence, which feeds the trust score. |
 | GR00T performs poorly in our twin | Acceptable, because a verifier needs failures to catch. Fine-tune on the A100 only until success is mixed (~30–70%), which makes the verdicts meaningful. |
 | Nebius GPU spend | Scale-to-zero endpoints, small N during development, capped Jobs. Claim every credit, including the Builders program. |
 | A100 contention with `qmlr` | Schedule fine-tune windows; fall back to a smaller GR00T batch or fewer steps. |
@@ -112,4 +114,4 @@ What we claim, and how we'd know it's true:
 
 - Agent runtime: NeMo Agent Toolkit or plain LangGraph.
 - GR00T version, and an SO-101 or Franka/Panda twin, whichever has the best pretrained checkpoint.
-- Stretch goal: phone-teleop takeover on ASK HUMAN.
+- Stretch goal: phone-teleop takeover on ASK HUMAN (same phone page, IMU or touch control).
