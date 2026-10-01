@@ -6,6 +6,8 @@
 #   mise run deploy      # sync the A100 checkout to the current branch
 #   mise run serve       # (re)launch capture server + cloudflared tunnel on the A100, detached
 #   mise run status      # A100 procs, tunnel URL, GPU
+#   mise run sweep       # 20-scene rehearsal sweep on the A100, logged to W&B
+#   mise run finetune v2 # record demos + fine-tune GR00T on the A100, logged to W&B
 
 [tools]
 python = "3.13.15"
@@ -47,9 +49,9 @@ ssh "$HOST" "cd ~/$A100_DIR && git fetch -q && git switch -q $B && git pull -q &
 description = "Relaunch the capture server (and tunnel if not running) on the A100, detached (PPID=1)"
 run = """
 ssh "$HOST" 'pkill -f "[n]pai serve"; true'
-ssh "$HOST" 'cd ~/'"$A100_DIR"' && mkdir -p logs && TS=$(date -u +%Y%m%dT%H%M%SZ) && \
-  setsid nohup ~/.local/bin/uv run npai serve --host 127.0.0.1 --port 8000 --width-mm '"$MAT_W_MM"' --height-mm '"$MAT_H_MM"' </dev/null >>logs/capture_$TS.log 2>&1 & disown; \
-  pgrep -f "[c]loudflared tunnel" >/dev/null || (setsid nohup ~/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8000 </dev/null >>logs/tunnel_$TS.log 2>&1 & disown); \
+ssh "$HOST" 'cd ~/'"$A100_DIR"' && \
+  scripts/detach.sh capture ~/.local/bin/uv run npai serve --host 127.0.0.1 --port 8000 --width-mm '"$MAT_W_MM"' --height-mm '"$MAT_H_MM"' && \
+  { pgrep -f "[c]loudflared tunnel" >/dev/null || scripts/detach.sh tunnel ~/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8000; } && \
   sleep 10; grep -ohE "https://[a-z0-9-]+\\.trycloudflare\\.com" $(ls -t logs/tunnel_*.log) | head -1'
 """
 
@@ -59,4 +61,17 @@ run = """
 ssh "$HOST" 'ps -eo pid,ppid,etime,cmd | grep -E "[n]pai serve|[c]loudflared" | cut -c1-120; \
   echo "--- latest ---"; curl -s http://127.0.0.1:8000/latest; echo; \
   echo "--- gpu ---"; nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.free --format=csv,noheader'
+"""
+
+[tasks.sweep]
+description = "Launch a detached 20-scene rehearsal sweep on the A100, logged to W&B (needs the GR00T server on PREFLIGHT_GR00T_PORT)"
+run = """
+ssh "$HOST" 'cd ~/'"$A100_DIR"' && scripts/detach.sh sweep env MUJOCO_GL=egl ~/.local/bin/uv run npai sweep logs/sweep_$(date -u +%Y%m%dT%H%M%SZ).json'
+"""
+
+[tasks.finetune]
+description = "Record sim demos and fine-tune GR00T on the A100, logged to W&B, detached (PPID=1)"
+usage = 'arg "<name>" help="run name, e.g. v2"'
+run = """
+ssh "$HOST" 'cd ~/'"$A100_DIR"' && PATH=$HOME/.local/bin:$PATH scripts/detach.sh finetune_'"${usage_name?}"' scripts/finetune.sh '"${usage_name?}"''
 """
