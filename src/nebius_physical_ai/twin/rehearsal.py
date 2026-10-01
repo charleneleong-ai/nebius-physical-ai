@@ -1,3 +1,4 @@
+import time
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
@@ -8,6 +9,8 @@ from nebius_physical_ai.policy.gr00t import Policy
 from nebius_physical_ai.twin.expert import start_pose
 from nebius_physical_ai.twin.rollout import BatchRollout, StackCheck
 from nebius_physical_ai.twin.scene import BlockPhysics, Twin, TwinLayout
+
+VARIANT_COLUMNS = ["scene_id", "index", "success", "steps", "friction", "mass_kg", "pick_dx_mm", "pick_dy_mm"]
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,22 @@ class RehearsalResult:
         half = z * np.sqrt(p * (1 - p) / n + z**2 / (4 * n**2)) / (1 + z**2 / n)
         return float(max(0.0, centre - half)), float(min(1.0, centre + half))
 
+    def variant_rows(self, scene_id: int, origin: DetectedObject) -> list[list[Any]]:
+        """One row per variant (VARIANT_COLUMNS); pick offsets are relative to the perceived pick object."""
+        return [
+            [
+                scene_id,
+                v["index"],
+                v["success"],
+                v["steps"],
+                round(v["physics"]["friction"], 3),
+                round(v["physics"]["mass_kg"], 4),
+                round(v["objects"][0]["x_mm"] - origin.x_mm, 1),
+                round(v["objects"][0]["y_mm"] - origin.y_mm, 1),
+            ]
+            for v in self.variants
+        ]
+
     def summary(self) -> dict[str, Any]:
         lo, hi = self.wilson()
         return {"successes": self.successes, "n": self.n, "p": round(self.p, 3), "ci95": [round(lo, 3), round(hi, 3)]}
@@ -109,3 +128,31 @@ class Rehearsal:
             for i, (v, r) in enumerate(zip(variants, outcomes))
         ]
         return RehearsalResult(sum(r.success for r in outcomes), n, [r.steps for r in outcomes], records)
+
+
+@dataclass
+class SceneRun:
+    scene_id: int
+    scene: list[DetectedObject]
+    result: RehearsalResult
+    seconds: float
+    tags: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def rehearse(
+        cls, rehearsal: Rehearsal, scene_id: int, scene: list[DetectedObject], n: int, seed: int, **tags: Any
+    ) -> "SceneRun":
+        start = time.time()
+        result = rehearsal.run(scene, n, seed)
+        return cls(scene_id, scene, result, round(time.time() - start, 1), tags)
+
+    def record(self) -> dict[str, Any]:
+        """JSON-ready row: summary, timing, tags, the perceived scene and every variant."""
+        return {
+            "scene_id": self.scene_id,
+            **self.tags,
+            **self.result.summary(),
+            "seconds": self.seconds,
+            "scene": [asdict(o) for o in self.scene],
+            "variants": self.result.variants,
+        }

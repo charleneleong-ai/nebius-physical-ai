@@ -1,7 +1,6 @@
 import json
-import time
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 import uvicorn
@@ -12,9 +11,10 @@ from nebius_physical_ai.capture.markers import DPI, render_marker_sheet
 from nebius_physical_ai.capture.mat import DetectedObject, MatSpec, ScenePerceiver
 from nebius_physical_ai.capture.server import create_app
 from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, Gr00tClient
+from nebius_physical_ai.tracking import Tracker
 from nebius_physical_ai.twin.dataset import LeRobotWriter
 from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler
-from nebius_physical_ai.twin.rehearsal import Rehearsal
+from nebius_physical_ai.twin.rehearsal import Rehearsal, SceneRun
 from nebius_physical_ai.twin.rollout import STACK_TASK, StackCheck
 from nebius_physical_ai.twin.scene import A3_MAT, Twin, TwinLayout
 
@@ -102,16 +102,40 @@ def rehearse(
     width_mm: WidthOpt = A3_MAT.width_mm,
     height_mm: HeightOpt = A3_MAT.height_mm,
     out: Path | None = None,
+    wandb_log: Annotated[bool, typer.Option("--wandb/--no-wandb")] = False,
 ) -> None:
     """Rehearse one scene N times across randomised variants against a running GR00T server."""
     layout = TwinLayout(MatSpec(width_mm, height_mm))
     scene = [DetectedObject(**o) for o in json.loads(objects)] if objects else SceneSampler(layout, seed).sample()
-    with Gr00tClient(port=port) as client:
-        start = time.time()
-        result = Rehearsal(client, task, StackCheck(), layout, batch_size=batch_size).run(scene, n, seed)
-    summary = result.summary() | {"seconds": round(time.time() - start, 1)}
-    print(summary)
+    config = {"n": n, "batch_size": batch_size, "seed": seed, "task": task}
+    with Tracker("rehearsal", config=config, enabled=wandb_log) as tracker, Gr00tClient(port=port) as client:
+        run = SceneRun.rehearse(Rehearsal(client, task, StackCheck(), layout, batch_size=batch_size), 0, scene, n, seed)
+        tracker.log_scene(run)
+    print({k: v for k, v in run.record().items() if k not in ("scene", "variants")})
     if out:
-        out.write_text(
-            json.dumps(summary | {"scene": [o.__dict__ for o in scene], "variants": result.variants}, indent=2)
-        )
+        out.write_text(json.dumps(run.record(), indent=2))
+
+
+@app.command()
+def sweep(
+    out: Path,
+    scenes: int = 20,
+    n: int = 32,
+    batch_size: int = 32,
+    port: int = DEFAULT_PORT,
+    task: str = STACK_TASK,
+    wandb_log: Annotated[bool, typer.Option("--wandb/--no-wandb")] = True,
+) -> None:
+    """Rehearse many sampled scenes, alternating ordinary and hard layouts (cubes close, edge of reach)."""
+    layout = TwinLayout()
+    samplers = [SceneSampler(layout, seed=2024), SceneSampler.hard(layout, seed=2025)]
+    records: list[dict[str, Any]] = []
+    config = {"scenes": scenes, "n": n, "batch_size": batch_size, "task": task}
+    with Tracker("sweep", config=config, enabled=wandb_log) as tracker, Gr00tClient(port=port) as client:
+        rehearsal = Rehearsal(client, task, StackCheck(), layout, batch_size=batch_size)
+        for i in range(scenes):
+            run = SceneRun.rehearse(rehearsal, i, samplers[i % 2].sample(), n, seed=i, hard=bool(i % 2))
+            tracker.log_scene(run)
+            records.append(run.record())
+            out.write_text(json.dumps(records))
+            print(f"{i} hard={run.tags['hard']} p={run.result.p:.3f} ci={run.result.summary()['ci95']} {run.seconds}s")
