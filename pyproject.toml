@@ -13,12 +13,14 @@ dependencies = [
     "opencv-python-headless>=5.0.0.93",
     "numpy>=2.5.3",
     "pillow>=12.3.0",
+    "mujoco>=3.14.0",
+    "pyzmq>=27.2.0",
+    "msgpack>=1.2.3",
+    "av>=19.0.0",
+    "pyarrow>=25.0.1",
 ]
 
-[project.scripts]
-npai = "nebius_physical_ai.cli:app"
-
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
     "pytest>=8",
     "ruff>=0.16",
@@ -26,12 +28,15 @@ dev = [
     "httpx2>=2.13.1",
 ]
 
+[project.scripts]
+npai = "nebius_physical_ai.cli:app"
+
 [build-system]
 requires = ["uv_build>=0.8.22,<0.9.0"]
 build-backend = "uv_build"
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py313"
 
 [tool.ruff.lint]

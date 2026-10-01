@@ -102,15 +102,9 @@ class ScenePerceiver:
 
     def observe(self, frame_bgr: np.ndarray) -> SceneObservation:
         corners, ids, _ = self._aruco.detectMarkers(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY))
-        found = (
-            sorted(int(i) for i in ids.flatten() if int(i) in CORNER_NAMES)
-            if ids is not None
-            else []
-        )
+        found = sorted(int(i) for i in ids.flatten() if int(i) in CORNER_NAMES) if ids is not None else []
         if len(found) < MIN_MARKERS:
-            return SceneObservation(
-                found, error=f"need {MIN_MARKERS} corner markers, saw {len(found)}"
-            )
+            return SceneObservation(found, error=f"need {MIN_MARKERS} corner markers, saw {len(found)}")
         obj_points, img_points = self.spec.board.matchImagePoints(corners, ids)
         homography, _ = cv2.findHomography(
             img_points.reshape(-1, 2), obj_points.reshape(-1, 3)[:, :2] * self.spec.px_per_mm
