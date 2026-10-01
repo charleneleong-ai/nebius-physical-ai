@@ -1,3 +1,4 @@
+import copy
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,6 +48,29 @@ class BlockPhysics:
     friction: float = 1.0  # sliding coefficient; torsional/rolling stay small
 
 
+class TwinRenderer:
+    """One GL context for many twins that share meshes, i.e. variants copied from one compiled scene.
+
+    `mjv_updateScene` takes each twin's own model, so per-variant cube sizes still render correctly;
+    a context per twin made context switches dominate rendering.
+    """
+
+    def __init__(self, model: mujoco.MjModel, size: tuple[int, int]) -> None:
+        self.renderer = mujoco.Renderer(model, *size)
+        self.option, self.perturb, self.camera = mujoco.MjvOption(), mujoco.MjvPerturb(), mujoco.MjvCamera()
+        self.camera.type = mujoco.mjtCamera.mjCAMERA_FIXED
+
+    def render(self, model: mujoco.MjModel, data: mujoco.MjData, camera: str) -> np.ndarray:
+        self.camera.fixedcamid = model.camera(camera).id
+        mujoco.mjv_updateScene(
+            model, data, self.option, self.perturb, self.camera, mujoco.mjtCatBit.mjCAT_ALL, self.renderer.scene
+        )
+        return self.renderer.render()
+
+    def close(self) -> None:
+        self.renderer.close()
+
+
 @dataclass
 class Twin:
     """MuJoCo SO-101 scene rebuilt from perceived objects on the mat."""
@@ -54,7 +78,7 @@ class Twin:
     model: mujoco.MjModel
     data: mujoco.MjData
     blocks: dict[str, DetectedObject]
-    renderers: dict[tuple[int, int], mujoco.Renderer] = field(default_factory=dict, repr=False)
+    renderers: dict[tuple[int, int], TwinRenderer] = field(default_factory=dict, repr=False)
 
     @classmethod
     def from_objects(
@@ -93,20 +117,54 @@ class Twin:
         return float(np.clip(np.sqrt(obj.area_mm2), *BLOCK_SIDE_MM)) / 1000
 
     @classmethod
+    def block_pose(cls, obj: DetectedObject, layout: TwinLayout) -> tuple[float, tuple[float, float, float]]:
+        """(half side, resting position just above the table) in metres."""
+        half = cls.block_side_m(obj) / 2
+        x, y = layout.mat_to_world(obj.x_mm, obj.y_mm)
+        return half, (x, y, half + 1e-3)
+
+    @classmethod
     def add_block(
         cls, world: mujoco.MjsBody, name: str, obj: DetectedObject, layout: TwinLayout, physics: BlockPhysics
     ) -> None:
-        half = cls.block_side_m(obj) / 2
-        x, y = layout.mat_to_world(obj.x_mm, obj.y_mm)
-        body = world.add_body(name=name, pos=[x, y, half + 1e-3])
+        half, pos = cls.block_pose(obj, layout)
+        body = world.add_body(name=name, pos=list(pos))
         body.add_freejoint(name=name)
         body.add_geom(
+            name=name,
             type=mujoco.mjtGeom.mjGEOM_BOX,
             size=[half] * 3,
             mass=physics.mass_kg,
             rgba=RGBA.get(obj.label, (0.5, 0.5, 0.5, 1)),
             friction=[physics.friction, 0.005, 0.0001],
         )
+
+    def variant(
+        self, objects: list[DetectedObject], layout: TwinLayout, physics: BlockPhysics, start_pose: np.ndarray
+    ) -> "Twin":
+        """Same scene with re-sized, re-weighted, moved blocks, without recompiling the MJCF (STL hulls dominate).
+
+        The model is copied and its block parameters edited in place; `objects` must carry the same labels.
+        """
+        model = copy.copy(self.model)
+        data = mujoco.MjData(model)
+        for obj in objects:
+            half, pos = self.block_pose(obj, layout)
+            geom, body, joint = model.geom(obj.label), model.body(obj.label), model.joint(obj.label)
+            geom.size[:] = half
+            geom.rbound[0] = half * np.sqrt(3)
+            model.geom_aabb[geom.id, 3:] = half  # not exposed on the named view
+            geom.friction[0] = physics.friction
+            body.mass[0] = physics.mass_kg
+            body.inertia[:] = physics.mass_kg * (2 * half) ** 2 / 6  # solid cube
+            adr = joint.qposadr[0]
+            body.pos[:] = model.qpos0[adr : adr + 3] = pos
+        mujoco.mj_setConst(model, data)  # rebuild constants derived from the edited mass/size
+        mujoco.mj_resetData(model, data)  # start from the edited qpos0
+        twin = type(self)(model, data, {obj.label: obj for obj in objects})
+        twin.reset_arm(start_pose)
+        twin.settle(0.3)
+        return twin
 
     def arm_qpos(self) -> np.ndarray:
         return np.array([self.data.joint(j).qpos[0] for j in ARM_JOINTS])
@@ -141,16 +199,20 @@ class Twin:
     def block_pos(self, name: str) -> np.ndarray:
         return self.data.body(name).xpos.copy()
 
-    def render(self, camera: str, size: tuple[int, int] = (480, 640)) -> np.ndarray:
-        """GL context creation dominates a render, so keep one renderer per image size."""
-        if size not in self.renderers:
-            self.renderers[size] = mujoco.Renderer(self.model, *size)
-        renderer = self.renderers[size]
-        renderer.update_scene(self.data, camera=camera)
-        return renderer.render()
+    def render(
+        self, camera: str, size: tuple[int, int] = (480, 640), renderer: TwinRenderer | None = None
+    ) -> np.ndarray:
+        """Uses a shared `renderer` if given, else this twin's own (one per image size)."""
+        if renderer is None:
+            if size not in self.renderers:
+                self.renderers[size] = TwinRenderer(self.model, size)
+            renderer = self.renderers[size]
+        return renderer.render(self.model, self.data, camera)
 
-    def observe(self, task: str, size: tuple[int, int] = (480, 640)) -> Observation:
-        front, wrist = (self.render(f"{cam}_cam", size) for cam in CAMERA_KEYS)
+    def observe(
+        self, task: str, size: tuple[int, int] = (480, 640), renderer: TwinRenderer | None = None
+    ) -> Observation:
+        front, wrist = (self.render(f"{cam}_cam", size, renderer) for cam in CAMERA_KEYS)
         return Observation(front=front, wrist=wrist, joints=self.to_lerobot(self.arm_qpos()), task=task)
 
     def __enter__(self) -> Self:
