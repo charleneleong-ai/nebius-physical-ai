@@ -12,6 +12,8 @@ from nebius_physical_ai.capture.mat import DetectedObject, MatSpec, ScenePerceiv
 from nebius_physical_ai.capture.server import create_app
 from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, Gr00tClient
 from nebius_physical_ai.tracking import Tracker
+from nebius_physical_ai.trust.plots import StressPlots
+from nebius_physical_ai.trust.stress import StressCase, StressReport
 from nebius_physical_ai.twin.dataset import LeRobotWriter
 from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler
 from nebius_physical_ai.twin.rehearsal import Rehearsal, SceneRun
@@ -139,3 +141,45 @@ def sweep(
             records.append(run.record())
             out.write_text(json.dumps(records))
             print(f"{i} hard={run.tags['hard']} p={run.result.p:.3f} ci={run.result.summary()['ci95']} {run.seconds}s")
+
+
+@app.command()
+def stress(
+    out: Path,
+    scenes: int = 20,
+    n: int = 32,
+    k: int = 8,
+    batch_size: int = 16,
+    port: int = DEFAULT_PORT,
+    task: str = STACK_TASK,
+    wandb_log: Annotated[bool, typer.Option("--wandb/--no-wandb")] = True,
+) -> None:
+    """Sim-to-sim calibration test: rehearse the perceived scene, then score it on k attempts in a hidden world."""
+    layout = TwinLayout()
+    samplers = [SceneSampler(layout, seed=3024), SceneSampler.hard(layout, seed=3025)]
+    cases: list[StressCase] = []
+    config = {"scenes": scenes, "n": n, "k": k, "batch_size": batch_size, "task": task}
+    with Tracker("stress", config=config, enabled=wandb_log) as tracker, Gr00tClient(port=port) as client:
+        rehearsal = Rehearsal(client, task, StackCheck(), layout, batch_size=batch_size)
+        for i in range(scenes):
+            case = StressCase.run(rehearsal, i, samplers[i % 2].sample(), n, k, seed=i, hard=bool(i % 2))
+            cases.append(case)
+            tracker.log_scene(case.prediction, true_rate=case.true_rate)
+            out.write_text(json.dumps([c.record() for c in cases]))
+            print(f"{i} p={case.prediction.result.p:.2f} true={case.true_rate:.2f} {case.prediction.seconds}s")
+        report = StressReport(cases)
+        summary = report.summary()
+        tracker.log_summary(summary, report.tables())
+    print(summary)
+
+
+@app.command()
+def stress_report(results: Path, out_dir: Path = Path("docs/assets/stress"), sweep: Path | None = None) -> None:
+    """Rebuild a stress-test report offline from its JSON: summary plus PNG figures."""
+    report = StressReport([StressCase.from_record(r) for r in json.loads(results.read_text())])
+    plots = StressPlots(report, out_dir)
+    paths = [plots.predicted_vs_true(), plots.coverage_curve()]
+    if sweep:
+        paths.append(StressPlots.sweep_distribution(json.loads(sweep.read_text()), out_dir))
+    print(report.summary())
+    print("wrote", *map(str, paths))

@@ -37,11 +37,11 @@ class Tracker:
             self.run.log({"variants": wandb.Table(columns=VARIANT_COLUMNS, data=self.variant_rows)})
         self.run.finish(exit_code=1 if exc else 0)
 
-    def log_scene(self, run: SceneRun) -> None:
+    def log_scene(self, run: SceneRun, **extra: Any) -> None:
         r = run.result
         lo, hi = r.wilson()
         metrics = {"p": r.p, "ci_lo": lo, "ci_hi": hi, "successes": r.successes, "n": r.n, "seconds": run.seconds}
-        self.run.log({"scene_id": run.scene_id, **metrics, **run.tags, **self.media(run)}, step=run.scene_id)
+        self.run.log({"scene_id": run.scene_id, **metrics, **run.tags, **extra, **self.media(run)}, step=run.scene_id)
         self.variant_rows += r.variant_rows(run.scene_id, run.scene[0])
 
     @staticmethod
@@ -61,3 +61,8 @@ class Tracker:
                 f"media/scene_{run.scene_id}_start", wandb.Image(frames[0], caption=f"scene {run.scene_id}")
             )
         return logged
+
+    def log_summary(self, metrics: dict[str, Any], tables: dict[str, tuple[list[str], list[list[Any]]]]) -> None:
+        """Run-level results (written to the summary, not the per-scene history) plus named tables."""
+        self.run.summary.update(metrics)
+        self.run.log({name: wandb.Table(columns=cols, data=rows) for name, (cols, rows) in tables.items()})
