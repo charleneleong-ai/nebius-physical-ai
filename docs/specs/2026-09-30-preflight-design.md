@@ -160,6 +160,7 @@ What we claim, and how we'd know it's true. Report absolute counts; no ratio met
 |---|---|
 | Phone → twin fidelity | ArUco-marked mat for camera pose, small set of known objects, stable frame selection (skip blurred frames). Perception reports its confidence, which feeds the trust score. |
 | GR00T performs poorly in our twin | Acceptable, because a verifier needs failures to catch. Fine-tune on the A100 only until success is mixed (~30–70%), which makes the verdicts meaningful. |
+| Camera viewpoint mismatch (tripod height/tilt, wrist-mount tolerance, field of view) | Randomise top-camera pose (±3 cm, ±5° tilt/yaw) and FOV (±5°) plus wrist-mount offsets in demos and rehearsals; centre the range on the real top camera's pose, measured from the ArUco markers; lower fidelity when the measured pose falls outside the trained range. |
 | Nebius GPU spend | Scale-to-zero endpoints, small N during development, capped Jobs. Claim every credit, including the Builders program. |
 | A100 contention with `qmlr` | Schedule fine-tune windows; fall back to a smaller GR00T batch or fewer steps. |
 | Cosmos Reason 2 too slow for live use | Cache results per scene. Fall back to Qwen2.5-VL on Token Factory for perception and keep Cosmos for the plausibility check. |
