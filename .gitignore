@@ -9,3 +9,5 @@ outputs/
 logs/
 *.mp4
 .DS_Store
+!data/capture/*.mp4
+!docs/assets/**/*.mp4
