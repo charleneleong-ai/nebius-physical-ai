@@ -119,13 +119,26 @@ class PickPlaceExpert:
 class SceneSampler:
     """Random pick/place cube layouts inside the arm's top-down workspace (16–22 cm out, ±9 cm sideways)."""
 
-    def __init__(self, layout: TwinLayout, seed: int = 0, min_gap_mm: float = 60.0) -> None:
+    def __init__(
+        self,
+        layout: TwinLayout,
+        seed: int = 0,
+        min_gap_mm: float = 60.0,
+        reach_mm: tuple[float, float] = (160.0, 220.0),
+        half_width_mm: float = 90.0,
+    ) -> None:
+        """`reach_mm` is the distance in front of the base; `half_width_mm` the sideways spread."""
         self.layout, self.min_gap_mm = layout, min_gap_mm
         self.rng = np.random.default_rng(seed)
         mat = layout.mat
         base_y = mat.height_mm + layout.base_offset_mm
-        self.y_range = (base_y - 220.0, base_y - 160.0)  # world x 0.16–0.22 m
-        self.x_range = (mat.width_mm / 2 - 90.0, mat.width_mm / 2 + 90.0)
+        self.y_range = (base_y - reach_mm[1], base_y - reach_mm[0])
+        self.x_range = (mat.width_mm / 2 - half_width_mm, mat.width_mm / 2 + half_width_mm)
+
+    @classmethod
+    def hard(cls, layout: TwinLayout, seed: int = 0) -> "SceneSampler":
+        """Cubes as close as 35 mm, sampled out to the edges of reach: where the fine-tuned policy struggles."""
+        return cls(layout, seed, min_gap_mm=35.0, reach_mm=(150.0, 245.0), half_width_mm=115.0)
 
     def sample(self, labels: tuple[str, str] = ("blue", "red"), side_mm: float = 30.0) -> list[DetectedObject]:
         while True:

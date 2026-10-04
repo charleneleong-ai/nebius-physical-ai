@@ -3,7 +3,7 @@ import pytest
 
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import MsgCodec, Observation
-from nebius_physical_ai.twin.rehearsal import Perturbation, Rehearsal, RehearsalResult, Variant
+from nebius_physical_ai.twin.rehearsal import VARIANT_COLUMNS, Perturbation, Rehearsal, RehearsalResult, Variant
 from nebius_physical_ai.twin.rollout import BatchRollout, StackCheck
 from nebius_physical_ai.twin.scene import SO101_XML, Twin, TwinLayout
 
@@ -51,6 +51,27 @@ def test_stack_batches_observations() -> None:
 )
 def test_wilson_interval(successes: int, n: int, lo: float, hi: float) -> None:
     assert RehearsalResult(successes, n, [], []).wilson() == pytest.approx((lo, hi), abs=0.002)
+
+
+def test_variant_rows_are_relative_to_perceived_pick() -> None:
+    variant = {
+        "index": 0,
+        "success": True,
+        "steps": 160,
+        "physics": {"friction": 0.61234, "mass_kg": 0.04567},
+        "objects": [{"x_mm": BLOCKS[0].x_mm + 3.0, "y_mm": BLOCKS[0].y_mm - 1.5}],
+    }
+    rows = RehearsalResult(1, 1, [160], [variant]).variant_rows(7, BLOCKS[0])
+    assert dict(zip(VARIANT_COLUMNS, rows[0])) == {
+        "scene_id": 7,
+        "index": 0,
+        "success": True,
+        "steps": 160,
+        "friction": 0.612,
+        "mass_kg": 0.0457,
+        "pick_dx_mm": 3.0,
+        "pick_dy_mm": -1.5,
+    }
 
 
 def test_variant_sampling() -> None:
