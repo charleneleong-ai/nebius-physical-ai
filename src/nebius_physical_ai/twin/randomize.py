@@ -19,9 +19,9 @@ class Randomization:
     distance_mm: tuple[float, float] = (350.0, 650.0)  # camera to its aim point
     fovy_deg: tuple[float, float] = (32.0, 52.0)  # vertical, at the 4:3 render
     aim_jitter_mm: float = 40.0  # aim point around the mat centre
-    light_tilt_deg: tuple[float, float] = (0.0, 50.0)
-    light_diffuse: tuple[float, float] = (0.35, 0.9)
-    ambient: tuple[float, float] = (0.05, 0.35)
+    light_tilt_deg: tuple[float, float] = (0.0, 35.0)  # steeper grazing light makes shadow-map acne
+    light_diffuse: tuple[float, float] = (0.35, 0.8)
+    ambient: tuple[float, float] = (0.05, 0.25)
     floor_grey: tuple[float, float] = (0.45, 0.7)  # brighter saturates to white under the key light
     pick_width_mm: tuple[float, float] = (22.0, 34.0)  # the gripper's comfortable range
     place_width_mm: tuple[float, float] = (30.0, 60.0)
