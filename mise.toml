@@ -1,0 +1,62 @@
+# Preflight — Nebius x NVIDIA hackathon, Physical AI track.
+# Capture + sim run on the A100 over SSH; the Mac is for editing and the phone test.
+#   mise run init        # one-time: deps + pre-commit hooks
+#   mise run test        # pre-commit + pytest
+#   mise run markers     # printable A4 marker sheet
+#   mise run deploy      # sync the A100 checkout to the current branch
+#   mise run serve       # (re)launch capture server + cloudflared tunnel on the A100, detached
+#   mise run status      # A100 procs, tunnel URL, GPU
+
+[tools]
+python = "3.13.15"
+uv = "0.12.21"
+
+[env]
+_.file = ".env"
+HOST = "pi-a100-80gb"
+A100_DIR = "nebius-physical-ai"
+MAT_W_MM = "350"   # A3 sheet; use 300/300 for the A4 cut-outs
+MAT_H_MM = "227"
+
+[tasks.init]
+description = "Install project dependencies (incl. dev) and register pre-commit hooks"
+run = """
+uv sync --extra dev
+uv run pre-commit install
+"""
+
+[tasks.test]
+description = "Run pre-commit on all files plus the test suite"
+run = """
+uv run pre-commit run --all-files
+uv run pytest -q
+"""
+
+[tasks.markers]
+description = "Write the printable A4 corner-marker sheet"
+run = "uv run npai markers --out markers.pdf"
+
+[tasks.deploy]
+description = "Check out the current branch on the A100 and sync deps"
+run = """
+B=$(git branch --show-current)
+ssh "$HOST" "cd ~/$A100_DIR && git fetch -q && git switch -q $B && git pull -q && ~/.local/bin/uv sync -q --extra dev && git log --oneline -1"
+"""
+
+[tasks.serve]
+description = "Relaunch the capture server (and tunnel if not running) on the A100, detached (PPID=1)"
+run = """
+ssh "$HOST" 'pkill -f "[n]pai serve"; true'
+ssh "$HOST" 'cd ~/'"$A100_DIR"' && mkdir -p logs && TS=$(date -u +%Y%m%dT%H%M%SZ) && \
+  setsid nohup ~/.local/bin/uv run npai serve --host 127.0.0.1 --port 8000 --width-mm '"$MAT_W_MM"' --height-mm '"$MAT_H_MM"' </dev/null >>logs/capture_$TS.log 2>&1 & disown; \
+  pgrep -f "[c]loudflared tunnel" >/dev/null || (setsid nohup ~/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8000 </dev/null >>logs/tunnel_$TS.log 2>&1 & disown); \
+  sleep 10; grep -ohE "https://[a-z0-9-]+\\.trycloudflare\\.com" $(ls -t logs/tunnel_*.log) | head -1'
+"""
+
+[tasks.status]
+description = "A100 capture/tunnel procs, latest observation, GPU"
+run = """
+ssh "$HOST" 'ps -eo pid,ppid,etime,cmd | grep -E "[n]pai serve|[c]loudflared" | cut -c1-120; \
+  echo "--- latest ---"; curl -s http://127.0.0.1:8000/latest; echo; \
+  echo "--- gpu ---"; nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.free --format=csv,noheader'
+"""
