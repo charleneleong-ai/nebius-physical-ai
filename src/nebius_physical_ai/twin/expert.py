@@ -82,7 +82,7 @@ class PickPlaceExpert:
         """(arm target, gripper target, seconds) segments."""
         pick = self.twin.block_pos(self.pick)
         place = self.twin.block_pos(self.place)
-        stack_z = place[2] + Twin.block_side_m(self.twin.blocks[self.place])
+        stack_z = place[2] + self.twin.geometry(self.place).half[2] + self.twin.geometry(self.pick).half[2]
         targets = {
             "pick_hover": np.array([pick[0], pick[1], PICK_HOVER_Z]),
             "pick": pick,

@@ -1,14 +1,21 @@
 import json
+from collections.abc import Iterable
+from contextlib import ExitStack
+from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Any
 
+import cv2
+import numpy as np
 import typer
 import uvicorn
 from rich import print
 from rich.progress import track
 
+from nebius_physical_ai.capture.camera import CameraPose, MarkerCalibrator
+from nebius_physical_ai.capture.lift import HeightLifter, MatView
 from nebius_physical_ai.capture.markers import DPI, render_marker_sheet
-from nebius_physical_ai.capture.mat import DetectedObject, MatSpec, ScenePerceiver
+from nebius_physical_ai.capture.mat import ARUCO_DICT, DetectedObject, MatSpec, ScenePerceiver
 from nebius_physical_ai.capture.server import create_app
 from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, Gr00tClient
 from nebius_physical_ai.tracking import Tracker
@@ -17,8 +24,8 @@ from nebius_physical_ai.trust.stress import StressCase, StressReport
 from nebius_physical_ai.twin.dataset import LeRobotWriter
 from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler
 from nebius_physical_ai.twin.rehearsal import Rehearsal, SceneRun
-from nebius_physical_ai.twin.rollout import STACK_TASK, StackCheck
-from nebius_physical_ai.twin.scene import A3_MAT, Twin, TwinLayout
+from nebius_physical_ai.twin.rollout import STACK_TASK, BatchRollout, RolloutResult, StackCheck
+from nebius_physical_ai.twin.scene import A3_MAT, RENDER_ASPECT, Twin, TwinLayout
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -183,3 +190,163 @@ def stress_report(results: Path, out_dir: Path = Path("docs/assets/stress"), swe
         paths.append(StressPlots.sweep_distribution(json.loads(sweep.read_text()), out_dir))
     print(report.summary())
     print("wrote", *map(str, paths))
+
+
+@app.command()
+def calibrate_camera(
+    video: Path,
+    out: Path = Path("configs/front_camera.json"),
+    hfov_deg: Annotated[float | None, typer.Option(help="Known horizontal FOV; omit to fit it from the clip")] = None,
+    width_mm: WidthOpt = A3_MAT.width_mm,
+    height_mm: HeightOpt = A3_MAT.height_mm,
+) -> None:
+    """Measure the fixed top camera's pose (and optionally its FOV) from a clip of the printed mat."""
+    calibrator = MarkerCalibrator(MatSpec(width_mm, height_mm))
+    correspondences = calibrator.correspondences(video)
+    if hfov_deg is None:
+        hfov_deg, rms = calibrator.fit_hfov_from(*correspondences)
+        print(f"fitted HFOV {hfov_deg:.1f}° (RMS {rms:.2f} px); move the phone around the mat for a reliable fit")
+    pose = calibrator.pose_from(*correspondences, hfov_deg)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    pose.save(out)
+    x, y, z = pose.position_mm
+    print(
+        f"camera at ({x:.0f}, {y:.0f}) mm on the mat, {z:.0f} mm up, tilted {pose.tilt_deg:.1f}°, "
+        f"reprojection {pose.reprojection_px:.2f} px -> {out}"
+    )
+
+
+@app.command()
+def evaluate(
+    name: str,
+    scenes: int = 20,
+    seed: int = 1234,
+    max_steps: int = 480,
+    batch_size: int = 10,
+    port: int = DEFAULT_PORT,
+    task: str = STACK_TASK,
+    camera: Annotated[Path | None, typer.Option(help="Calibrated top camera (npai calibrate-camera)")] = None,
+    wandb_log: Annotated[bool, typer.Option("--wandb/--no-wandb")] = True,
+) -> None:
+    """One rollout per unseen scene (seed 1234 = the v1 evaluation set), full-res cameras, success rate to W&B."""
+    layout = TwinLayout(front_camera=CameraPose.load(camera) if camera else None)
+    sampler = SceneSampler(layout, seed=seed)
+    episodes = [(sampler.sample(), sampler.start_pose()) for _ in range(scenes)]
+    results: list[RolloutResult] = []
+    successes = 0
+    config = {"scenes": scenes, "seed": seed, "max_steps": max_steps, "port": port, "task": task, "camera": str(camera)}
+    with Tracker("eval", name=name, config=config, enabled=wandb_log) as tracker, Gr00tClient(port=port) as client:
+        for start in range(0, scenes, batch_size):
+            with ExitStack() as stack:
+                batch = episodes[start : start + batch_size]
+                twins = [stack.enter_context(Twin.from_objects(o, layout, start_pose=p)) for o, p in batch]
+                results += BatchRollout(twins, client, task).run(StackCheck(), max_steps)
+            successes = sum(r.success for r in results)
+            print(f"{len(results)}/{scenes}: {successes} successes")
+        rows = [[i, r.success, r.steps] for i, r in enumerate(results)]
+        tracker.log_summary(
+            {"success_rate": successes / scenes, "successes": successes, "n": scenes},
+            {"episodes": (["scene", "success", "steps"], rows)},
+        )
+    print(f"{name}: {successes}/{scenes} successes")
+
+
+def marker_alignment(twin: Twin, layout: TwinLayout, image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Printed marker corners: (detected in `image`, projected through the twin's front camera), both (N, 2) px."""
+    corners, ids, _ = cv2.aruco.ArucoDetector(ARUCO_DICT).detectMarkers(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY))
+    if ids is None:
+        return np.empty((0, 2)), np.empty((0, 2))
+    mat_points, image_points = layout.mat.board.matchImagePoints(corners, ids)
+    world = np.array([[*layout.mat_to_world(x, y), 0.0] for x, y in mat_points.reshape(-1, 3)[:, :2]])
+    return image_points.reshape(-1, 2), twin.project(world, "front_cam", image.shape[:2])
+
+
+@app.command()
+def compare_twin(
+    frame: Path,
+    camera: Path,
+    out: Path = Path("docs/assets/capture/real_vs_twin.jpg"),
+    objects: Annotated[
+        Path | None, typer.Option(help="Objects JSON (npai lift) instead of perceiving the frame")
+    ] = None,
+    hide_arm: Annotated[bool, typer.Option(help="Hide the twin's arm when the real one isn't in shot")] = True,
+) -> None:
+    """Rebuild a real frame's objects in the twin, render from the calibrated camera: real | twin | overlay.
+
+    Also checks the camera: printed marker corners detected in the frame (green) vs projected through the twin (red).
+    """
+    pose = CameraPose.load(camera)
+    if (image := cv2.imread(str(frame))) is None:
+        raise typer.BadParameter(f"can't read {frame}")
+    if objects:
+        found = [DetectedObject(**o) for o in json.loads(objects.read_text())]
+    elif (obs := ScenePerceiver(A3_MAT).observe(image)).ok:
+        found = obs.objects
+    else:
+        raise typer.BadParameter(obs.error or "perception failed")
+    layout = TwinLayout(A3_MAT, front_camera=pose)
+    with Twin.from_objects(found, layout) as twin:
+        twin.settle(0.5)
+        if hide_arm:
+            twin.hide_arm()
+        sim = cv2.cvtColor(twin.render("front_cam"), cv2.COLOR_RGB2BGR)
+        real = cv2.resize(pose.crop_frame(image, RENDER_ASPECT), sim.shape[1::-1])
+        seen, projected = marker_alignment(twin, layout, real)
+    panels = {"real": real, "twin": sim, "overlay": cv2.addWeighted(real, 0.55, sim, 0.45, 0)}
+    for p, q in zip(np.int32(seen), np.int32(projected)):
+        cv2.circle(panels["overlay"], tuple(p), 6, (0, 200, 0), 2)
+        cv2.drawMarker(panels["overlay"], tuple(q), (0, 0, 255), cv2.MARKER_CROSS, 12, 2)
+    for text, img in panels.items():
+        cv2.putText(img, text, (12, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (20, 20, 20), 2)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(out), np.hstack(list(panels.values())))
+    for o in found:
+        rgb = "#{:02x}{:02x}{:02x}".format(*(round(255 * c) for c in o.rgb)) if o.rgb else "palette"
+        print(
+            f"{o.label} {o.shape} ({o.x_mm:.0f}, {o.y_mm:.0f}) mm {o.length_mm:.0f}x{o.width_mm:.0f} mm yaw {o.yaw_deg:.0f} {rgb}"
+        )
+    if len(seen):
+        err = np.linalg.norm(seen - projected, axis=1)
+        print(f"camera check: {len(err)} marker corners, median {np.median(err):.1f} px, max {err.max():.1f} px")
+    print(f"wrote {out}")
+
+
+def read_frames(video: Path, indices: Iterable[int]) -> list[np.ndarray]:
+    cap, frames = cv2.VideoCapture(str(video)), []
+    for i in indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(i))
+        ok, frame = cap.read()
+        if not ok:
+            raise typer.BadParameter(f"can't read frame {i} of {video}")
+        frames.append(frame)
+    return frames
+
+
+@app.command()
+def lift(
+    video: Path,
+    points: Annotated[Path, typer.Argument(help="Point maps from scripts/moge_points.py for the same clip")],
+    out: Path = Path("objects.json"),
+    width_mm: WidthOpt = A3_MAT.width_mm,
+    height_mm: HeightOpt = A3_MAT.height_mm,
+) -> None:
+    """Object heights and parallax-free footprints from a clip's MoGe-3 point maps, written as the twin's objects."""
+    spec, maps = MatSpec(width_mm, height_mm), np.load(points)
+    views = []
+    for frame, pts, valid in zip(read_frames(video, maps["indices"]), maps["points"], maps["valid"]):
+        if (view := MatView.solve(frame, spec, float(maps["hfov"]))) is not None:
+            views.append((view, frame, pts.astype(np.float32), valid))
+    if not views:
+        raise typer.BadParameter(f"no frame of {video} shows two corner markers")
+    reference = min(views, key=lambda v: v[0].tilt_deg)[1]  # most top-down view: least warp and parallax
+    if not (obs := ScenePerceiver(spec).observe(reference)).objects:
+        raise typer.BadParameter(f"no objects perceived in the reference frame: {obs.error or 'none found'}")
+    objects = obs.objects
+    lifted = HeightLifter().lift(objects, [(v, p, m) for v, _, p, m in views], spec)
+    out.write_text(json.dumps([asdict(o) for o in lifted], indent=2))
+    for before, after in zip(objects, lifted):
+        print(
+            f"{after.label} {after.shape}: height {after.height_mm:.0f} mm, "
+            f"footprint {before.length_mm:.0f}x{before.width_mm:.0f} -> {after.length_mm:.0f}x{after.width_mm:.0f} mm"
+        )
+    print(f"{len(views)} views -> {out}")

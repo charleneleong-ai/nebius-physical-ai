@@ -23,11 +23,14 @@ class StackCheck:
         self.top, self.bottom = top, bottom
 
     def __call__(self, twin: Twin) -> bool:
-        top, bottom = twin.block_pos(self.top), twin.block_pos(self.bottom)
-        bottom_side = Twin.block_side_m(twin.blocks[self.bottom])
-        on_top = top[2] > bottom[2] + 0.4 * bottom_side
-        overlapping = np.linalg.norm(top[:2] - bottom[:2]) < 0.5 * bottom_side
-        return bool(on_top and overlapping)
+        geometry = twin.geometry(self.bottom)
+        hx, hy, hz = geometry.half
+        # Offset in the bottom block's live frame, so long boxes and tipped blocks are judged by their real extent.
+        x, y, z = (twin.block_pos(self.top) - twin.block_pos(self.bottom)) @ twin.data.body(self.bottom).xmat.reshape(
+            3, 3
+        )
+        inside = np.hypot(x, y) < hx if geometry.shape == "cylinder" else abs(x) < hx and abs(y) < hy
+        return bool(z > 0.8 * hz and inside)
 
 
 class BatchRollout:

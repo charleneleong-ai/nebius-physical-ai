@@ -27,10 +27,18 @@ class Perturbation:
     friction: tuple[float, float] = (0.4, 1.2)
     mass_kg: tuple[float, float] = (0.03, 0.10)
     start_pose_sigma_rad: float = 0.05
+    height_jitter_mm: float = 8.0  # worst MoGe-3 height error against a ruler (3 objects, 2026-10-04)
 
     @classmethod
     def none(cls) -> "Perturbation":
-        return cls(0.0, 0.0, (1.0, 1.0), (0.05, 0.05), 0.0)
+        return cls(
+            pos_sigma_mm=0.0,
+            size_jitter_mm=0.0,
+            friction=(1.0, 1.0),
+            mass_kg=(0.05, 0.05),
+            start_pose_sigma_rad=0.0,
+            height_jitter_mm=0.0,
+        )
 
 
 @dataclass
@@ -44,8 +52,21 @@ class Variant:
         jittered = []
         for obj in objects:
             dx, dy = rng.normal(0, p.pos_sigma_mm, 2)
-            side = np.sqrt(obj.area_mm2) + rng.uniform(-p.size_jitter_mm, p.size_jitter_mm)
-            jittered.append(replace(obj, x_mm=obj.x_mm + dx, y_mm=obj.y_mm + dy, area_mm2=side**2))
+            side = np.sqrt(obj.area_mm2)
+            scale = (side + rng.uniform(-p.size_jitter_mm, p.size_jitter_mm)) / side
+            jittered.append(
+                replace(
+                    obj,
+                    x_mm=obj.x_mm + dx,
+                    y_mm=obj.y_mm + dy,
+                    area_mm2=obj.area_mm2 * scale**2,
+                    length_mm=obj.length_mm * scale,
+                    width_mm=obj.width_mm * scale,
+                    height_mm=max(obj.height_mm * scale + rng.uniform(-p.height_jitter_mm, p.height_jitter_mm), 5.0)
+                    if obj.height_mm
+                    else 0.0,
+                )
+            )
         physics = BlockPhysics(mass_kg=rng.uniform(*p.mass_kg), friction=rng.uniform(*p.friction))
         return cls(jittered, physics, start_pose(rng, p.start_pose_sigma_rad))
 
