@@ -22,11 +22,11 @@ def main(
     video: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
     out: Annotated[Path, typer.Argument(dir_okay=False)],
     hfov: Annotated[float, typer.Option(help="The clip's horizontal FOV in degrees (npai calibrate-camera).")],
-    frames: Annotated[int, typer.Option(show_default=True)] = 26,
+    frames: Annotated[int, typer.Option(min=1, show_default=True)] = 26,
     model: Annotated[str, typer.Option(show_default=True)] = "Ruicheng/moge-3-vitl",
 ) -> None:
     net = MoGeModel.from_pretrained(model).cuda().eval()
-    cap = cv2.VideoCapture(video)
+    cap = cv2.VideoCapture(str(video))
     indices = np.linspace(0, int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) - 1, frames).astype(int)
     points, valid = [], []
     for i in indices:
