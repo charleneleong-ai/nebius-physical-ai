@@ -82,12 +82,16 @@ def demos(
     randomize: Annotated[
         bool, typer.Option(help="Random cameras, lights, shapes, sizes, colours and distractors per episode")
     ] = False,
+    real_objects: Annotated[
+        Path | None, typer.Option(help="Objects JSON (npai lift) placed as distractors when randomizing")
+    ] = None,
     width_mm: WidthOpt = A3_MAT.width_mm,
     height_mm: HeightOpt = A3_MAT.height_mm,
 ) -> None:
     """Record scripted pick-and-place demos in the twin as a LeRobot v2.1 dataset (successes only)."""
     sampler = SceneSampler(TwinLayout(MatSpec(width_mm, height_mm)), seed=seed)
-    randomizer = SceneRandomizer(sampler.layout, seed=seed) if randomize else None
+    real = [DetectedObject(**o) for o in json.loads(real_objects.read_text())] if real_objects else None
+    randomizer = SceneRandomizer(sampler.layout, seed=seed, real_objects=real) if randomize else None
     writer, attempts = LeRobotWriter(out), 0
     for _ in track(range(episodes), description="recording demos"):
         while True:

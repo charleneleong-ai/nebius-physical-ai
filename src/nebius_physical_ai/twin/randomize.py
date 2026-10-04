@@ -1,5 +1,5 @@
 import colorsys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -34,8 +34,15 @@ class Randomization:
 class SceneRandomizer:
     """Per-episode looks (camera, light, mat) and objects (shapes, sizes, colours, distractors) for demos."""
 
-    def __init__(self, layout: TwinLayout, seed: int = 0, ranges: Randomization | None = None) -> None:
-        self.layout, self.ranges = layout, ranges or Randomization()
+    def __init__(
+        self,
+        layout: TwinLayout,
+        seed: int = 0,
+        ranges: Randomization | None = None,
+        real_objects: list[DetectedObject] | None = None,
+    ) -> None:
+        """`real_objects` (e.g. `npai lift` output) are placed as distractors half the time, so demos see real clutter."""
+        self.layout, self.ranges, self.real_objects = layout, ranges or Randomization(), real_objects or []
         self.rng = np.random.default_rng(seed)
 
     def uniform(self, bounds: tuple[float, float]) -> float:
@@ -101,8 +108,24 @@ class SceneRandomizer:
         lo, hi = self.ranges.distractors
         for _ in range(int(self.rng.integers(lo, hi + 1))):
             if (xy := self.free_spot(found)) is not None:
-                found.append(self.block(str(self.rng.choice(DISTRACTOR_LABELS)), *xy, self.ranges.place_width_mm))
+                found.append(self.distractor(*xy))
         return found
+
+    def distractor(self, x_mm: float, y_mm: float) -> DetectedObject:
+        if self.real_objects and self.rng.random() < 0.5:
+            real = self.real_objects[int(self.rng.integers(len(self.real_objects)))]
+            s = self.rng.uniform(0.9, 1.1)
+            return replace(
+                real,
+                x_mm=round(x_mm, 1),
+                y_mm=round(y_mm, 1),
+                area_mm2=round(real.area_mm2 * s * s, 1),
+                length_mm=round(real.length_mm * s, 1),
+                width_mm=round(real.width_mm * s, 1),
+                height_mm=round(real.height_mm * s, 1),
+                yaw_deg=round(self.rng.uniform(-90, 90), 1),
+            )
+        return self.block(str(self.rng.choice(DISTRACTOR_LABELS)), x_mm, y_mm, self.ranges.place_width_mm)
 
     def free_spot(self, taken: list[DetectedObject], tries: int = 50) -> tuple[float, float] | None:
         mat, margin = self.layout.mat, 40.0

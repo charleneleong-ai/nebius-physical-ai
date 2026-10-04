@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.twin.expert import SceneSampler
 from nebius_physical_ai.twin.randomize import Randomization, SceneRandomizer
 from nebius_physical_ai.twin.scene import TwinLayout
@@ -55,3 +56,12 @@ def test_colours_stay_close_to_the_label(randomizer: SceneRandomizer) -> None:
     blues = np.array([randomizer.colour("blue") for _ in range(200)])
     assert (blues[:, 2] > blues[:, 0]).all() and (blues[:, 2] > blues[:, 1]).all()  # still unmistakably blue
     assert blues.std(axis=0).max() > 0.02  # but not one fixed shade
+
+
+def test_real_objects_appear_as_distractors_with_their_measured_size() -> None:
+    real = DetectedObject("glasses_case", 0.0, 0.0, 8100.0, length_mm=140.0, width_mm=58.0, height_mm=26.0)
+    randomizer = SceneRandomizer(LAYOUT, seed=1, ranges=Randomization(distractors=(2, 2)), real_objects=[real])
+    sampler = SceneSampler(LAYOUT, seed=1)
+    placed = [d for _ in range(60) for d in randomizer.objects(sampler)[2:] if d.label == "glasses_case"]
+    assert len(placed) > 20  # about half of the distractors
+    assert all(126 <= d.length_mm <= 154 and 23 <= d.height_mm <= 29 for d in placed)  # measured size +-10%

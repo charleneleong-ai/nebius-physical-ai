@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Record sim demos, build GR00T stats, fine-tune, logging to W&B project "preflight".
 # Runs on the A100 from the repo root:  scripts/finetune.sh <name> [episodes] [max_steps]
+# DEMO_ARGS passes extra `npai demos` options, e.g. DEMO_ARGS="--randomize --real-objects data/capture/real_objects.json".
 # Saves a single checkpoint at the end: each is ~22 GB and the A100 disk is tight.
 # Needs ~/Isaac-GR00T on branch n1d6 (>= 9b37aa1) with its .venv, and the base checkpoint below.
 set -euo pipefail
@@ -13,7 +14,7 @@ DATA=$HOME/data/preflight_demos_$NAME
 OUT=$HOME/checkpoints/gr00t-preflight-$NAME
 
 rm -rf "$DATA"
-MUJOCO_GL=egl uv run npai demos "$DATA" --episodes "$EPISODES" --seed 1
+MUJOCO_GL=egl uv run npai demos "$DATA" --episodes "$EPISODES" --seed 1 ${DEMO_ARGS:-}
 
 cd "$GR00T"
 .venv/bin/python gr00t/data/stats.py --dataset-path "$DATA" --embodiment-tag NEW_EMBODIMENT || true  # rel stats need the config below
