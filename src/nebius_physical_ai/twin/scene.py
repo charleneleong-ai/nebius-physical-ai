@@ -23,6 +23,8 @@ RGBA = {
     "blue": (0.1, 0.3, 0.9, 1),
 }
 BLOCK_SIDE_MM = (20.0, 60.0)
+# Robonine SO-ARM101 follower: white printed parts, black STS3215 servos (the menagerie model ships yellow).
+ARM_PRINT_RGBA, SERVO_RGBA = (0.93, 0.93, 0.91, 1.0), (0.08, 0.08, 0.08, 1.0)
 ARM_JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")
 A3_MAT = MatSpec(width_mm=350.0, height_mm=227.0)  # the printed A3 sheet; MatSpec defaults to the A4 cut-outs
 
@@ -95,6 +97,8 @@ class Twin:
             raise ValueError(f"block labels must be unique, got {labels}")
         layout = layout or TwinLayout()
         spec = mujoco.MjSpec.from_file(str(so101_xml))
+        for material in spec.materials:
+            material.rgba = SERVO_RGBA if material.name.startswith("sts3215") else ARM_PRINT_RGBA
         world = spec.worldbody
         world.add_light(pos=[0.2, 0, 1.5], dir=[0, 0, -1], type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL)
         world.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[0, 0, 0.05], rgba=[0.6, 0.6, 0.6, 1])

@@ -42,7 +42,7 @@ run = "uv run npai markers --out markers.pdf"
 description = "Check out the current branch on the A100 and sync deps"
 run = """
 B=$(git branch --show-current)
-ssh "$HOST" "cd ~/$A100_DIR && git fetch -q && git switch -q $B && git pull -q && ~/.local/bin/uv sync -q --extra dev && git log --oneline -1"
+ssh "$HOST" "cd ~/$A100_DIR && git fetch -q && git switch -q -C $B origin/$B && ~/.local/bin/uv sync -q --extra dev && git log --oneline -1"
 """
 
 [tasks.serve]
