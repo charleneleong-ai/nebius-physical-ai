@@ -71,6 +71,20 @@ class TwinLayout:
 
 
 @dataclass(frozen=True)
+class SceneLook:
+    """What one episode looks like: top camera, key light, ambient and mat brightness. Defaults are the standard scene.
+
+    `camera` holds `add_camera` kwargs in the world frame (None = the layout's camera).
+    """
+
+    camera: dict[str, list[float] | float] | None = None
+    light_dir: tuple[float, float, float] = (0.0, 0.0, -1.0)
+    light_diffuse: float = 0.7
+    ambient: float = 0.1
+    floor_grey: float = FLOOR_RGBA[0]
+
+
+@dataclass(frozen=True)
 class BlockGeometry:
     """A perceived object as a MuJoCo primitive: half extents along (long side, short side, up) and world yaw."""
 
@@ -170,19 +184,26 @@ class Twin:
         physics: BlockPhysics | None = None,
         start_pose: np.ndarray | None = None,
         so101_xml: Path = SO101_XML,
+        look: SceneLook | None = None,
     ) -> "Twin":
         """Blocks are named by label (suffixed when a colour repeats), so task checks don't depend on order."""
-        layout = layout or TwinLayout()
+        layout, look = layout or TwinLayout(), look or SceneLook()
         spec = mujoco.MjSpec.from_file(str(so101_xml))
         for material in spec.materials:
             material.rgba = SERVO_RGBA if material.name.startswith("sts3215") else ARM_PRINT_RGBA
         world = spec.worldbody
-        world.add_light(pos=[0.2, 0, 1.5], dir=[0, 0, -1], type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL)
-        world.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[0, 0, 0.05], rgba=FLOOR_RGBA)
+        spec.visual.headlight.ambient = [look.ambient] * 3
+        world.add_light(
+            pos=[0.2, 0, 1.5],
+            dir=list(look.light_dir),
+            diffuse=[look.light_diffuse] * 3,
+            type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
+        )
+        world.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[0, 0, 0.05], rgba=[*[look.floor_grey] * 3, 1.0])
         blocks = dict(zip(cls.block_names(objects), objects))
         for name, obj in blocks.items():
             cls.add_block(world, name, obj, layout, physics or BlockPhysics())
-        world.add_camera(name="front_cam", **layout.front_camera_spec())  # the checkpoint's "front" = top camera
+        world.add_camera(name="front_cam", **(look.camera or layout.front_camera_spec()))  # checkpoint's "front"
         model = spec.compile()
         twin = cls(model, mujoco.MjData(model), blocks)
         mujoco.mj_forward(model, twin.data)  # poses (block_pos, cameras) are valid before the first step

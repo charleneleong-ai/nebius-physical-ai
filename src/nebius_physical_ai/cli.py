@@ -23,6 +23,7 @@ from nebius_physical_ai.trust.plots import StressPlots
 from nebius_physical_ai.trust.stress import StressCase, StressReport
 from nebius_physical_ai.twin.dataset import LeRobotWriter
 from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler
+from nebius_physical_ai.twin.randomize import SceneRandomizer
 from nebius_physical_ai.twin.rehearsal import Rehearsal, SceneRun
 from nebius_physical_ai.twin.rollout import STACK_TASK, BatchRollout, RolloutResult, StackCheck
 from nebius_physical_ai.twin.scene import A3_MAT, RENDER_ASPECT, Twin, TwinLayout
@@ -78,17 +79,27 @@ def demos(
     episodes: int = 100,
     seed: int = 0,
     task: str = STACK_TASK,
+    randomize: Annotated[
+        bool, typer.Option(help="Random cameras, lights, shapes, sizes, colours and distractors per episode")
+    ] = False,
     width_mm: WidthOpt = A3_MAT.width_mm,
     height_mm: HeightOpt = A3_MAT.height_mm,
 ) -> None:
     """Record scripted pick-and-place demos in the twin as a LeRobot v2.1 dataset (successes only)."""
     sampler = SceneSampler(TwinLayout(MatSpec(width_mm, height_mm)), seed=seed)
+    randomizer = SceneRandomizer(sampler.layout, seed=seed) if randomize else None
     writer, attempts = LeRobotWriter(out), 0
     for _ in track(range(episodes), description="recording demos"):
         while True:
             attempts += 1
-            with Twin.from_objects(sampler.sample(), sampler.layout, start_pose=sampler.start_pose()) as twin:
-                frames = list(PickPlaceExpert(twin, task).run())
+            objects = randomizer.objects(sampler) if randomizer else sampler.sample()
+            look = randomizer.look() if randomizer else None
+            start = sampler.start_pose()
+            with Twin.from_objects(objects, sampler.layout, start_pose=start, look=look) as twin:
+                try:
+                    frames = list(PickPlaceExpert(twin, task).run())
+                except ValueError:  # a target out of the arm's reach: draw another scene
+                    continue
                 twin.settle(0.5)
                 stacked = StackCheck()(twin)
             if stacked:
