@@ -30,8 +30,7 @@ BLOCK_SIDE_MM = (20.0, 60.0)
 # The floor stands in for the mat's paper; perceived colours are paper-relative, so blocks are painted relative to it.
 FLOOR_RGBA = (0.6, 0.6, 0.6, 1.0)
 # Robonine SO-ARM101 follower: white printed parts, black STS3215 servos (the menagerie model ships yellow).
-ARM_PRINT_RGBA = (0.93, 0.93, 0.91, 1.0)
-SERVO_RGBA = (0.08, 0.08, 0.08, 1.0)
+ARM_PRINT_RGBA, SERVO_RGBA = (0.93, 0.93, 0.91, 1.0), (0.08, 0.08, 0.08, 1.0)
 RENDER_ASPECT = 4 / 3  # GR00T's SO-101 checkpoint sees 640x480
 ARM_JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")
 A3_MAT = MatSpec(width_mm=350.0, height_mm=227.0)  # the printed A3 sheet; MatSpec defaults to the A4 cut-outs
