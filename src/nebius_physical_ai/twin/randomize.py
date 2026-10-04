@@ -14,14 +14,15 @@ DISTRACTOR_LABELS = ("yellow", "green", "purple", "dark")
 class Randomization:
     """Ranges for demo randomisation: wide enough that the policy can't lean on any one camera, light or object."""
 
-    elevation_deg: tuple[float, float] = (35.0, 80.0)  # camera above the mat plane, any azimuth
+    elevation_deg: tuple[float, float] = (35.0, 80.0)  # camera above the mat plane
+    azimuth_deg: tuple[float, float] = (-130.0, 130.0)  # 0 = across the mat facing the robot; behind the arm is out
     distance_mm: tuple[float, float] = (350.0, 650.0)  # camera to its aim point
     fovy_deg: tuple[float, float] = (32.0, 52.0)  # vertical, at the 4:3 render
     aim_jitter_mm: float = 40.0  # aim point around the mat centre
     light_tilt_deg: tuple[float, float] = (0.0, 50.0)
-    light_diffuse: tuple[float, float] = (0.35, 1.0)
+    light_diffuse: tuple[float, float] = (0.35, 0.9)
     ambient: tuple[float, float] = (0.05, 0.35)
-    floor_grey: tuple[float, float] = (0.45, 0.8)
+    floor_grey: tuple[float, float] = (0.45, 0.7)  # brighter saturates to white under the key light
     pick_width_mm: tuple[float, float] = (22.0, 34.0)  # the gripper's comfortable range
     place_width_mm: tuple[float, float] = (30.0, 60.0)
     height_mm: tuple[float, float] = (18.0, 45.0)
@@ -53,11 +54,11 @@ class SceneRandomizer:
         )
 
     def camera(self) -> dict[str, list[float] | float]:
-        """A camera anywhere around the mat, aimed near its centre, image up as close to world up as it can be."""
+        """A camera on an arc around the mat (never behind the arm), aimed near its centre, image up = world up-ish."""
         r, mat = self.ranges, self.layout.mat
         aim_xy = self.layout.mat_to_world(mat.width_mm / 2, mat.height_mm / 2)
         aim = np.array([*aim_xy, 0.0]) + np.append(self.rng.normal(0, r.aim_jitter_mm / 1000, 2), 0.0)
-        elevation, azimuth = np.radians(self.uniform(r.elevation_deg)), self.rng.uniform(0, 2 * np.pi)
+        elevation, azimuth = np.radians(self.uniform(r.elevation_deg)), np.radians(self.uniform(r.azimuth_deg))
         offset = np.array([np.cos(elevation) * np.cos(azimuth), np.cos(elevation) * np.sin(azimuth), np.sin(elevation)])
         position = aim + self.uniform(r.distance_mm) / 1000 * offset
         forward = -offset

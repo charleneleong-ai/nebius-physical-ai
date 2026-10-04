@@ -27,10 +27,12 @@ def test_cameras_aim_at_the_mat_from_within_range(randomizer: SceneRandomizer) -
         assert RANGES.fovy_deg[0] <= cam["fovy"] <= RANGES.fovy_deg[1]
 
 
-def test_cameras_cover_every_side_of_the_mat(randomizer: SceneRandomizer) -> None:
+def test_cameras_spread_over_the_arc_but_never_sit_behind_the_arm(randomizer: SceneRandomizer) -> None:
     centre = np.array(LAYOUT.mat_to_world(LAYOUT.mat.width_mm / 2, LAYOUT.mat.height_mm / 2))
-    azimuths = [np.arctan2(*(np.array(randomizer.camera()["pos"][:2]) - centre)[::-1]) for _ in range(400)]
-    assert np.histogram(azimuths, bins=8, range=(-np.pi, np.pi))[0].min() > 20
+    offsets = [np.array(randomizer.camera()["pos"][:2]) - centre for _ in range(400)]
+    azimuths = np.degrees([np.arctan2(o[1], o[0]) for o in offsets])  # 0 = across the mat from the robot
+    assert np.abs(azimuths).max() <= RANGES.azimuth_deg[1] + 15  # aim jitter blurs the edge a little
+    assert np.histogram(azimuths, bins=6, range=RANGES.azimuth_deg)[0].min() > 30
 
 
 def test_objects_keep_the_task_pair_and_space_out_distractors(randomizer: SceneRandomizer) -> None:
