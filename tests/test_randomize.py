@@ -3,7 +3,14 @@ import pytest
 
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.twin.expert import SceneSampler
-from nebius_physical_ai.twin.randomize import Randomization, SceneRandomizer
+from nebius_physical_ai.twin.randomize import (
+    TASK_LABELS,
+    Randomization,
+    SceneRandomizer,
+    outline,
+    radius,
+    segment_distance,
+)
 from nebius_physical_ai.twin.scene import TwinLayout
 
 LAYOUT = TwinLayout()
@@ -36,20 +43,27 @@ def test_cameras_spread_over_the_arc_but_never_sit_behind_the_arm(randomizer: Sc
     assert np.histogram(azimuths, bins=6, range=RANGES.azimuth_deg)[0].min() > 30
 
 
-def test_objects_keep_the_task_pair_and_space_out_distractors(randomizer: SceneRandomizer) -> None:
-    sampler = SceneSampler(LAYOUT, seed=3)
-    for _ in range(100):
+def test_objects_keep_the_task_pair_and_leave_room_for_the_arm(randomizer: SceneRandomizer) -> None:
+    sampler, layout = SceneSampler(LAYOUT, seed=3), LAYOUT
+    base = np.array([layout.mat.width_mm / 2, layout.mat.height_mm + layout.base_offset_mm])
+    seen = 0
+    for _ in range(150):
         objects = randomizer.objects(sampler)
         pick, place, *distractors = objects
         assert (pick.label, place.label) == ("blue", "red")
-        assert RANGES.pick_width_mm[0] <= pick.width_mm <= RANGES.pick_width_mm[1]
-        assert RANGES.place_width_mm[0] <= place.width_mm <= RANGES.place_width_mm[1]
-        assert len(distractors) <= RANGES.distractors[1]
+        assert max(pick.length_mm, pick.width_mm) <= RANGES.pick_length_mm + 1e-6
+        assert pick.height_mm + place.height_mm <= RANGES.pick_height_mm[1] + RANGES.place_height_mm[1]
+        a, b = np.array([pick.x_mm, pick.y_mm]), np.array([place.x_mm, place.y_mm])
         for d in distractors:
-            assert d.label not in ("blue", "red")
-            assert all(
-                np.hypot(d.x_mm - o.x_mm, d.y_mm - o.y_mm) > RANGES.distractor_gap_mm for o in objects if o is not d
-            )
+            seen += 1
+            p = np.array([d.x_mm, d.y_mm])
+            assert d.label not in TASK_LABELS
+            edge = outline(d, p)
+            for o in objects[:2]:  # footprints never overlap the task blocks at spawn
+                assert np.hypot(*(edge - [o.x_mm, o.y_mm]).T).min() > radius(o) + RANGES.clearance_mm
+            for start, end in [(base, a), (base, b), (a, b)]:  # and stay out of the arm's way
+                assert segment_distance(edge, start, end).min() > RANGES.corridor_mm
+    assert seen > 50  # the constraints still leave room for clutter
 
 
 def test_colours_stay_close_to_the_label(randomizer: SceneRandomizer) -> None:
@@ -60,8 +74,11 @@ def test_colours_stay_close_to_the_label(randomizer: SceneRandomizer) -> None:
 
 def test_real_objects_appear_as_distractors_with_their_measured_size() -> None:
     real = DetectedObject("glasses_case", 0.0, 0.0, 8100.0, length_mm=140.0, width_mm=58.0, height_mm=26.0)
-    randomizer = SceneRandomizer(LAYOUT, seed=1, ranges=Randomization(distractors=(2, 2)), real_objects=[real])
+    clash = DetectedObject("red", 0.0, 0.0, 900.0)  # would collide with the task's red block: dropped
+    ranges = Randomization(distractors=(2, 2))
+    randomizer = SceneRandomizer(LAYOUT, seed=1, ranges=ranges, real_objects=[real, clash])
     sampler = SceneSampler(LAYOUT, seed=1)
     placed = [d for _ in range(60) for d in randomizer.objects(sampler)[2:] if d.label == "glasses_case"]
-    assert len(placed) > 20  # about half of the distractors
+    assert len(placed) > 15  # about half of the distractors that fit
+    assert randomizer.real_objects == [real]
     assert all(126 <= d.length_mm <= 154 and 23 <= d.height_mm <= 29 for d in placed)  # measured size +-10%

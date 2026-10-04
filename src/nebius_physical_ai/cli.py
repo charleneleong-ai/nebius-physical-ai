@@ -22,13 +22,14 @@ from nebius_physical_ai.tracking import Tracker
 from nebius_physical_ai.trust.plots import StressPlots
 from nebius_physical_ai.trust.stress import StressCase, StressReport
 from nebius_physical_ai.twin.dataset import LeRobotWriter
-from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler
+from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler, UnreachableTarget
 from nebius_physical_ai.twin.randomize import SceneRandomizer
 from nebius_physical_ai.twin.rehearsal import Rehearsal, SceneRun
 from nebius_physical_ai.twin.rollout import STACK_TASK, BatchRollout, RolloutResult, StackCheck
 from nebius_physical_ai.twin.scene import A3_MAT, RENDER_ASPECT, Twin, TwinLayout
 
 app = typer.Typer(no_args_is_help=True)
+MAX_ATTEMPTS_PER_EPISODE = 10  # demos give up instead of looping forever on ranges the expert can't solve
 
 WidthOpt = Annotated[float, typer.Option(help="Mat width between marker centres (mm)")]
 HeightOpt = Annotated[float, typer.Option(help="Mat height between marker centres (mm)")]
@@ -96,13 +97,15 @@ def demos(
     for _ in track(range(episodes), description="recording demos"):
         while True:
             attempts += 1
+            if attempts > MAX_ATTEMPTS_PER_EPISODE * episodes:
+                raise RuntimeError(f"expert solved only {len(writer.episodes)} of {attempts} scenes; check the ranges")
             objects = randomizer.objects(sampler) if randomizer else sampler.sample()
             look = randomizer.look() if randomizer else None
             start = sampler.start_pose()
             with Twin.from_objects(objects, sampler.layout, start_pose=start, look=look) as twin:
                 try:
                     frames = list(PickPlaceExpert(twin, task).run())
-                except ValueError:  # a target out of the arm's reach: draw another scene
+                except UnreachableTarget:  # draw another scene
                     continue
                 twin.settle(0.5)
                 stacked = StackCheck()(twin)
