@@ -16,8 +16,12 @@ COLOUR_HUES: dict[str, list[tuple[int, int]]] = {
     "yellow": [(20, 35)],
     "green": [(40, 85)],
     "blue": [(95, 130)],
+    "purple": [(131, 160)],
 }
+ROUND_CIRCULARITY = 0.8  # 4πA/P²: 1 for a disc, π/4 for a square
 OPEN_KERNEL = np.ones((5, 5), np.uint8)
+# The mat is near-white (S~15, V~200): anything more saturated or darker is an object, pale lids and black tins included.
+FOREGROUND_SAT, FOREGROUND_DARK = 60, 80
 
 
 @dataclass(frozen=True)
@@ -51,11 +55,24 @@ class MatSpec:
 
 @dataclass
 class DetectedObject:
+    """An object on the mat. Footprint fields are 0 when unknown (then the twin assumes a cube from the area)."""
+
     label: str
     x_mm: float
     y_mm: float
     area_mm2: float
     confidence: float = 1.0
+    length_mm: float = 0.0  # long side of the footprint
+    width_mm: float = 0.0
+    yaw_deg: float = 0.0  # long side's angle from mat +x towards mat +y (down the mat)
+    height_mm: float = 0.0
+    shape: str = "box"  # "box" or "cylinder"
+    # Median colour relative to the mat's white paper (paper = 1), so exposure and white balance cancel; None = palette.
+    rgb: tuple[float, float, float] | None = None
+
+    def __post_init__(self) -> None:
+        if self.rgb is not None:
+            self.rgb = tuple(self.rgb)  # JSON brings it back as a list
 
 
 @dataclass
@@ -76,20 +93,74 @@ ObjectDetector = Callable[[np.ndarray], list[DetectedObject]]
 
 
 def detect_colour_objects(
-    top_down_bgr: np.ndarray, px_per_mm: float, min_area_mm2: float = 150.0
+    top_down_bgr: np.ndarray,
+    px_per_mm: float,
+    min_area_mm2: float = 150.0,
+    corner_mm: float = 0.0,
+    merge_mm: float = 6.0,
 ) -> list[DetectedObject]:
+    """Blobs that stand out from the light mat, labelled by their dominant colour (or "dark").
+
+    Touching parts within `merge_mm` count as one object (a two-tone tin, a cluster of balls); the
+    `corner_mm` squares at each corner hold marker quarters and are ignored.
+    """
     hsv = cv2.cvtColor(top_down_bgr, cv2.COLOR_BGR2HSV)
+    colours = {
+        colour: np.bitwise_or.reduce([cv2.inRange(hsv, (lo, 100, 70), (hi, 255, 255)) for lo, hi in bands])
+        for colour, bands in COLOUR_HUES.items()
+    }
+    foreground = cv2.inRange(hsv, (0, FOREGROUND_SAT, 0), (179, 255, 255)) | cv2.inRange(
+        hsv, (0, 0, 0), (179, 255, FOREGROUND_DARK)
+    )
+    mask = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, OPEN_KERNEL)
+    markers = np.zeros(mask.shape, bool)
+    if (c := round(corner_mm * px_per_mm)) > 0:
+        markers[:c, :c] = markers[:c, -c:] = markers[-c:, :c] = markers[-c:, -c:] = True
+        mask[markers] = 0
+    k = max(1, round(merge_mm * px_per_mm))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    paper = np.median(top_down_bgr[(mask == 0) & ~markers], axis=0)
     found = []
-    for colour, bands in COLOUR_HUES.items():
-        masks = [cv2.inRange(hsv, (lo, 100, 70), (hi, 255, 255)) for lo, hi in bands]
-        mask = cv2.morphologyEx(np.bitwise_or.reduce(masks), cv2.MORPH_OPEN, OPEN_KERNEL)
-        n, _, stats, centroids = cv2.connectedComponentsWithStats(mask)
-        for i in range(1, n):  # label 0 is background
-            area_mm2 = stats[i, cv2.CC_STAT_AREA] / px_per_mm**2
-            if area_mm2 >= min_area_mm2:
-                x, y = centroids[i] / px_per_mm
-                found.append(DetectedObject(colour, round(x, 1), round(y, 1), round(area_mm2, 1)))
+    for contour in cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
+        area_mm2 = cv2.contourArea(contour) / px_per_mm**2
+        if area_mm2 >= min_area_mm2:
+            blob = cv2.drawContours(np.zeros_like(mask), [contour], -1, 255, -1)
+            counts = {colour: cv2.countNonZero(m & blob) for colour, m in colours.items()}
+            label = max(counts, key=counts.__getitem__) if any(counts.values()) else "dark"
+            b, g, r = np.clip(np.median(top_down_bgr[blob > 0], axis=0) / np.maximum(paper, 1), 0, 1)
+            found.append(footprint(label, contour, px_per_mm, area_mm2, (round(r, 3), round(g, 3), round(b, 3))))
     return found
+
+
+def oriented_rect(points: np.ndarray) -> tuple[float, float, float, float, float]:
+    """(centre x, centre y, length, width, yaw degrees in [-90, 90)) of the smallest rectangle around 2D points."""
+    rect = cv2.minAreaRect(points.astype(np.float32))
+    corners = cv2.boxPoints(rect)
+    short_edge, long_edge = sorted([corners[1] - corners[0], corners[2] - corners[1]], key=np.linalg.norm)
+    yaw = float(np.degrees(np.arctan2(long_edge[1], long_edge[0])))
+    yaw = (yaw + 90.0) % 180.0 - 90.0  # a footprint is symmetric under 180°
+    return *(float(c) for c in rect[0]), float(np.linalg.norm(long_edge)), float(np.linalg.norm(short_edge)), yaw
+
+
+def footprint(
+    label: str, contour: np.ndarray, px_per_mm: float, area_mm2: float, rgb: tuple[float, float, float] | None = None
+) -> DetectedObject:
+    """Oriented rectangle around a blob (or a disc if it's round), in mat millimetres."""
+    x, y, length, width, yaw = oriented_rect(contour)
+    x, y, length, width = (v / px_per_mm for v in (x, y, length, width))
+    circularity = 4 * np.pi * cv2.contourArea(contour) / max(cv2.arcLength(contour, True) ** 2, 1e-9)
+    shape = "cylinder" if circularity > ROUND_CIRCULARITY and length < 1.25 * width else "box"
+    return DetectedObject(
+        label,
+        round(x, 1),
+        round(y, 1),
+        round(area_mm2, 1),
+        length_mm=round(length, 1),
+        width_mm=round(width, 1),
+        yaw_deg=round(yaw, 1),
+        shape=shape,
+        rgb=rgb,
+    )
 
 
 class ScenePerceiver:
@@ -97,7 +168,9 @@ class ScenePerceiver:
 
     def __init__(self, spec: MatSpec | None = None, detector: ObjectDetector | None = None) -> None:
         self.spec = spec or MatSpec()
-        self.detector = detector or partial(detect_colour_objects, px_per_mm=self.spec.px_per_mm)
+        self.detector = detector or partial(
+            detect_colour_objects, px_per_mm=self.spec.px_per_mm, corner_mm=self.spec.marker_mm / 2
+        )
         self._aruco = cv2.aruco.ArucoDetector(ARUCO_DICT, cv2.aruco.DetectorParameters())
 
     def observe(self, frame_bgr: np.ndarray) -> SceneObservation:

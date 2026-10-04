@@ -1,5 +1,6 @@
 import copy
 import os
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Self
@@ -7,6 +8,7 @@ from typing import Self
 import mujoco
 import numpy as np
 
+from nebius_physical_ai.capture.camera import CameraPose
 from nebius_physical_ai.capture.mat import DetectedObject, MatSpec
 from nebius_physical_ai.policy.gr00t import CAMERA_KEYS, Observation
 
@@ -21,10 +23,15 @@ RGBA = {
     "yellow": (0.95, 0.8, 0.1, 1),
     "green": (0.1, 0.7, 0.2, 1),
     "blue": (0.1, 0.3, 0.9, 1),
+    "purple": (0.5, 0.2, 0.7, 1),
+    "dark": (0.12, 0.12, 0.12, 1),
 }
 BLOCK_SIDE_MM = (20.0, 60.0)
+# The floor stands in for the mat's paper; perceived colours are paper-relative, so blocks are painted relative to it.
+FLOOR_RGBA = (0.6, 0.6, 0.6, 1.0)
 # Robonine SO-ARM101 follower: white printed parts, black STS3215 servos (the menagerie model ships yellow).
 ARM_PRINT_RGBA, SERVO_RGBA = (0.93, 0.93, 0.91, 1.0), (0.08, 0.08, 0.08, 1.0)
+RENDER_ASPECT = 4 / 3  # GR00T's SO-101 checkpoint sees 640x480
 ARM_JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")
 A3_MAT = MatSpec(width_mm=350.0, height_mm=227.0)  # the printed A3 sheet; MatSpec defaults to the A4 cut-outs
 
@@ -38,10 +45,82 @@ class TwinLayout:
 
     mat: MatSpec = A3_MAT
     base_offset_mm: float = 50.0
+    front_camera: CameraPose | None = None  # calibrated real camera; None = straight down from 60 cm
 
     def mat_to_world(self, x_mm: float, y_mm: float) -> tuple[float, float]:
         base_x, base_y = self.mat.width_mm / 2, self.mat.height_mm + self.base_offset_mm
         return (base_y - y_mm) / 1000, (base_x - x_mm) / 1000
+
+    @staticmethod
+    def direction_to_world(v: tuple[float, float, float]) -> np.ndarray:
+        """Mat-frame direction (x right, y down the mat, z up) to world (x forward, y left, z up)."""
+        return np.array([-v[1], -v[0], v[2]])
+
+    def front_camera_spec(self) -> dict[str, list[float] | float]:
+        """`add_camera` kwargs. A calibrated camera is cropped to RENDER_ASPECT, so feed the policy real frames
+        through `CameraPose.crop_frame(frame, RENDER_ASPECT)` for the views to match."""
+        cam = self.front_camera and self.front_camera.cropped_to(RENDER_ASPECT)
+        if cam is None:
+            top_x, _ = self.mat_to_world(self.mat.width_mm / 2, self.mat.height_mm / 2)
+            return {"pos": [top_x, 0.0, 0.6], "xyaxes": [0, -1, 0, 1, 0, 0], "fovy": 45.0}
+        x, y = self.mat_to_world(cam.position_mm[0], cam.position_mm[1])
+        forward, up = self.direction_to_world(cam.forward), self.direction_to_world(cam.up)
+        right = np.cross(forward, up)  # MuJoCo cameras look down -z with y up, so x = y × z = forward × up
+        return {"pos": [x, y, cam.position_mm[2] / 1000], "xyaxes": [*right, *up], "fovy": cam.vfov_deg}
+
+
+@dataclass(frozen=True)
+class BlockGeometry:
+    """A perceived object as a MuJoCo primitive: half extents along (long side, short side, up) and world yaw."""
+
+    shape: str
+    half: tuple[float, float, float]  # metres
+    yaw_rad: float
+
+    FOOTPRINT_MM = (10.0, 250.0)
+
+    @classmethod
+    def of(cls, obj: DetectedObject) -> "BlockGeometry":
+        if obj.length_mm <= 0:  # no footprint: a cube from the blob area
+            side = float(np.clip(np.sqrt(obj.area_mm2), *BLOCK_SIDE_MM)) / 1000
+            return cls("box", (side / 2,) * 3, 0.0)
+        length, width = (float(np.clip(v, *cls.FOOTPRINT_MM)) for v in (obj.length_mm, obj.width_mm))
+        height = obj.height_mm or float(np.clip(width, *BLOCK_SIDE_MM))  # unknown height: as tall as it is narrow
+        theta = np.radians(obj.yaw_deg)
+        yaw = -np.pi / 2 - theta  # mat direction (cos, sin) is world (-sin, -cos)
+        if obj.shape == "cylinder":
+            r = (length + width) / 4000
+            return cls("cylinder", (r, r, height / 2000), yaw)
+        return cls("box", (length / 2000, width / 2000, height / 2000), yaw)
+
+    @property
+    def geom_type(self) -> mujoco.mjtGeom:
+        return mujoco.mjtGeom.mjGEOM_CYLINDER if self.shape == "cylinder" else mujoco.mjtGeom.mjGEOM_BOX
+
+    @property
+    def size(self) -> list[float]:
+        hx, hy, hz = self.half
+        return [hx, hz, 0.0] if self.shape == "cylinder" else [hx, hy, hz]
+
+    @property
+    def rbound(self) -> float:
+        hx, _, hz = self.half
+        return float(np.hypot(hx, hz)) if self.shape == "cylinder" else float(np.linalg.norm(self.half))
+
+    @property
+    def quat(self) -> list[float]:
+        return [np.cos(self.yaw_rad / 2), 0.0, 0.0, np.sin(self.yaw_rad / 2)]
+
+    def inertia(self, mass: float) -> list[float]:
+        hx, hy, hz = self.half
+        if self.shape == "cylinder":
+            side = mass * (3 * hx**2 + 4 * hz**2) / 12
+            return [side, side, mass * hx**2 / 2]
+        return [mass * (hy**2 + hz**2) / 3, mass * (hx**2 + hz**2) / 3, mass * (hx**2 + hy**2) / 3]
+
+    def resting_pos(self, obj: DetectedObject, layout: "TwinLayout") -> tuple[float, float, float]:
+        x, y = layout.mat_to_world(obj.x_mm, obj.y_mm)
+        return x, y, self.half[2] + 1e-3
 
 
 @dataclass(frozen=True)
@@ -91,55 +170,53 @@ class Twin:
         start_pose: np.ndarray | None = None,
         so101_xml: Path = SO101_XML,
     ) -> "Twin":
-        """Blocks are named by label, so task checks don't depend on perception order."""
-        labels = [obj.label for obj in objects]
-        if len(set(labels)) != len(labels):
-            raise ValueError(f"block labels must be unique, got {labels}")
+        """Blocks are named by label (suffixed when a colour repeats), so task checks don't depend on order."""
         layout = layout or TwinLayout()
         spec = mujoco.MjSpec.from_file(str(so101_xml))
         for material in spec.materials:
             material.rgba = SERVO_RGBA if material.name.startswith("sts3215") else ARM_PRINT_RGBA
         world = spec.worldbody
         world.add_light(pos=[0.2, 0, 1.5], dir=[0, 0, -1], type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL)
-        world.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[0, 0, 0.05], rgba=[0.6, 0.6, 0.6, 1])
-        blocks = {}
-        for obj in objects:
-            cls.add_block(world, obj.label, obj, layout, physics or BlockPhysics())
-            blocks[obj.label] = obj
-        # The checkpoint's "front" view is a top camera: look straight down on the mat, arm at the bottom.
-        top_x, _ = layout.mat_to_world(layout.mat.width_mm / 2, layout.mat.height_mm / 2)
-        world.add_camera(name="front_cam", pos=[top_x, 0, 0.6], xyaxes=[0, -1, 0, 1, 0, 0])
+        world.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[0, 0, 0.05], rgba=FLOOR_RGBA)
+        blocks = dict(zip(cls.block_names(objects), objects))
+        for name, obj in blocks.items():
+            cls.add_block(world, name, obj, layout, physics or BlockPhysics())
+        world.add_camera(name="front_cam", **layout.front_camera_spec())  # the checkpoint's "front" = top camera
         model = spec.compile()
         twin = cls(model, mujoco.MjData(model), blocks)
+        mujoco.mj_forward(model, twin.data)  # poses (block_pos, cameras) are valid before the first step
         if start_pose is not None:
             twin.reset_arm(start_pose)
             twin.settle(0.3)
         return twin
 
     @staticmethod
-    def block_side_m(obj: DetectedObject) -> float:
-        return float(np.clip(np.sqrt(obj.area_mm2), *BLOCK_SIDE_MM)) / 1000
+    def block_names(objects: list[DetectedObject]) -> list[str]:
+        """The label, or label_<k> for the k-th object of a colour that appears more than once."""
+        counts = Counter(obj.label for obj in objects)
+        seen: Counter[str] = Counter()
+        names = []
+        for obj in objects:
+            names.append(obj.label if counts[obj.label] == 1 else f"{obj.label}_{seen[obj.label]}")
+            seen[obj.label] += 1
+        return names
 
-    @classmethod
-    def block_pose(cls, obj: DetectedObject, layout: TwinLayout) -> tuple[float, tuple[float, float, float]]:
-        """(half side, resting position just above the table) in metres."""
-        half = cls.block_side_m(obj) / 2
-        x, y = layout.mat_to_world(obj.x_mm, obj.y_mm)
-        return half, (x, y, half + 1e-3)
+    def geometry(self, name: str) -> BlockGeometry:
+        return BlockGeometry.of(self.blocks[name])
 
-    @classmethod
+    @staticmethod
     def add_block(
-        cls, world: mujoco.MjsBody, name: str, obj: DetectedObject, layout: TwinLayout, physics: BlockPhysics
+        world: mujoco.MjsBody, name: str, obj: DetectedObject, layout: TwinLayout, physics: BlockPhysics
     ) -> None:
-        half, pos = cls.block_pose(obj, layout)
-        body = world.add_body(name=name, pos=list(pos))
+        g = BlockGeometry.of(obj)
+        body = world.add_body(name=name, pos=list(g.resting_pos(obj, layout)), quat=g.quat)
         body.add_freejoint(name=name)
         body.add_geom(
             name=name,
-            type=mujoco.mjtGeom.mjGEOM_BOX,
-            size=[half] * 3,
+            type=g.geom_type,
+            size=g.size,
             mass=physics.mass_kg,
-            rgba=RGBA.get(obj.label, (0.5, 0.5, 0.5, 1)),
+            rgba=(*np.multiply(obj.rgb, FLOOR_RGBA[:3]), 1.0) if obj.rgb else RGBA.get(obj.label, (0.5, 0.5, 0.5, 1)),
             friction=[physics.friction, 0.005, 0.0001],
         )
 
@@ -148,24 +225,29 @@ class Twin:
     ) -> "Twin":
         """Same scene with re-sized, re-weighted, moved blocks, without recompiling the MJCF (STL hulls dominate).
 
-        The model is copied and its block parameters edited in place; `objects` must carry the same labels.
+        The model is copied and its block parameters edited in place; `objects` must match the template's
+        labels and shapes, in the same order.
         """
         model = copy.copy(self.model)
         data = mujoco.MjData(model)
-        for obj in objects:
-            half, pos = self.block_pose(obj, layout)
-            geom, body, joint = model.geom(obj.label), model.body(obj.label), model.joint(obj.label)
-            geom.size[:] = half
-            geom.rbound[0] = half * np.sqrt(3)
-            model.geom_aabb[geom.id, 3:] = half  # not exposed on the named view
+        blocks = dict(zip(self.block_names(objects), objects))
+        for name, obj in blocks.items():
+            g = BlockGeometry.of(obj)
+            geom, body, joint = model.geom(name), model.body(name), model.joint(name)
+            if geom.type[0] != g.geom_type:
+                raise ValueError(f"{name} is a {g.shape} here but not in the template")
+            geom.size[:] = g.size
+            geom.rbound[0] = g.rbound
+            model.geom_aabb[geom.id, 3:] = (g.half[0], g.half[0] if g.shape == "cylinder" else g.half[1], g.half[2])
             geom.friction[0] = physics.friction
             body.mass[0] = physics.mass_kg
-            body.inertia[:] = physics.mass_kg * (2 * half) ** 2 / 6  # solid cube
+            body.inertia[:] = g.inertia(physics.mass_kg)
             adr = joint.qposadr[0]
-            body.pos[:] = model.qpos0[adr : adr + 3] = pos
+            body.pos[:] = model.qpos0[adr : adr + 3] = g.resting_pos(obj, layout)
+            body.quat[:] = model.qpos0[adr + 3 : adr + 7] = g.quat
         mujoco.mj_setConst(model, data)  # rebuild constants derived from the edited mass/size
         mujoco.mj_resetData(model, data)  # start from the edited qpos0
-        twin = type(self)(model, data, {obj.label: obj for obj in objects})
+        twin = type(self)(model, data, blocks)
         twin.reset_arm(start_pose)
         twin.settle(0.3)
         return twin
@@ -201,7 +283,26 @@ class Twin:
         mujoco.mj_step(self.model, self.data, nstep=round(seconds / self.model.opt.timestep))
 
     def block_pos(self, name: str) -> np.ndarray:
+        if name not in self.blocks:  # repeated colours are suffixed (red_0, red_1); fail with the real names
+            raise KeyError(f"no block {name!r}; the twin has {list(self.blocks)}")
         return self.data.body(name).xpos.copy()
+
+    def project(self, world: np.ndarray, camera: str, size: tuple[int, int] = (480, 640)) -> np.ndarray:
+        """Pixel (u, v) of world points (N, 3) in `camera`'s render at `size` (height, width)."""
+        mujoco.mj_forward(self.model, self.data)
+        cam = self.model.camera(camera).id
+        h, w = size
+        f = (h / 2) / np.tan(np.radians(self.model.cam_fovy[cam]) / 2)
+        local = (world - self.data.cam_xpos[cam]) @ self.data.cam_xmat[cam].reshape(3, 3)  # x right, y up, looks -z
+        depth = np.where(local[:, 2] < 0, -local[:, 2], np.nan)  # behind the camera: no pixel
+        return np.stack([w / 2 + f * local[:, 0] / depth, h / 2 - f * local[:, 1] / depth], axis=1)
+
+    def hide_arm(self) -> None:
+        """Make everything but the blocks and the floor invisible, for comparing objects with an arm-free photo."""
+        blocks = {self.model.body(name).id for name in self.blocks}
+        for g in range(self.model.ngeom):
+            if self.model.geom_bodyid[g] not in blocks and self.model.geom_type[g] != mujoco.mjtGeom.mjGEOM_PLANE:
+                self.model.geom_rgba[g, 3] = 0.0
 
     def render(
         self, camera: str, size: tuple[int, int] = (480, 640), renderer: TwinRenderer | None = None

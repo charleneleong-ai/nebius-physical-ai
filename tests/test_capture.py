@@ -1,10 +1,13 @@
+import json
+from dataclasses import asdict
+
 import cv2
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
 from nebius_physical_ai.capture.markers import render_marker_sheet
-from nebius_physical_ai.capture.mat import ARUCO_DICT, MatSpec, ScenePerceiver
+from nebius_physical_ai.capture.mat import ARUCO_DICT, DetectedObject, MatSpec, ScenePerceiver, detect_colour_objects
 from nebius_physical_ai.capture.server import create_app
 
 SPEC = MatSpec()
@@ -72,3 +75,34 @@ def test_frame_endpoint_round_trip() -> None:
     assert client.get("/latest").json() == body
     assert client.post("/frame", content=b"not an image").status_code == 400
     assert "getUserMedia" in client.get("/").text
+
+
+@pytest.mark.parametrize("yaw_deg", [-60.0, 0.0, 30.0])
+def test_footprint_measures_rotated_box_and_disc(yaw_deg: float) -> None:
+    img = np.full((300 * PX, 300 * PX, 3), 235, np.uint8)
+    t = np.radians(yaw_deg)
+    u, v = np.array([np.cos(t), np.sin(t)]), np.array([-np.sin(t), np.cos(t)])
+    corners = [np.array([100.0, 150.0]) + a * 80 * u + b * 30 * v for a, b in [(-1, -1), (1, -1), (1, 1), (-1, 1)]]
+    cv2.fillPoly(img, [np.int32(np.array(corners) * PX)], BGR["blue"])
+    cv2.circle(img, (230 * PX, 150 * PX), 35 * PX, BGR["red"], -1)
+    found = {o.label: o for o in detect_colour_objects(img, px_per_mm=PX)}
+    box, disc = found["blue"], found["red"]
+    assert box.shape == "box" and (box.length_mm, box.width_mm) == pytest.approx((160, 60), abs=2)
+    assert box.yaw_deg == pytest.approx(yaw_deg, abs=1.5)
+    assert box.rgb == pytest.approx((0, 60 / 235, 220 / 235), abs=0.02)  # relative to the mat's paper (235)
+    assert disc.shape == "cylinder" and disc.length_mm == pytest.approx(70, abs=2)
+
+
+def test_two_tone_object_is_one_detection() -> None:
+    img = np.full((300 * PX, 300 * PX, 3), 235, np.uint8)
+    centre = (150 * PX, 150 * PX)
+    cv2.ellipse(img, centre, (40 * PX, 40 * PX), 0, 0, 180, (40, 40, 40), -1)  # black tin side
+    cv2.ellipse(img, centre, (40 * PX, 40 * PX), 0, 180, 360, (60, 200, 230), -1)  # yellow lid
+    (tin,) = detect_colour_objects(img, px_per_mm=PX)
+    assert tin.shape == "cylinder" and tin.label == "yellow"
+    assert (tin.x_mm, tin.y_mm, tin.length_mm) == pytest.approx((150, 150, 80), abs=2)
+
+
+def test_detected_object_survives_a_json_round_trip() -> None:
+    obj = DetectedObject("yellow", 1.0, 2.0, 3.0, rgb=(0.1, 0.2, 0.3))
+    assert DetectedObject(**json.loads(json.dumps(asdict(obj)))) == obj
