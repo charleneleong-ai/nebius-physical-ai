@@ -96,10 +96,14 @@ def test_variant_sampling() -> None:
 
 @needs_model
 class TestBatchRollout:
-    def test_lerobot_units_round_trip(self) -> None:
+    def test_lerobot_units_match_joint_calibration(self) -> None:
         twin = Twin.from_objects(BLOCKS, A3)
-        joints = np.array([-50.0, 0.0, 25.0, 90.0, -10.0, 40.0])
-        assert twin.to_lerobot(twin.from_lerobot(joints)) == pytest.approx(joints)
+        units = np.array([-50.0, 0.0, 25.0, 90.0, -10.0, 40.0])
+        fractions = np.array([0.25, 0.5, 0.625, 0.95, 0.45, 0.4])
+        limits = twin.arm_limits()
+        expected_qpos = limits[:, 0] + fractions * (limits[:, 1] - limits[:, 0])
+        assert twin.to_lerobot(expected_qpos) == pytest.approx(units)
+        assert twin.from_lerobot(units) == pytest.approx(expected_qpos)
 
     def test_twins_track_target_in_one_batch_per_chunk(self) -> None:
         twins = [Twin.from_objects(BLOCKS, A3) for _ in range(3)]
