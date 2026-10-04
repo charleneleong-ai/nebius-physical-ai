@@ -110,9 +110,19 @@ class Rehearsal:
         self.batch_size, self.max_steps, self.image_size = batch_size, max_steps, image_size
         self.record_examples = record_examples
 
-    def run(self, objects: list[DetectedObject], n: int, seed: int = 0) -> RehearsalResult:
+    def run(
+        self,
+        objects: list[DetectedObject],
+        n: int,
+        seed: int = 0,
+        perturbation: Perturbation | None = None,
+        record_examples: bool | None = None,
+    ) -> RehearsalResult:
+        """`perturbation` / `record_examples` override the instance defaults for this run only."""
         rng = np.random.default_rng(seed)
-        variants = [Variant.sample(objects, self.perturbation, rng) for _ in range(n)]
+        perturbation = perturbation or self.perturbation
+        record_examples = self.record_examples if record_examples is None else record_examples
+        variants = [Variant.sample(objects, perturbation, rng) for _ in range(n)]
         template = Twin.from_objects(objects, self.layout)  # compiled once; variants copy and edit it
         renderer = TwinRenderer(template.model, self.image_size)  # variants share its meshes
         outcomes, examples = [], {}
@@ -120,7 +130,7 @@ class Rehearsal:
             for start in range(0, n, self.batch_size):
                 batch = variants[start : start + self.batch_size]
                 twins = [template.variant(v.objects, self.layout, v.physics, v.start_pose) for v in batch]
-                record = self.record_examples and len(examples) < 2  # stop recording once both are found
+                record = record_examples and len(examples) < 2  # stop recording once both are found
                 rollout = BatchRollout(twins, self.policy, self.task, self.image_size, renderer, record)
                 for i, r in enumerate(rollout.run(self.success, self.max_steps), start=start):
                     if r.frames:
