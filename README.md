@@ -1,6 +1,6 @@
-# nebius-physical-ai
+# Preflight
 
-Entry for the [Nebius Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/) — **Physical AI track**.
+**Know whether a robot will succeed before it moves.** Entry for the [Nebius Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/) — **Physical AI track**.
 
 > Build embodied and edge agents that sense and act in the real world: robotics, IoT, and on-device
 > intelligence, powered by Nemotron, GR00T, Cosmos and Sonic models and coordinated through an agent
@@ -25,4 +25,4 @@ uv run npai info
 uv run pytest
 ```
 
-Hackathon rules digest: [`docs/hackathon-rules.md`](docs/hackathon-rules.md). Design specs live in [`docs/specs/`](docs/specs/).
+Hackathon rules digest: [`docs/hackathon-rules.md`](docs/hackathon-rules.md). Design spec: [`docs/specs/2026-09-30-preflight-design.md`](docs/specs/2026-09-30-preflight-design.md).
