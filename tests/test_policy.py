@@ -3,7 +3,15 @@ import pytest
 
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import MsgCodec, Observation
-from nebius_physical_ai.twin.rehearsal import VARIANT_COLUMNS, Perturbation, Rehearsal, RehearsalResult, Variant
+from nebius_physical_ai.tracking import Tracker
+from nebius_physical_ai.twin.rehearsal import (
+    VARIANT_COLUMNS,
+    Perturbation,
+    Rehearsal,
+    RehearsalResult,
+    SceneRun,
+    Variant,
+)
 from nebius_physical_ai.twin.rollout import BatchRollout, StackCheck
 from nebius_physical_ai.twin.scene import SO101_XML, Twin, TwinLayout
 
@@ -97,8 +105,10 @@ class TestBatchRollout:
         twins = [Twin.from_objects(BLOCKS, A3) for _ in range(3)]
         target = np.array([30.0, -20.0, 20.0, 40.0, 0.0, 50.0])
         policy = HoldPolicy(target)
-        results = BatchRollout(twins, policy, "hold", image_size=(64, 80)).run(StackCheck(), 48)
+        results = BatchRollout(twins, policy, "hold", image_size=(64, 80), record=True).run(StackCheck(), 48)
         assert [r.steps for r in results] == [48] * 3 and not any(r.success for r in results)
+        assert [len(r.frames) for r in results] == [4] * 3  # one per chunk plus the final state
+        assert results[0].frames[-1].shape == (64, 80, 3)
         assert policy.batch_sizes == [3, 3, 3]
         for twin in twins:
             assert twin.to_lerobot(twin.arm_qpos()) == pytest.approx(target, abs=3)
@@ -117,5 +127,9 @@ class TestBatchRollout:
         rehearsal = Rehearsal(policy, "t", SlipperyFails(), A3, batch_size=4, max_steps=16, image_size=(32, 40))
         result = rehearsal.run(BLOCKS, n=10, seed=3)
         assert result.n == 10 and [v["index"] for v in result.variants] == list(range(10))
+        first = {ok: next(v["index"] for v in result.variants if v["success"] == ok) for ok in (True, False)}
+        assert {k: i for k, (i, _) in result.examples.items()} == {"success": first[True], "failure": first[False]}
+        media = Tracker.media(SceneRun(4, BLOCKS, result, 1.0))
+        assert set(media) == {"video/scene_4_success", "video/scene_4_failure", "media/scene_4_start"}
         assert [v["success"] for v in result.variants] == [v["physics"]["friction"] > 0.8 for v in result.variants]
         assert policy.batch_sizes == [4, 4, 2]

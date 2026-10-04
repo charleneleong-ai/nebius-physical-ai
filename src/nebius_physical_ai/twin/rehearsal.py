@@ -8,8 +8,13 @@ from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import Policy
 from nebius_physical_ai.twin.expert import start_pose
 from nebius_physical_ai.twin.rollout import BatchRollout, StackCheck
-from nebius_physical_ai.twin.scene import BlockPhysics, Twin, TwinLayout
+from nebius_physical_ai.twin.scene import BlockPhysics, Twin, TwinLayout, TwinRenderer
 
+# Successes after ~10.7 s of robot time are rare slow recoveries (3.5% in the first sweep); capping there cuts a
+# batch's wall time by a third because every batch waits for its slowest twin.
+REHEARSAL_MAX_STEPS = 320
+# GR00T resizes on the server's (contended) CPU anyway; half-res renders change actions by ~0.2 LeRobot units.
+REHEARSAL_IMAGE_SIZE = (240, 320)
 VARIANT_COLUMNS = ["scene_id", "index", "success", "steps", "friction", "mass_kg", "pick_dx_mm", "pick_dy_mm"]
 
 
@@ -51,6 +56,8 @@ class RehearsalResult:
     n: int
     steps: list[int]
     variants: list[dict[str, Any]] = field(repr=False)
+    # First successful and first failed variant: (variant index, top-camera frames)
+    examples: dict[str, tuple[int, list[np.ndarray]]] = field(default_factory=dict, repr=False)
 
     @property
     def p(self) -> float:
@@ -94,28 +101,33 @@ class Rehearsal:
         layout: TwinLayout,
         perturbation: Perturbation | None = None,
         batch_size: int = 16,
-        max_steps: int = 480,
-        image_size: tuple[int, int] = (480, 640),
+        max_steps: int = REHEARSAL_MAX_STEPS,
+        image_size: tuple[int, int] = REHEARSAL_IMAGE_SIZE,
+        record_examples: bool = True,
     ) -> None:
         self.policy, self.task, self.success, self.layout = policy, task, success, layout
         self.perturbation = perturbation or Perturbation()
         self.batch_size, self.max_steps, self.image_size = batch_size, max_steps, image_size
-
-    def build(self, variant: Variant) -> Twin:
-        return Twin.from_objects(variant.objects, self.layout, variant.physics, variant.start_pose)
+        self.record_examples = record_examples
 
     def run(self, objects: list[DetectedObject], n: int, seed: int = 0) -> RehearsalResult:
         rng = np.random.default_rng(seed)
         variants = [Variant.sample(objects, self.perturbation, rng) for _ in range(n)]
-        outcomes = []
-        for start in range(0, n, self.batch_size):
-            twins = [self.build(v) for v in variants[start : start + self.batch_size]]
-            try:
-                rollout = BatchRollout(twins, self.policy, self.task, self.image_size)
-                outcomes += rollout.run(self.success, self.max_steps)
-            finally:
-                for twin in twins:
-                    twin.close()
+        template = Twin.from_objects(objects, self.layout)  # compiled once; variants copy and edit it
+        renderer = TwinRenderer(template.model, self.image_size)  # variants share its meshes
+        outcomes, examples = [], {}
+        try:
+            for start in range(0, n, self.batch_size):
+                batch = variants[start : start + self.batch_size]
+                twins = [template.variant(v.objects, self.layout, v.physics, v.start_pose) for v in batch]
+                record = self.record_examples and len(examples) < 2  # stop recording once both are found
+                rollout = BatchRollout(twins, self.policy, self.task, self.image_size, renderer, record)
+                for i, r in enumerate(rollout.run(self.success, self.max_steps), start=start):
+                    if r.frames:
+                        examples.setdefault("success" if r.success else "failure", (i, r.frames))
+                    outcomes.append(replace(r, frames=[]))  # keep only the two examples in memory
+        finally:
+            renderer.close()
         records = [
             {
                 "index": i,
@@ -127,7 +139,7 @@ class Rehearsal:
             }
             for i, (v, r) in enumerate(zip(variants, outcomes))
         ]
-        return RehearsalResult(sum(r.success for r in outcomes), n, [r.steps for r in outcomes], records)
+        return RehearsalResult(sum(r.success for r in outcomes), n, [r.steps for r in outcomes], records, examples)
 
 
 @dataclass
