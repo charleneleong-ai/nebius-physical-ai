@@ -19,6 +19,7 @@ from nebius_physical_ai.benchmark import (
     mcnemar,
     verdict,
 )
+from nebius_physical_ai.capture.camera import CameraPose
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import Observation
 from nebius_physical_ai.twin import roles
@@ -372,3 +373,13 @@ class TestScript:
         result = CliRunner().invoke(script.app, ["run", "x", "--group", "legacy", "--only", "clean*", "--dry-run"])
         out = " ".join(result.output.split())
         assert result.exit_code == 0 and "clean_top_down" in out and "azimuth_90" not in out
+
+
+def test_the_front_oblique_camera_config_is_the_clean_many_benchmark_view() -> None:
+    """configs/front_oblique_camera.json centres training's pose share on the view clean_many scores."""
+    layout = TwinLayout()
+    spec = layout.camera_spec(CameraPose.load(Path(__file__).parent.parent / "configs/front_oblique_camera.json"))
+    expected = benchmark.oblique_camera(layout, benchmark.OBLIQUE_ELEVATION_DEG, 0.0)
+    np.testing.assert_allclose(spec["pos"], expected["pos"], atol=1e-9)
+    np.testing.assert_allclose(spec["xyaxes"], expected["xyaxes"], atol=1e-9)
+    assert spec["fovy"] == pytest.approx(expected["fovy"])
