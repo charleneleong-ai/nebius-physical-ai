@@ -1,0 +1,53 @@
+[
+  {
+    "label": "pomade_tin",
+    "x_mm": 290.2,
+    "y_mm": 162.0,
+    "area_mm2": 4651.1,
+    "confidence": 1.0,
+    "length_mm": 68.1,
+    "width_mm": 65.4,
+    "yaw_deg": -28.8,
+    "height_mm": 35.1,
+    "shape": "cylinder",
+    "rgb": [
+      1.0,
+      1.0,
+      0.694
+    ]
+  },
+  {
+    "label": "glasses_case",
+    "x_mm": 73.6,
+    "y_mm": 147.2,
+    "area_mm2": 10356.2,
+    "confidence": 1.0,
+    "length_mm": 139.5,
+    "width_mm": 58.2,
+    "yaw_deg": -36.9,
+    "height_mm": 25.8,
+    "shape": "box",
+    "rgb": [
+      0.904,
+      0.874,
+      0.344
+    ]
+  },
+  {
+    "label": "ball_cluster",
+    "x_mm": 191.7,
+    "y_mm": 86.3,
+    "area_mm2": 4101.6,
+    "confidence": 1.0,
+    "length_mm": 69.3,
+    "width_mm": 61.9,
+    "yaw_deg": 79.2,
+    "height_mm": 60.5,
+    "shape": "cylinder",
+    "rgb": [
+      0.571,
+      0.319,
+      0.355
+    ]
+  }
+]

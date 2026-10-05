@@ -30,7 +30,8 @@ BLOCK_SIDE_MM = (20.0, 60.0)
 # The floor stands in for the mat's paper; perceived colours are paper-relative, so blocks are painted relative to it.
 FLOOR_RGBA = (0.6, 0.6, 0.6, 1.0)
 # Robonine SO-ARM101 follower: white printed parts, black STS3215 servos (the menagerie model ships yellow).
-ARM_PRINT_RGBA, SERVO_RGBA = (0.93, 0.93, 0.91, 1.0), (0.08, 0.08, 0.08, 1.0)
+ARM_PRINT_RGBA = (0.93, 0.93, 0.91, 1.0)
+SERVO_RGBA = (0.08, 0.08, 0.08, 1.0)
 RENDER_ASPECT = 4 / 3  # GR00T's SO-101 checkpoint sees 640x480
 ARM_JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")
 A3_MAT = MatSpec(width_mm=350.0, height_mm=227.0)  # the printed A3 sheet; MatSpec defaults to the A4 cut-outs
@@ -56,17 +57,37 @@ class TwinLayout:
         """Mat-frame direction (x right, y down the mat, z up) to world (x forward, y left, z up)."""
         return np.array([-v[1], -v[0], v[2]])
 
-    def front_camera_spec(self) -> dict[str, list[float] | float]:
-        """`add_camera` kwargs. A calibrated camera is cropped to RENDER_ASPECT, so feed the policy real frames
-        through `CameraPose.crop_frame(frame, RENDER_ASPECT)` for the views to match."""
-        cam = self.front_camera and self.front_camera.cropped_to(RENDER_ASPECT)
-        if cam is None:
-            top_x, _ = self.mat_to_world(self.mat.width_mm / 2, self.mat.height_mm / 2)
-            return {"pos": [top_x, 0.0, 0.6], "xyaxes": [0, -1, 0, 1, 0, 0], "fovy": 45.0}
+    def top_down_camera_spec(self) -> dict[str, list[float] | float]:
+        """Straight down from 60 cm over the mat's centre: the view the v1 and v2 checkpoints were trained on."""
+        top_x, _ = self.mat_to_world(self.mat.width_mm / 2, self.mat.height_mm / 2)
+        return {"pos": [top_x, 0.0, 0.6], "xyaxes": [0, -1, 0, 1, 0, 0], "fovy": 45.0}
+
+    def camera_spec(self, pose: CameraPose) -> dict[str, list[float] | float]:
+        """`add_camera` kwargs for a camera pose measured on the mat, cropped to RENDER_ASPECT: feed the policy real
+        frames through `CameraPose.crop_frame(frame, RENDER_ASPECT)` for the views to match."""
+        cam = pose.cropped_to(RENDER_ASPECT)
         x, y = self.mat_to_world(cam.position_mm[0], cam.position_mm[1])
         forward, up = self.direction_to_world(cam.forward), self.direction_to_world(cam.up)
         right = np.cross(forward, up)  # MuJoCo cameras look down -z with y up, so x = y × z = forward × up
         return {"pos": [x, y, cam.position_mm[2] / 1000], "xyaxes": [*right, *up], "fovy": cam.vfov_deg}
+
+    def front_camera_spec(self) -> dict[str, list[float] | float]:
+        """The layout's own camera: the calibrated one when there is one, else straight down."""
+        return self.top_down_camera_spec() if self.front_camera is None else self.camera_spec(self.front_camera)
+
+
+@dataclass(frozen=True)
+class SceneLook:
+    """What one episode looks like: top camera, key light, ambient and mat brightness. Defaults are the standard scene.
+
+    `camera` holds `add_camera` kwargs in the world frame (None = the layout's camera).
+    """
+
+    camera: dict[str, list[float] | float] | None = None
+    light_dir: tuple[float, float, float] = (0.0, 0.0, -1.0)
+    light_diffuse: float = 0.7
+    ambient: float = 0.1
+    floor_grey: float = FLOOR_RGBA[0]
 
 
 @dataclass(frozen=True)
@@ -169,19 +190,26 @@ class Twin:
         physics: BlockPhysics | None = None,
         start_pose: np.ndarray | None = None,
         so101_xml: Path = SO101_XML,
+        look: SceneLook | None = None,
     ) -> "Twin":
         """Blocks are named by label (suffixed when a colour repeats), so task checks don't depend on order."""
-        layout = layout or TwinLayout()
+        layout, look = layout or TwinLayout(), look or SceneLook()
         spec = mujoco.MjSpec.from_file(str(so101_xml))
         for material in spec.materials:
             material.rgba = SERVO_RGBA if material.name.startswith("sts3215") else ARM_PRINT_RGBA
         world = spec.worldbody
-        world.add_light(pos=[0.2, 0, 1.5], dir=[0, 0, -1], type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL)
-        world.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[0, 0, 0.05], rgba=FLOOR_RGBA)
+        spec.visual.headlight.ambient = [look.ambient] * 3
+        world.add_light(
+            pos=[0.2, 0, 1.5],
+            dir=list(look.light_dir),
+            diffuse=[look.light_diffuse] * 3,
+            type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
+        )
+        world.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[0, 0, 0.05], rgba=[*[look.floor_grey] * 3, 1.0])
         blocks = dict(zip(cls.block_names(objects), objects))
         for name, obj in blocks.items():
             cls.add_block(world, name, obj, layout, physics or BlockPhysics())
-        world.add_camera(name="front_cam", **layout.front_camera_spec())  # the checkpoint's "front" = top camera
+        world.add_camera(name="front_cam", **(look.camera or layout.front_camera_spec()))  # checkpoint's "front"
         model = spec.compile()
         twin = cls(model, mujoco.MjData(model), blocks)
         mujoco.mj_forward(model, twin.data)  # poses (block_pos, cameras) are valid before the first step

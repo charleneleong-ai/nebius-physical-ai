@@ -15,6 +15,10 @@ PICK_HOVER_Z, PLACE_HOVER_Z = 0.06, 0.075
 REST_POSE = np.array([0.0, -0.5, 0.5, 1.0, 0.0])  # arm folded above the base
 
 
+class UnreachableTarget(ValueError):
+    """The top-down IK can't reach a waypoint within tolerance."""
+
+
 def start_pose(rng: np.random.Generator, sigma_rad: float = 0.05) -> np.ndarray:
     """Rest pose with joint noise and the gripper open: where demos and rehearsals begin."""
     return np.append(REST_POSE + rng.normal(0, sigma_rad, 5), GRIP_OPEN)
@@ -93,7 +97,7 @@ class PickPlaceExpert:
         for name, target in targets.items():
             q, err = self.ik.solve(target, q)
             if err > 0.005:
-                raise ValueError(f"{name} unreachable ({err * 1000:.1f} mm)")
+                raise UnreachableTarget(f"{name} unreachable ({err * 1000:.1f} mm)")
             joints[name] = q
         return [
             (joints["pick_hover"], GRIP_OPEN, 1.5),

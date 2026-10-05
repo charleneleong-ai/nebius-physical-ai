@@ -11,10 +11,37 @@ from typing import Annotated
 import cv2
 import numpy as np
 import torch
-from moge.model.v3 import MoGeModel
 import typer
+from moge.model.v3 import MoGeModel
 
 app = typer.Typer()
+
+
+class MoGePointMapGenerator:
+    """Generate metric point maps for evenly sampled video frames."""
+
+    def __init__(self, model: str) -> None:
+        self.model = MoGeModel.from_pretrained(model).cuda().eval()
+
+    def generate(self, video: Path, out: Path, hfov: float, frames: int) -> None:
+        capture = cv2.VideoCapture(str(video))
+        try:
+            indices = np.linspace(0, int(capture.get(cv2.CAP_PROP_FRAME_COUNT)) - 1, frames).astype(int)
+            points, valid = [], []
+            for index in indices:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, int(index))
+                ok, frame = capture.read()
+                if not ok:
+                    raise typer.BadParameter(f"can't read frame {index} of {video}")
+                rgb = torch.tensor(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) / 255, dtype=torch.float32, device="cuda")
+                with torch.no_grad():
+                    prediction = self.model.infer(rgb.permute(2, 0, 1), fov_x=hfov)
+                points.append((prediction["points"].cpu().numpy() * 1000).astype(np.float16))
+                valid.append(prediction["mask"].cpu().numpy() > 0.5)
+        finally:
+            capture.release()
+        np.savez_compressed(out, indices=indices, points=np.stack(points), valid=np.stack(valid), hfov=hfov)
+        typer.echo(f"wrote {len(indices)} point maps to {out}")
 
 
 @app.command()
@@ -25,22 +52,8 @@ def main(
     frames: Annotated[int, typer.Option(min=1, show_default=True)] = 26,
     model: Annotated[str, typer.Option(show_default=True)] = "Ruicheng/moge-3-vitl",
 ) -> None:
-    net = MoGeModel.from_pretrained(model).cuda().eval()
-    cap = cv2.VideoCapture(str(video))
-    indices = np.linspace(0, int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) - 1, frames).astype(int)
-    points, valid = [], []
-    for i in indices:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(i))
-        ok, frame = cap.read()
-        if not ok:
-            raise typer.BadParameter(f"can't read frame {i} of {video}")
-        rgb = torch.tensor(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) / 255, dtype=torch.float32, device="cuda")
-        with torch.no_grad():
-            pred = net.infer(rgb.permute(2, 0, 1), fov_x=hfov)
-        points.append((pred["points"].cpu().numpy() * 1000).astype(np.float16))  # camera frame, mm
-        valid.append(pred["mask"].cpu().numpy() > 0.5)
-    np.savez_compressed(out, indices=indices, points=np.stack(points), valid=np.stack(valid), hfov=hfov)
-    typer.echo(f"wrote {len(indices)} point maps to {out}")
+    """Create point maps for a video clip."""
+    MoGePointMapGenerator(model).generate(video, out, hfov, frames)
 
 
 if __name__ == "__main__":
