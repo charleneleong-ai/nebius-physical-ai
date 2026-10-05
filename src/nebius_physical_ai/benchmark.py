@@ -41,10 +41,15 @@ MAX_TRIES_PER_CASE = 20
 CLEAN_BLUE = DetectedObject("blue", 131.0, 151.0, 900.0)
 CLEAN_RED = DetectedObject("red", 221.0, 151.0, 1600.0)
 # Sizes the training randomiser never draws: taller blocks to carry, wider and taller place targets.
+# Real place targets are the `place_on_*` suites' business, so here both roles are synthetic.
 HELD_OUT_RANGES = Randomization(
-    pick_height_mm=(41.0, 50.0), place_height_mm=(34.0, 42.0), place_width_mm=(62.0, 76.0), wide_distractors=(0, 2)
+    pick_height_mm=(41.0, 50.0),
+    place_height_mm=(34.0, 42.0),
+    place_width_mm=(62.0, 76.0),
+    wide_distractors=(0, 2),
+    real_place_share=0.0,
 )
-SEEN_RANGES = Randomization(wide_distractors=(0, 2))
+SEEN_RANGES = Randomization(wide_distractors=(0, 2), real_place_share=0.0)
 
 
 @dataclass(frozen=True)

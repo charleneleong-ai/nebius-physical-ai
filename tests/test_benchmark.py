@@ -133,12 +133,14 @@ def test_a_fixed_camera_layout_overrides_only_the_camera() -> None:
     assert FixedCameraLayout().front_camera_spec() == LAYOUT.front_camera_spec()
 
 
+@pytest.fixture(scope="module")
+def suites() -> dict[str, benchmark.Suite]:
+    """The held-out suites, built once: the expert has to solve every candidate scene, which takes minutes."""
+    return by_name(build_suites(REAL, LAYOUT, group="held_out"))
+
+
 @needs_model
 class TestHeldOutSuites:
-    @pytest.fixture(scope="class")
-    def suites(self) -> dict[str, benchmark.Suite]:
-        return by_name(build_suites(REAL, LAYOUT, group="held_out"))
-
     def test_the_expected_suites_exist_and_are_headline_sized(self, suites: dict[str, benchmark.Suite]) -> None:
         assert {"held_out_objects", "seen_vocabulary", "place_on_pomade_tin"} <= set(suites)
         for name in ("held_out_objects", "seen_vocabulary"):
