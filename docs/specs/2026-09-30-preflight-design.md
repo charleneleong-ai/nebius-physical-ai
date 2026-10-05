@@ -7,6 +7,9 @@
 
 Deadline **Fri 30 Oct 2026, 17:00 UTC**. Rules: [`../hackathon-rules.md`](../hackathon-rules.md).
 
+> **Update 2026-10-05:** this is the original plan. Perception now uses Cosmos 3 Nano (not Cosmos Reason 2), hosted on
+> the A100, with Token Factory Qwen as the fallback; see [`../perception.md`](../perception.md).
+
 ## Problem & audience
 
 Robot policies such as GR00T fail silently and at real cost: a dropped part, a collision, a stalled

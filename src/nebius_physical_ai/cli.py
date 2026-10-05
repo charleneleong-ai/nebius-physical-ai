@@ -12,22 +12,25 @@ import uvicorn
 from rich import print
 from rich.progress import track
 
-from nebius_physical_ai.capture.camera import CameraPose, MarkerCalibrator
+from nebius_physical_ai.capture.camera import DEFAULT_CAMERA_MIX, CameraPose, MarkerCalibrator, parse_camera_mix
 from nebius_physical_ai.capture.lift import HeightLifter, MatView
 from nebius_physical_ai.capture.markers import DPI, render_marker_sheet
 from nebius_physical_ai.capture.mat import ARUCO_DICT, DetectedObject, MatSpec, ScenePerceiver
 from nebius_physical_ai.capture.server import create_app
+from nebius_physical_ai.pipeline import add_pipeline_cli
 from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, Gr00tClient
 from nebius_physical_ai.tracking import Tracker
 from nebius_physical_ai.trust.plots import StressPlots
 from nebius_physical_ai.trust.stress import StressCase, StressReport
 from nebius_physical_ai.twin.dataset import LeRobotWriter
-from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler
+from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler, UnreachableTarget
+from nebius_physical_ai.twin.randomize import SceneRandomizer
 from nebius_physical_ai.twin.rehearsal import Rehearsal, SceneRun
 from nebius_physical_ai.twin.rollout import STACK_TASK, BatchRollout, RolloutResult, StackCheck
 from nebius_physical_ai.twin.scene import A3_MAT, RENDER_ASPECT, Twin, TwinLayout
 
 app = typer.Typer(no_args_is_help=True)
+MAX_ATTEMPTS_PER_EPISODE = 10  # demos give up instead of looping forever on ranges the expert can't solve
 
 WidthOpt = Annotated[float, typer.Option(help="Mat width between marker centres (mm)")]
 HeightOpt = Annotated[float, typer.Option(help="Mat height between marker centres (mm)")]
@@ -72,23 +75,61 @@ def serve(
     )
 
 
+def build_randomizer(
+    sampler: SceneSampler, seed: int, real_objects: Path | None, camera: Path | None, camera_mix: str
+) -> SceneRandomizer:
+    """The demo randomiser: real objects as distractors, and cameras centred on a calibrated pose when one is given."""
+    real = [DetectedObject(**o) for o in json.loads(real_objects.read_text())] if real_objects else None
+    try:
+        mix = parse_camera_mix(camera_mix)
+    except ValueError as err:
+        raise typer.BadParameter(str(err)) from err
+    pose = CameraPose.load(camera) if camera else None
+    return SceneRandomizer(sampler.layout, seed=seed, real_objects=real, camera_pose=pose, camera_mix=mix)
+
+
 @app.command()
 def demos(
     out: Path,
     episodes: int = 100,
     seed: int = 0,
     task: str = STACK_TASK,
+    randomize: Annotated[
+        bool, typer.Option(help="Random cameras, lights, shapes, sizes, colours and distractors per episode")
+    ] = False,
+    real_objects: Annotated[
+        Path | None, typer.Option(help="Objects JSON (npai lift) placed as distractors when randomizing")
+    ] = None,
+    camera: Annotated[
+        Path | None,
+        typer.Option(help="Calibrated camera (npai calibrate-camera) that randomized episodes are centred on"),
+    ] = None,
+    camera_mix: Annotated[
+        str,
+        typer.Option(help="With --camera, shares of pose-centred, wide-arc and straight-down cameras (sum 1)"),
+    ] = ",".join(str(share) for share in DEFAULT_CAMERA_MIX),
     width_mm: WidthOpt = A3_MAT.width_mm,
     height_mm: HeightOpt = A3_MAT.height_mm,
 ) -> None:
     """Record scripted pick-and-place demos in the twin as a LeRobot v2.1 dataset (successes only)."""
+    if camera and not randomize:
+        raise typer.BadParameter("--camera needs --randomize: only randomized episodes vary their camera")
     sampler = SceneSampler(TwinLayout(MatSpec(width_mm, height_mm)), seed=seed)
+    randomizer = build_randomizer(sampler, seed, real_objects, camera, camera_mix) if randomize else None
     writer, attempts = LeRobotWriter(out), 0
     for _ in track(range(episodes), description="recording demos"):
         while True:
             attempts += 1
-            with Twin.from_objects(sampler.sample(), sampler.layout, start_pose=sampler.start_pose()) as twin:
-                frames = list(PickPlaceExpert(twin, task).run())
+            if attempts > MAX_ATTEMPTS_PER_EPISODE * episodes:
+                raise RuntimeError(f"expert solved only {len(writer.episodes)} of {attempts} scenes; check the ranges")
+            objects = randomizer.objects(sampler) if randomizer else sampler.sample()
+            look = randomizer.look() if randomizer else None
+            start = sampler.start_pose()
+            with Twin.from_objects(objects, sampler.layout, start_pose=start, look=look) as twin:
+                try:
+                    frames = list(PickPlaceExpert(twin, task).run())
+                except UnreachableTarget:  # draw another scene
+                    continue
                 twin.settle(0.5)
                 stacked = StackCheck()(twin)
             if stacked:
@@ -96,6 +137,8 @@ def demos(
                 break
     writer.finalize()
     print(f"wrote {episodes} episodes ({writer.total_frames} frames) to {out}; expert success {episodes}/{attempts}")
+    if randomizer and randomizer.camera_pose:
+        print(f"cameras (pose, arc, top_down) over every attempt: {dict(randomizer.camera_counts)}")
 
 
 @app.command()
@@ -108,6 +151,8 @@ def rehearse(
     seed: int = 0,
     port: int = DEFAULT_PORT,
     task: str = STACK_TASK,
+    pick: Annotated[str, typer.Option(help="Label of the object to pick, as in --objects")] = "blue",
+    place: Annotated[str, typer.Option(help="Label of the object to place it on")] = "red",
     width_mm: WidthOpt = A3_MAT.width_mm,
     height_mm: HeightOpt = A3_MAT.height_mm,
     out: Path | None = None,
@@ -118,7 +163,8 @@ def rehearse(
     scene = [DetectedObject(**o) for o in json.loads(objects)] if objects else SceneSampler(layout, seed).sample()
     config = {"n": n, "batch_size": batch_size, "seed": seed, "task": task}
     with Tracker("rehearsal", config=config, enabled=wandb_log) as tracker, Gr00tClient(port=port) as client:
-        run = SceneRun.rehearse(Rehearsal(client, task, StackCheck(), layout, batch_size=batch_size), 0, scene, n, seed)
+        rehearsal = Rehearsal(client, task, StackCheck(pick, place), layout, batch_size=batch_size)
+        run = SceneRun.rehearse(rehearsal, 0, scene, n, seed)
         tracker.log_scene(run)
     print({k: v for k, v in run.record().items() if k not in ("scene", "variants")})
     if out:
@@ -249,6 +295,10 @@ def evaluate(
             {"episodes": (["scene", "success", "steps"], rows)},
         )
     print(f"{name}: {successes}/{scenes} successes")
+
+
+# Preflight pipeline CLI
+add_pipeline_cli(app)
 
 
 def marker_alignment(twin: Twin, layout: TwinLayout, image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

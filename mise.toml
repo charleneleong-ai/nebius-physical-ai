@@ -7,7 +7,8 @@
 #   mise run serve       # (re)launch capture server + cloudflared tunnel on the A100, detached
 #   mise run status      # A100 procs, tunnel URL, GPU
 #   mise run sweep       # 20-scene rehearsal sweep on the A100, logged to W&B
-#   mise run finetune v2 # record demos + fine-tune GR00T on the A100, logged to W&B
+#   mise run finetune v4 # record 800 demos around the real camera + fine-tune GR00T on the A100, logged to W&B
+#   mise run cosmos-up | cosmos-health | cosmos-logs | cosmos-down   # Cosmos 3 on the A100, localhost only
 
 [tools]
 python = "3.13.15"
@@ -69,9 +70,33 @@ run = """
 ssh "$HOST" 'cd ~/'"$A100_DIR"' && scripts/detach.sh sweep env MUJOCO_GL=egl ~/.local/bin/uv run npai sweep logs/sweep_$(date -u +%Y%m%dT%H%M%SZ).json'
 """
 
+[tasks.cosmos-up]
+description = "Start Cosmos 3 Reasoner (vLLM) on the A100, localhost only; first start downloads ~54 GB"
+run = """
+ssh "$HOST" 'cd ~/'"$A100_DIR"' && scripts/cosmos_local.sh up'
+"""
+
+[tasks.cosmos-health]
+description = "Is Cosmos answering on the A100? (container state and served model)"
+run = """
+ssh "$HOST" 'cd ~/'"$A100_DIR"' && scripts/cosmos_local.sh status'
+"""
+
+[tasks.cosmos-logs]
+description = "Last lines of the Cosmos container log on the A100"
+run = """
+ssh "$HOST" 'cd ~/'"$A100_DIR"' && scripts/cosmos_local.sh logs'
+"""
+
+[tasks.cosmos-down]
+description = "Remove the Cosmos container on the A100 (frees its GPU memory; weights stay cached)"
+run = """
+ssh "$HOST" 'cd ~/'"$A100_DIR"' && scripts/cosmos_local.sh down'
+"""
+
 [tasks.finetune]
 description = "Record sim demos and fine-tune GR00T on the A100, logged to W&B, detached (PPID=1)"
-usage = 'arg "<name>" help="run name, e.g. v2"'
+usage = 'arg "<name>" help="run name, e.g. v4"'
 run = """
-ssh "$HOST" 'cd ~/'"$A100_DIR"' && PATH=$HOME/.local/bin:$PATH scripts/detach.sh finetune_'"${usage_name?}"' scripts/finetune.sh '"${usage_name?}"''
+ssh "$HOST" 'cd ~/'"$A100_DIR"' && PATH=$HOME/.local/bin:$PATH scripts/detach.sh finetune_'"${usage_name?}"' uv run python scripts/finetune.py run '"${usage_name?}"''
 """

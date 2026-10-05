@@ -9,6 +9,22 @@ from nebius_physical_ai.capture.mat import ARUCO_DICT, MatSpec
 
 IPHONE_MAIN_HFOV_DEG = 69.0  # 26 mm-equivalent wide camera in 16:9 video, after stabilisation crop
 
+# Where a demo episode's camera comes from: jittered around the calibrated pose, a wide arc over the mat (as a
+# regulariser), or straight down (the view v1 and v2 were trained on). DEFAULT_CAMERA_MIX is the share of each.
+CAMERA_SOURCES = ("pose", "arc", "top_down")
+DEFAULT_CAMERA_MIX = (0.6, 0.3, 0.1)
+
+
+def parse_camera_mix(text: str) -> tuple[float, float, float]:
+    """`0.6,0.3,0.1` as shares of (pose, arc, top_down); ValueError unless three non-negative numbers sum to 1."""
+    try:
+        shares = tuple(float(part) for part in text.split(","))
+    except ValueError:
+        shares = ()
+    if len(shares) != len(CAMERA_SOURCES) or min(shares, default=-1) < 0 or abs(sum(shares) - 1.0) > 1e-6:
+        raise ValueError(f"camera mix must be three non-negative shares summing to 1 (pose,arc,top_down), got {text!r}")
+    return shares  # type: ignore[return-value]
+
 
 @dataclass(frozen=True)
 class CameraPose:

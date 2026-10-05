@@ -7,7 +7,8 @@ import pytest
 
 from nebius_physical_ai.capture.camera import CameraPose
 from nebius_physical_ai.capture.mat import DetectedObject
-from nebius_physical_ai.twin.expert import start_pose
+from nebius_physical_ai.twin.expert import SceneSampler, start_pose
+from nebius_physical_ai.twin.randomize import SceneRandomizer
 from nebius_physical_ai.twin.rollout import StackCheck
 from nebius_physical_ai.twin.scene import SO101_XML, BlockPhysics, Twin, TwinLayout, TwinRenderer
 
@@ -155,3 +156,15 @@ def test_front_camera_keeps_the_photos_orientation() -> None:
     assert (u0, v0) == pytest.approx((320, 240), abs=1.0)
     assert u_right > u0 + 20 and abs(v_right - v0) < 5
     assert v_up < v0 - 20 and abs(u_up - u0) < 5
+
+
+@pytest.mark.skipif(os.environ.get("MUJOCO_GL") != "egl", reason="needs headless GL")
+def test_randomized_scene_compiles_and_shows_the_task_blocks() -> None:
+    sampler, randomizer = SceneSampler(A3, seed=4), SceneRandomizer(A3, seed=4)
+    look = randomizer.look()
+    with Twin.from_objects(randomizer.objects(sampler), A3, start_pose=sampler.start_pose(), look=look) as twin:
+        assert twin.model.cam("front_cam").pos == pytest.approx(look.camera["pos"])
+        image = twin.render("front_cam", (240, 320))
+        assert image.std() > 10  # a real scene, not a blank frame
+        twin.settle(0.5)
+        assert all(twin.block_pos(name)[2] > 0 for name in twin.blocks)  # nothing knocked through the floor
