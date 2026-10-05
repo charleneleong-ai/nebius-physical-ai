@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from functools import cached_property, partial
 from typing import Any
 
@@ -92,6 +92,34 @@ class SceneObservation:
 ObjectDetector = Callable[[np.ndarray], list[DetectedObject]]
 
 
+class MarkersNotFound(ValueError):
+    """Fewer than MIN_MARKERS corner markers were visible, so the mat can't be located in the frame."""
+
+    def __init__(self, found: list[int]) -> None:
+        super().__init__(f"need {MIN_MARKERS} corner markers, saw {len(found)}")
+        self.found = found
+
+
+@dataclass(frozen=True)
+class MatLocation:
+    """Where the mat sits in a frame, from its corner markers.
+
+    `homography` maps frame pixels to mat pixels (`px_per_mm` per millimetre), the warp behind the top-down view.
+    `residual_mm` is the RMS distance between the markers' printed corners and where that homography puts the
+    detected ones: large means a bent sheet, a wrong MatSpec or a bad detection.
+    """
+
+    markers_found: list[int]
+    homography: np.ndarray
+    px_per_mm: float
+    residual_mm: float
+
+    def to_mat_mm(self, points_px: np.ndarray | list[tuple[float, float]]) -> np.ndarray:
+        """Frame pixels (N, 2) on the mat plane to mat millimetres (N, 2)."""
+        pts = np.asarray(points_px, np.float32).reshape(-1, 1, 2)
+        return cv2.perspectiveTransform(pts, self.homography).reshape(-1, 2) / self.px_per_mm
+
+
 def detect_colour_objects(
     top_down_bgr: np.ndarray,
     px_per_mm: float,
@@ -173,14 +201,31 @@ class ScenePerceiver:
         )
         self._aruco = cv2.aruco.ArucoDetector(ARUCO_DICT, cv2.aruco.DetectorParameters())
 
-    def observe(self, frame_bgr: np.ndarray) -> SceneObservation:
+    def locate(self, frame_bgr: np.ndarray) -> MatLocation:
+        """The mat's pixel -> millimetre homography and how well the marker corners fit it.
+
+        Raises MarkersNotFound when fewer than MIN_MARKERS corner markers are visible.
+        """
         corners, ids, _ = self._aruco.detectMarkers(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY))
         found = sorted(int(i) for i in ids.flatten() if int(i) in CORNER_NAMES) if ids is not None else []
         if len(found) < MIN_MARKERS:
-            return SceneObservation(found, error=f"need {MIN_MARKERS} corner markers, saw {len(found)}")
+            raise MarkersNotFound(found)
         obj_points, img_points = self.spec.board.matchImagePoints(corners, ids)
-        homography, _ = cv2.findHomography(
-            img_points.reshape(-1, 2), obj_points.reshape(-1, 3)[:, :2] * self.spec.px_per_mm
-        )
-        top_down = cv2.warpPerspective(frame_bgr, homography, self.spec.canvas_size_px())
-        return SceneObservation(found, self.detector(top_down))
+        printed_mm = obj_points.reshape(-1, 3)[:, :2]
+        homography, _ = cv2.findHomography(img_points.reshape(-1, 2), printed_mm * self.spec.px_per_mm)
+        location = MatLocation(found, homography, self.spec.px_per_mm, 0.0)
+        fitted_mm = location.to_mat_mm(img_points.reshape(-1, 2))
+        residual = float(np.sqrt(np.mean(np.sum((fitted_mm - printed_mm) ** 2, axis=1))))
+        return replace(location, residual_mm=residual)
+
+    def perceive(self, frame_bgr: np.ndarray) -> tuple[SceneObservation, MatLocation | None]:
+        """`observe`, plus the marker location it was built on (None when the mat couldn't be located)."""
+        try:
+            location = self.locate(frame_bgr)
+        except MarkersNotFound as err:
+            return SceneObservation(err.found, error=str(err)), None
+        top_down = cv2.warpPerspective(frame_bgr, location.homography, self.spec.canvas_size_px())
+        return SceneObservation(location.markers_found, self.detector(top_down)), location
+
+    def observe(self, frame_bgr: np.ndarray) -> SceneObservation:
+        return self.perceive(frame_bgr)[0]
