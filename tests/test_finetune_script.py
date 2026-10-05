@@ -65,7 +65,8 @@ def flag(argv: tuple[str, ...], name: str) -> str:
 class TestRecipe:
     def test_the_default_is_the_v4_recipe(self, script: ModuleType) -> None:
         r = script.Recipe("v4")
-        assert (r.episodes, r.max_steps, r.camera_mix) == (800, 8000, (0.6, 0.3, 0.1))
+        assert (r.episodes, r.max_steps, r.camera_mix) == (800, 4000, (0.3, 0.6, 0.1))
+        assert r.role_agnostic and r.seed == 42
         assert r.base == script.LATEST and (r.save_steps, r.save_total_limit) == (2000, 2)
         assert r.data_dir.name == "preflight_demos_v4" and r.out_dir.name == "gr00t-preflight-v4"
 
@@ -74,10 +75,16 @@ class TestRecipe:
     ) -> None:
         step = recipe(script, home).record_step()
         assert step.argv[:4] == ("uv", "run", "npai", "demos") and step.argv[4] == str(home.data / "preflight_demos_v4")
-        assert flag(step.argv, "--episodes") == "800" and flag(step.argv, "--seed") == "1"
-        assert flag(step.argv, "--camera") == str(home.camera) and flag(step.argv, "--camera-mix") == "0.6,0.3,0.1"
+        assert flag(step.argv, "--episodes") == "800" and flag(step.argv, "--seed") == "42"
+        assert flag(step.argv, "--camera") == str(home.camera) and flag(step.argv, "--camera-mix") == "0.3,0.6,0.1"
         assert "--randomize" in step.argv and flag(step.argv, "--real-objects") == str(home.real)
         assert step.env == {"MUJOCO_GL": "egl"} and step.cwd == script.REPO
+
+    def test_role_agnostic_demos_are_recorded_unless_switched_off(
+        self, script: ModuleType, home: SimpleNamespace
+    ) -> None:
+        assert "--role-agnostic" in recipe(script, home).record_step().argv
+        assert "--role-agnostic" not in recipe(script, home, role_agnostic=False).record_step().argv
 
     def test_with_no_pose_share_the_camera_is_not_passed_at_all(
         self, script: ModuleType, home: SimpleNamespace
@@ -95,7 +102,7 @@ class TestRecipe:
         assert flag(step.argv, "--dataset-path") == str(r.data_dir) and flag(step.argv, "--output-dir") == str(
             r.out_dir
         )
-        assert flag(step.argv, "--max-steps") == "8000" and flag(step.argv, "--save-steps") == "2000"
+        assert flag(step.argv, "--max-steps") == "4000" and flag(step.argv, "--save-steps") == "2000"
         assert flag(step.argv, "--save-total-limit") == "2" and "--use-wandb" in step.argv
         assert step.env == {"WANDB_RUN_GROUP": "v4"} and step.cwd == home.gr00t
 
@@ -179,7 +186,7 @@ class TestRunCommand:
         ]
         assert [c["check"] for c in fake.calls] == [True, False, True, True]  # only the stats step may fail
         assert fake.calls[0]["env"]["MUJOCO_GL"] == "egl" and fake.calls[3]["env"]["WANDB_RUN_GROUP"] == "v4"
-        assert out.endswith(f"FINETUNE_DONE {home.checkpoints}/gr00t-preflight-v4/checkpoint-8000")
+        assert out.endswith(f"FINETUNE_DONE {home.checkpoints}/gr00t-preflight-v4/checkpoint-4000")
 
     def test_a_stale_dataset_is_cleared_before_recording_and_kept_when_recording_is_skipped(
         self, script: ModuleType, home: SimpleNamespace, monkeypatch: pytest.MonkeyPatch

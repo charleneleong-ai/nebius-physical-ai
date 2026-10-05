@@ -24,7 +24,7 @@ from nebius_physical_ai.trust.plots import StressPlots
 from nebius_physical_ai.trust.stress import StressCase, StressReport
 from nebius_physical_ai.twin.dataset import LeRobotWriter
 from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler, UnreachableTarget
-from nebius_physical_ai.twin.randomize import SceneRandomizer
+from nebius_physical_ai.twin.randomize import Episode, SceneRandomizer
 from nebius_physical_ai.twin.rehearsal import Rehearsal, SceneRun
 from nebius_physical_ai.twin.rollout import STACK_TASK, BatchRollout, RolloutResult, StackCheck
 from nebius_physical_ai.twin.scene import A3_MAT, RENDER_ASPECT, Twin, TwinLayout
@@ -76,16 +76,25 @@ def serve(
 
 
 def build_randomizer(
-    sampler: SceneSampler, seed: int, real_objects: Path | None, camera: Path | None, camera_mix: str
+    sampler: SceneSampler,
+    seed: int,
+    real_objects: Path | None,
+    camera: Path | None,
+    camera_mix: str,
+    role_agnostic: bool = False,
 ) -> SceneRandomizer:
-    """The demo randomiser: real objects as distractors, and cameras centred on a calibrated pose when one is given."""
+    """The demo randomiser: real objects as distractors, and cameras centred on a calibrated pose when one is given.
+
+    Role-agnostic episodes name the objects by their looks and never use the held-out colours or real objects."""
     real = [DetectedObject(**o) for o in json.loads(real_objects.read_text())] if real_objects else None
     try:
         mix = parse_camera_mix(camera_mix)
     except ValueError as err:
         raise typer.BadParameter(str(err)) from err
     pose = CameraPose.load(camera) if camera else None
-    return SceneRandomizer(sampler.layout, seed=seed, real_objects=real, camera_pose=pose, camera_mix=mix)
+    return SceneRandomizer(
+        sampler.layout, seed=seed, real_objects=real, camera_pose=pose, camera_mix=mix, role_agnostic=role_agnostic
+    )
 
 
 @app.command()
@@ -108,35 +117,48 @@ def demos(
         str,
         typer.Option(help="With --camera, shares of pose-centred, wide-arc and straight-down cameras (sum 1)"),
     ] = ",".join(str(share) for share in DEFAULT_CAMERA_MIX),
+    role_agnostic: Annotated[
+        bool,
+        typer.Option(
+            help="Name the pick and place objects by their looks, with a prompt per episode (needs --randomize)"
+        ),
+    ] = False,
     width_mm: WidthOpt = A3_MAT.width_mm,
     height_mm: HeightOpt = A3_MAT.height_mm,
 ) -> None:
-    """Record scripted pick-and-place demos in the twin as a LeRobot v2.1 dataset (successes only)."""
-    if camera and not randomize:
-        raise typer.BadParameter("--camera needs --randomize: only randomized episodes vary their camera")
+    """Record scripted pick-and-place demos in the twin as a LeRobot v2.1 dataset (successes only).
+
+    With --role-agnostic each episode is told what to pick and where to put it in its own words (`Pick green can and
+    place on red box`), and a quarter keep the original blue and red cubes and prompt."""
+    if (camera or role_agnostic) and not randomize:
+        raise typer.BadParameter("--camera and --role-agnostic need --randomize: only randomized episodes vary")
     sampler = SceneSampler(TwinLayout(MatSpec(width_mm, height_mm)), seed=seed)
-    randomizer = build_randomizer(sampler, seed, real_objects, camera, camera_mix) if randomize else None
+    randomizer = build_randomizer(sampler, seed, real_objects, camera, camera_mix, role_agnostic) if randomize else None
     writer, attempts = LeRobotWriter(out), 0
     for _ in track(range(episodes), description="recording demos"):
         while True:
             attempts += 1
             if attempts > MAX_ATTEMPTS_PER_EPISODE * episodes:
                 raise RuntimeError(f"expert solved only {len(writer.episodes)} of {attempts} scenes; check the ranges")
-            objects = randomizer.objects(sampler) if randomizer else sampler.sample()
+            episode = (
+                randomizer.episode(sampler, task) if randomizer else Episode(sampler.sample(), "blue", "red", task)
+            )
             look = randomizer.look() if randomizer else None
             start = sampler.start_pose()
-            with Twin.from_objects(objects, sampler.layout, start_pose=start, look=look) as twin:
+            with Twin.from_objects(episode.objects, sampler.layout, start_pose=start, look=look) as twin:
                 try:
-                    frames = list(PickPlaceExpert(twin, task).run())
+                    frames = list(PickPlaceExpert(twin, episode.prompt, episode.pick, episode.place).run())
                 except UnreachableTarget:  # draw another scene
                     continue
                 twin.settle(0.5)
-                stacked = StackCheck()(twin)
+                stacked = StackCheck(episode.pick, episode.place)(twin)
             if stacked:
-                writer.add_episode(frames, task)
+                writer.add_episode(frames, episode.prompt)
                 break
     writer.finalize()
     print(f"wrote {episodes} episodes ({writer.total_frames} frames) to {out}; expert success {episodes}/{attempts}")
+    if role_agnostic:
+        print(f"{len(writer.tasks)} distinct prompts, e.g. {writer.tasks[:3]}")
     if randomizer and randomizer.camera_pose:
         print(f"cameras (pose, arc, top_down) over every attempt: {dict(randomizer.camera_counts)}")
 

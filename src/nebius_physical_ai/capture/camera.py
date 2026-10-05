@@ -10,9 +10,10 @@ from nebius_physical_ai.capture.mat import ARUCO_DICT, MatSpec
 IPHONE_MAIN_HFOV_DEG = 69.0  # 26 mm-equivalent wide camera in 16:9 video, after stabilisation crop
 
 # Where a demo episode's camera comes from: jittered around the calibrated pose, a wide arc over the mat (as a
-# regulariser), or straight down (the view v1 and v2 were trained on). DEFAULT_CAMERA_MIX is the share of each.
+# regulariser), or straight down (the view v1 and v2 were trained on). DEFAULT_CAMERA_MIX is the share of each: a hedge
+# that leans on the wide arc until the mount is re-recorded and the calibrated pose can be trusted (then 0.6, 0.3, 0.1).
 CAMERA_SOURCES = ("pose", "arc", "top_down")
-DEFAULT_CAMERA_MIX = (0.6, 0.3, 0.1)
+DEFAULT_CAMERA_MIX = (0.3, 0.6, 0.1)
 
 
 def parse_camera_mix(text: str) -> tuple[float, float, float]:

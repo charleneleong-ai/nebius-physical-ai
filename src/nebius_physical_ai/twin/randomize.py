@@ -6,11 +6,25 @@ import numpy as np
 
 from nebius_physical_ai.capture.camera import CAMERA_SOURCES, DEFAULT_CAMERA_MIX, CameraPose
 from nebius_physical_ai.capture.mat import DetectedObject
+from nebius_physical_ai.twin import roles
 from nebius_physical_ai.twin.expert import SceneSampler
-from nebius_physical_ai.twin.scene import FLOOR_RGBA, RGBA, SceneLook, TwinLayout
+from nebius_physical_ai.twin.rollout import STACK_TASK
+from nebius_physical_ai.twin.scene import FLOOR_RGBA, SceneLook, TwinLayout
 
 DISTRACTOR_LABELS = ("yellow", "green", "purple", "dark")
 TASK_LABELS = ("blue", "red")  # the expert and StackCheck look these up by name, so nothing else may use them
+REAL_DISTRACTOR_SHARE = 0.5  # of distractors, when real objects are available
+MAX_DISTRACTOR_LENGTH_MM = 140.0  # the longest real object (the glasses case)
+
+
+@dataclass(frozen=True)
+class Episode:
+    """One demo scene and the task it teaches: the objects, which two to use, and the prompt that names them."""
+
+    objects: list[DetectedObject]
+    pick: str  # twin block names, as the expert and StackCheck look them up
+    place: str
+    prompt: str
 
 
 def radius(obj: DetectedObject) -> float:
@@ -70,6 +84,14 @@ class Randomization:
     pose_position_mm: float = 30.0  # per mat axis
     pose_rotation_deg: float = 5.0  # each of yaw, pitch and roll, about the camera's own axes
     pose_hfov_deg: float = 5.0
+    # Role-agnostic demos: a share of episodes keep the original blue and red cubes and prompt verbatim, a share of the
+    # rest place onto a real object, and clutter covers the real objects' sizes (up to 140 mm long and 65 mm tall).
+    original_share: float = 0.25
+    real_place_share: float = 1 / 3
+    wide_distractors: tuple[int, int] = (0, 4)
+    wide_distractor_width_mm: tuple[float, float] = (22.0, 65.0)
+    wide_distractor_aspect: tuple[float, float] = (1.0, 2.2)
+    wide_distractor_height_mm: tuple[float, float] = (15.0, 65.0)
 
 
 class SceneRandomizer:
@@ -78,19 +100,31 @@ class SceneRandomizer:
     def __init__(
         self,
         layout: TwinLayout,
-        seed: int = 0,
+        seed: int | list[int] = 0,
         ranges: Randomization | None = None,
         real_objects: list[DetectedObject] | None = None,
         camera_pose: CameraPose | None = None,
         camera_mix: tuple[float, float, float] = DEFAULT_CAMERA_MIX,
+        role_agnostic: bool = False,
+        colours: tuple[str, ...] = roles.TRAIN_COLOURS,
+        exclude_real: tuple[str, ...] | None = None,
     ) -> None:
         """`real_objects` (e.g. `npai lift` output) are placed as distractors half the time, so demos see real clutter.
 
         With a calibrated `camera_pose` each episode's camera is drawn from `camera_mix` (shares of pose-centred, wide
         arc and straight-down views, as in `CAMERA_SOURCES`); without one it is always the wide arc.
+
+        With `role_agnostic`, `episode` names the pick and place objects by what they look like (`green can`, with the
+        prompt to match) in all but `ranges.original_share` of episodes. Their colours come from `colours`; real
+        objects named in `exclude_real` (default: the held-out ones) are never used, so a training randomiser can't see
+        what the benchmark holds out.
         """
         self.layout, self.ranges = layout, ranges or Randomization()
-        self.real_objects = [o for o in real_objects or [] if o.label not in TASK_LABELS]
+        self.role_agnostic, self.colours = role_agnostic, colours
+        if exclude_real is None:
+            exclude_real = roles.HELD_OUT_REAL if role_agnostic else ()
+        skipped = (*TASK_LABELS, *exclude_real)
+        self.real_objects = [o for o in real_objects or [] if o.label not in skipped]
         self.camera_pose, self.camera_mix = camera_pose, camera_mix
         self.camera_counts: Counter[str] = Counter()  # how many episodes came from each source
         self.last_camera_source = ""
@@ -156,8 +190,8 @@ class SceneRandomizer:
         return {"pos": position.tolist(), "xyaxes": [*right.tolist(), *up.tolist()], "fovy": self.uniform(r.fovy_deg)}
 
     def colour(self, label: str) -> tuple[float, float, float]:
-        """The label's palette colour with hue, saturation and brightness jittered, relative to the mat's paper."""
-        h, s, v = colorsys.rgb_to_hsv(*RGBA.get(label, (0.5, 0.5, 0.5, 1))[:3])
+        """The named colour with hue, saturation and brightness jittered, relative to the mat's paper."""
+        h, s, v = colorsys.rgb_to_hsv(*roles.PALETTE.get(label, (0.5, 0.5, 0.5)))
         h = (h + self.rng.uniform(-self.ranges.hue_jitter, self.ranges.hue_jitter)) % 1.0
         rgb = colorsys.hsv_to_rgb(h, s * self.rng.uniform(0.7, 1.0), v * self.rng.uniform(0.6, 1.0))
         return tuple(round(float(np.clip(c / FLOOR_RGBA[0], 0, 1)), 3) for c in rgb)
@@ -169,10 +203,13 @@ class SceneRandomizer:
         height_mm: tuple[float, float],
         max_length_mm: float = float("inf"),
         xy: tuple[float, float] = (0.0, 0.0),
+        aspect: tuple[float, float] = (1.0, 1.3),
+        colour: str | None = None,
     ) -> DetectedObject:
+        """A random box or cylinder named `label`, painted `colour` (default: the label's own)."""
         width = self.uniform(width_mm)
         cylinder = self.rng.random() < 0.5
-        length = width if cylinder else min(width * self.rng.uniform(1.0, 1.3), max(max_length_mm, width))
+        length = width if cylinder else min(width * self.uniform(aspect), max(max_length_mm, width))
         return DetectedObject(
             label,
             round(xy[0], 1),
@@ -183,10 +220,21 @@ class SceneRandomizer:
             yaw_deg=round(self.rng.uniform(-90, 90), 1),
             height_mm=round(self.uniform(height_mm), 1),
             shape="cylinder" if cylinder else "box",
-            rgb=self.colour(label),
+            rgb=self.colour(label if colour is None else colour),
         )
 
     def objects(self, sampler: SceneSampler) -> list[DetectedObject]:
+        """This episode's objects; see `episode` for the task that goes with them."""
+        return self.episode(sampler).objects
+
+    def episode(self, sampler: SceneSampler, task: str = STACK_TASK) -> Episode:
+        """The next demo scene and its task: `blue` onto `red` with `task` as the prompt, or, when role-agnostic and
+        not one of the `original_share`, two objects named by their looks with a prompt that names them."""
+        if self.role_agnostic and self.rng.random() >= self.ranges.original_share:
+            return self.described(sampler)
+        return Episode(self.standard_objects(sampler), *TASK_LABELS, task)
+
+    def standard_objects(self, sampler: SceneSampler) -> list[DetectedObject]:
         """The sampler's pick (blue) and place (red) positions as random shapes, plus distractors clear of the arm."""
         pick, place = sampler.sample()
         r = self.ranges
@@ -194,27 +242,85 @@ class SceneRandomizer:
             self.block("blue", r.pick_width_mm, r.pick_height_mm, r.pick_length_mm, (pick.x_mm, pick.y_mm)),
             self.block("red", r.place_width_mm, r.place_height_mm, xy=(place.x_mm, place.y_mm)),
         ]
-        for _ in range(int(self.rng.integers(r.distractors[0], r.distractors[1] + 1))):
+        count = r.wide_distractors if self.role_agnostic else r.distractors
+        for _ in range(int(self.rng.integers(count[0], count[1] + 1))):
             candidate = self.distractor()
             if (xy := self.free_spot(found, candidate)) is not None:
                 found.append(replace(candidate, x_mm=round(float(xy[0]), 1), y_mm=round(float(xy[1]), 1)))
         return found
 
+    def real_copy(self, real: DetectedObject) -> DetectedObject:
+        """The real object with its size scaled by up to +-10% and a random yaw."""
+        s = self.rng.uniform(0.9, 1.1)
+        return replace(
+            real,
+            area_mm2=round(real.area_mm2 * s * s, 1),
+            length_mm=round(real.length_mm * s, 1),
+            width_mm=round(real.width_mm * s, 1),
+            height_mm=round(real.height_mm * s, 1),
+            yaw_deg=round(self.rng.uniform(-90, 90), 1),
+        )
+
     def distractor(self) -> DetectedObject:
-        """A copy of a real object (size +-10%) half the time when there are any, else a random shape."""
-        if self.real_objects and self.rng.random() < 0.5:
-            real = self.real_objects[int(self.rng.integers(len(self.real_objects)))]
-            s = self.rng.uniform(0.9, 1.1)
-            return replace(
-                real,
-                area_mm2=round(real.area_mm2 * s * s, 1),
-                length_mm=round(real.length_mm * s, 1),
-                width_mm=round(real.width_mm * s, 1),
-                height_mm=round(real.height_mm * s, 1),
-                yaw_deg=round(self.rng.uniform(-90, 90), 1),
-            )
+        """A copy of a real object half the time when there are any, else a random shape (larger ones when
+        role-agnostic, to cover the real objects' sizes)."""
+        if self.real_objects and self.rng.random() < REAL_DISTRACTOR_SHARE:
+            return self.real_copy(self.real_objects[int(self.rng.integers(len(self.real_objects)))])
         label = str(self.rng.choice(DISTRACTOR_LABELS))
+        if self.role_agnostic:
+            return self.wide_block(label)
         return self.block(label, self.ranges.place_width_mm, self.ranges.distractor_height_mm)
+
+    def wide_block(self, colour: str) -> DetectedObject:
+        r = self.ranges
+        return self.block(
+            colour,
+            r.wide_distractor_width_mm,
+            r.wide_distractor_height_mm,
+            MAX_DISTRACTOR_LENGTH_MM,
+            aspect=r.wide_distractor_aspect,
+        )
+
+    def named(self, obj: DetectedObject, colour: str) -> DetectedObject:
+        """The object labelled by what it looks like: its colour and a noun that fits its footprint (`green_can`)."""
+        noun = str(self.rng.choice(roles.nouns_for(obj.shape, obj.length_mm, obj.width_mm)))
+        return replace(obj, label=f"{colour}_{noun}")
+
+    def described(self, sampler: SceneSampler, place_on: DetectedObject | None = None) -> Episode:
+        """Pick and place objects named by their looks, the place target a real object in a few episodes (always
+        `place_on`, when given), and clutter that never shares a colour (or a name) with them, so the prompt picks
+        out exactly one object each. Pick objects are always synthetic: the real ones are wider than the jaws open."""
+        pick_at, place_at = sampler.sample()
+        r = self.ranges
+        pick_colour, place_colour = (str(c) for c in self.rng.choice(self.colours, 2, replace=False))
+        pick = self.block(
+            pick_colour, r.pick_width_mm, r.pick_height_mm, r.pick_length_mm, (pick_at.x_mm, pick_at.y_mm)
+        )
+        found = [self.named(pick, pick_colour)]
+        if place_on is not None or (self.real_objects and self.rng.random() < r.real_place_share):
+            real = place_on or self.real_objects[int(self.rng.integers(len(self.real_objects)))]
+            found.append(replace(self.real_copy(real), x_mm=place_at.x_mm, y_mm=place_at.y_mm))
+        else:
+            place = self.block(place_colour, r.place_width_mm, r.place_height_mm, xy=(place_at.x_mm, place_at.y_mm))
+            found.append(self.named(place, place_colour))
+        for _ in range(int(self.rng.integers(r.wide_distractors[0], r.wide_distractors[1] + 1))):
+            if (candidate := self.described_distractor(found)) is None:
+                continue
+            if (xy := self.free_spot(found, candidate)) is not None:
+                found.append(replace(candidate, x_mm=round(float(xy[0]), 1), y_mm=round(float(xy[1]), 1)))
+        return Episode(found, found[0].label, found[1].label, roles.instruction(found[0].label, found[1].label))
+
+    def described_distractor(self, taken: list[DetectedObject]) -> DetectedObject | None:
+        """A real object not yet in the scene, or a block in a colour nothing else has; None when there is neither."""
+        names = {o.label for o in taken}
+        spare = [o for o in self.real_objects if o.label not in names]
+        if spare and self.rng.random() < REAL_DISTRACTOR_SHARE:
+            return self.real_copy(spare[int(self.rng.integers(len(spare)))])
+        used = {o.label.split("_")[0] for o in taken}
+        if not (free := [c for c in roles.TRAIN_COLOURS if c not in used]):
+            return None
+        colour = str(self.rng.choice(free))
+        return self.named(self.wide_block(colour), colour)
 
     def free_spot(self, taken: list[DetectedObject], candidate: DetectedObject, tries: int = 100) -> np.ndarray | None:
         """A centre on the mat where the candidate's own outline clears every object and the arm's corridors."""

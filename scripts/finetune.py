@@ -1,10 +1,12 @@
-"""Fine-tune GR00T on twin demos recorded around the real camera.
+"""Fine-tune GR00T on role-agnostic twin demos recorded around the real camera.
 
-The default recipe is v4: 800 episodes, cameras drawn 60% around the calibrated pose, 30% from a wide arc over the
-mat and 10% straight down, starting from the latest checkpoint.
+The default recipe is v4: 800 episodes, 4,000 steps, starting from the latest checkpoint. Cameras are drawn 30% around
+the calibrated pose, 60% from a wide arc over the mat and 10% straight down (a hedge until the mount is re-recorded).
+Each episode is told what to pick and where to put it in its own words (`Pick green can and place on red box`); a quarter
+keep the original blue and red cubes and prompt. The held-out colours and real objects never appear (see twin/roles.py).
 
-    uv run python scripts/finetune.py run v4              # record demos, build stats, fine-tune
-    uv run python scripts/finetune.py run v4 --dry-run    # print the steps without running them
+    uv run python scripts/finetune.py run v4a             # record demos, build stats, fine-tune
+    uv run python scripts/finetune.py run v4a --dry-run   # print the steps without running them
     uv run python scripts/finetune.py preview             # sample frames of what the policy will see
     uv run python scripts/finetune.py serve CHECKPOINT --port 5558   # serve a checkpoint to the rehearsal
 
@@ -61,12 +63,13 @@ class Step:
 class Recipe:
     name: str
     episodes: int = 800
-    max_steps: int = 8000
+    max_steps: int = 4000
     base: Path = LATEST
     camera: Path = REPO / "configs/front_camera.json"
     camera_mix: tuple[float, float, float] = DEFAULT_CAMERA_MIX
     real_objects: Path = REPO / "data/capture/real_objects.json"
-    seed: int = 1
+    role_agnostic: bool = True
+    seed: int = 42
     save_steps: int = 2000
     save_total_limit: int = 2
     batch_size: int = 32
@@ -118,6 +121,7 @@ class Recipe:
         argv = (
             ("uv", "run", "npai", "demos", str(self.data_dir), "--episodes", str(self.episodes))
             + ("--seed", str(self.seed), "--randomize", "--real-objects", str(self.real_objects))
+            + (("--role-agnostic",) if self.role_agnostic else ())
             + (camera if self.uses_pose else ())
         )
         return Step("record demos", argv, REPO, {"MUJOCO_GL": "egl"})
@@ -161,14 +165,17 @@ RealObjectsOpt = Annotated[Path, typer.Option(help="Real objects placed as distr
 
 @app.command()
 def run(
-    name: Annotated[str, typer.Argument(help="Run name, e.g. v4: names the dataset and the checkpoint folder")],
+    name: Annotated[str, typer.Argument(help="Run name, e.g. v4a: names the dataset and the checkpoint folder")],
     episodes: int = 800,
-    max_steps: int = 8000,
+    max_steps: int = 4000,
     base: Annotated[Path, typer.Option(help="Checkpoint to start from (default: the latest fine-tune)")] = LATEST,
     camera: CameraOpt = REPO / "configs/front_camera.json",
     camera_mix: MixOpt = MIX_TEXT,
     real_objects: RealObjectsOpt = REPO / "data/capture/real_objects.json",
-    seed: int = 1,
+    role_agnostic: Annotated[
+        bool, typer.Option(help="Name the objects by their looks, one prompt per episode (off: blue and red only)")
+    ] = True,
+    seed: int = 42,
     save_steps: int = 2000,
     save_total_limit: int = 2,
     gr00t_dir: Annotated[Path, typer.Option(help="Isaac-GR00T checkout (branch n1d6)")] = HOME / "Isaac-GR00T",
@@ -187,6 +194,7 @@ def run(
         camera=camera,
         camera_mix=camera_mix_option(camera_mix),
         real_objects=real_objects,
+        role_agnostic=role_agnostic,
         seed=seed,
         save_steps=save_steps,
         save_total_limit=save_total_limit,
@@ -223,10 +231,11 @@ def preview(
     camera: CameraOpt = REPO / "configs/front_camera.json",
     camera_mix: MixOpt = MIX_TEXT,
     real_objects: RealObjectsOpt = REPO / "data/capture/real_objects.json",
+    role_agnostic: Annotated[bool, typer.Option(help="Draw role-agnostic episodes, as the recipe does")] = True,
     out: Path = Path("/tmp/finetune_preview.jpg"),
 ) -> None:
     """Render what the policy will see (twin frames from the camera mix) to check, say, that the arm does not hide
-    the blocks from the calibrated view. Each tile is labelled with its camera source."""
+    the blocks from the calibrated view. Each tile is labelled with its camera source and the episode's prompt."""
     import cv2
     import numpy as np
 
@@ -235,13 +244,14 @@ def preview(
     from nebius_physical_ai.twin.scene import Twin, TwinLayout
 
     sampler = SceneSampler(TwinLayout(), seed=seed)
-    randomizer = build_randomizer(sampler, seed, real_objects, camera, camera_mix)
+    randomizer = build_randomizer(sampler, seed, real_objects, camera, camera_mix, role_agnostic)
     tiles = []
     for _ in range(n):
-        objects, look = randomizer.objects(sampler), randomizer.look()
-        with Twin.from_objects(objects, sampler.layout, start_pose=sampler.start_pose(), look=look) as twin:
+        episode, look = randomizer.episode(sampler), randomizer.look()
+        with Twin.from_objects(episode.objects, sampler.layout, start_pose=sampler.start_pose(), look=look) as twin:
             tile = np.ascontiguousarray(twin.render("front_cam", (240, 320)))
         cv2.putText(tile, randomizer.last_camera_source, (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 40, 40), 2)
+        cv2.putText(tile, episode.prompt[:44], (8, 228), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 40, 40), 1)
         tiles.append(tile)
     columns = min(4, n)
     tiles += [np.zeros_like(tiles[0])] * (-len(tiles) % columns)
