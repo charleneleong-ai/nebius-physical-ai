@@ -24,7 +24,7 @@ from nebius_physical_ai.trust.plots import StressPlots
 from nebius_physical_ai.trust.stress import StressCase, StressReport
 from nebius_physical_ai.twin.dataset import LeRobotWriter
 from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler, UnreachableTarget
-from nebius_physical_ai.twin.randomize import Episode, SceneRandomizer
+from nebius_physical_ai.twin.randomize import Episode, Randomization, SceneRandomizer
 from nebius_physical_ai.twin.rehearsal import Rehearsal, SceneRun
 from nebius_physical_ai.twin.rollout import STACK_TASK, BatchRollout, RolloutResult, StackCheck
 from nebius_physical_ai.twin.scene import A3_MAT, RENDER_ASPECT, Twin, TwinLayout
@@ -82,6 +82,7 @@ def build_randomizer(
     camera: Path | None,
     camera_mix: str,
     role_agnostic: bool = False,
+    original_share: float | None = None,
 ) -> SceneRandomizer:
     """The demo randomiser: real objects as distractors, and cameras centred on a calibrated pose when one is given.
 
@@ -92,8 +93,15 @@ def build_randomizer(
     except ValueError as err:
         raise typer.BadParameter(str(err)) from err
     pose = CameraPose.load(camera) if camera else None
+    ranges = None if original_share is None else Randomization(original_share=original_share)
     return SceneRandomizer(
-        sampler.layout, seed=seed, real_objects=real, camera_pose=pose, camera_mix=mix, role_agnostic=role_agnostic
+        sampler.layout,
+        seed=seed,
+        ranges=ranges,
+        real_objects=real,
+        camera_pose=pose,
+        camera_mix=mix,
+        role_agnostic=role_agnostic,
     )
 
 
@@ -123,6 +131,12 @@ def demos(
             help="Name the pick and place objects by their looks, with a prompt per episode (needs --randomize)"
         ),
     ] = False,
+    original_share: Annotated[
+        float,
+        typer.Option(
+            min=0.0, max=1.0, help="With --role-agnostic, the share of episodes keeping the blue and red prompt"
+        ),
+    ] = 0.25,
     layout: Annotated[
         str,
         typer.Option(help="Joint layout in modality.json: stock (5 arm joints + gripper) or split (wrist roll apart)"),
@@ -137,7 +151,11 @@ def demos(
     if (camera or role_agnostic) and not randomize:
         raise typer.BadParameter("--camera and --role-agnostic need --randomize: only randomized episodes vary")
     sampler = SceneSampler(TwinLayout(MatSpec(width_mm, height_mm)), seed=seed)
-    randomizer = build_randomizer(sampler, seed, real_objects, camera, camera_mix, role_agnostic) if randomize else None
+    randomizer = (
+        build_randomizer(sampler, seed, real_objects, camera, camera_mix, role_agnostic, original_share)
+        if randomize
+        else None
+    )
     if layout not in LAYOUTS:
         raise typer.BadParameter(f"--layout must be one of {sorted(LAYOUTS)}, got {layout!r}")
     writer, attempts = LeRobotWriter(out, layout=layout), 0

@@ -188,6 +188,31 @@ class TestHeldOutSuites:
 
 
 @needs_model
+class TestDiagnosticSuite:
+    @pytest.fixture(scope="class")
+    def clean_many(self) -> benchmark.Suite:
+        (suite,) = benchmark.diagnostic_suites(LAYOUT)
+        return suite
+
+    def test_it_is_the_original_task_in_many_different_scenes(self, clean_many: benchmark.Suite) -> None:
+        assert (clean_many.name, clean_many.group) == ("clean_many", "diagnostic")
+        assert len(clean_many.cases) == benchmark.GENERATED_CASES and clean_many.n >= HEADLINE_N
+        for case in clean_many.cases:
+            assert (case.pick, case.place, case.prompt) == ("blue", "red", STACK_TASK)
+            assert [o.label for o in case.objects[:2]] == ["blue", "red"]
+        blue_positions = np.array([[c.objects[0].x_mm, c.objects[0].y_mm] for c in clean_many.cases])
+        assert blue_positions.std(axis=0).min() > 5.0  # many layouts, not one repeated
+
+    def test_it_uses_the_same_camera_as_the_clean_cell(self, clean_many: benchmark.Suite) -> None:
+        (clean,) = by_name(legacy_suites(REAL, LAYOUT))["clean"].cases
+        assert all(case.camera == clean.camera for case in clean_many.cases)
+
+    def test_it_is_part_of_all_and_selectable_alone(self) -> None:
+        assert {s.name for s in build_suites([], LAYOUT, "diagnostic")} == {"clean_many"}
+        assert "clean_many" in {s.name for s in build_suites([], LAYOUT, "all", ["clean_many"])}
+
+
+@needs_model
 def test_run_suite_sends_the_cases_own_prompt_to_the_policy_and_pools_the_rehearsals() -> None:
     class Recorder:
         def __init__(self) -> None:

@@ -81,6 +81,17 @@ class TestRecipe:
         assert "--randomize" in step.argv and flag(step.argv, "--real-objects") == str(home.real)
         assert step.env == {"MUJOCO_GL": "egl"} and step.cwd == script.REPO
 
+    def test_the_original_share_reaches_the_demo_recorder_and_the_learning_rate_the_trainer(
+        self, script: ModuleType, home: SimpleNamespace
+    ) -> None:
+        default = recipe(script, home)
+        assert flag(default.record_step().argv, "--original-share") == "0.25"
+        assert flag(default.train_step().argv, "--learning-rate") == "0.0001"
+        replay = recipe(script, home, original_share=0.5, learning_rate=5e-5)
+        assert flag(replay.record_step().argv, "--original-share") == "0.5"
+        assert flag(replay.train_step().argv, "--learning-rate") == "5e-05"
+        assert "--original-share" not in recipe(script, home, role_agnostic=False).record_step().argv
+
     def test_role_agnostic_demos_are_recorded_unless_switched_off(
         self, script: ModuleType, home: SimpleNamespace
     ) -> None:
@@ -322,7 +333,7 @@ class TestRunCommand:
         out = CliRunner().invoke(script.app, ["run", "--help"]).output
         for option in ("--episodes", "--camera-mix", "--base", "--skip-demos", "--force", "--dry-run", "--save-steps"):
             assert option in out
-        for option in ("--layout", "--save-only-model"):
+        for option in ("--layout", "--save-only-model", "--original-share", "--learning-rate"):
             assert option in out
 
     def test_a_dry_run_for_the_split_layout_on_a_community_checkpoint_shows_every_flag(

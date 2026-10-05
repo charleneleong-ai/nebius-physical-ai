@@ -202,6 +202,32 @@ class TestClutter:
         assert blocks and max(o.height_mm for o in blocks) <= 45
 
 
+class TestOriginalShare:
+    def sampler_and_randomizer(self, share: float | None):
+        from nebius_physical_ai.cli import build_randomizer
+
+        sampler = SceneSampler(LAYOUT, seed=42)
+        return sampler, build_randomizer(sampler, 42, None, None, "0.3,0.6,0.1", True, share)
+
+    @pytest.mark.parametrize(("share", "low", "high"), [(0.5, 0.42, 0.58), (0.1, 0.04, 0.16), (None, 0.19, 0.31)])
+    def test_the_share_of_original_prompt_episodes_follows_the_option(
+        self, share: float | None, low: float, high: float
+    ) -> None:
+        sampler, randomizer = self.sampler_and_randomizer(share)
+        episodes = [randomizer.episode(sampler) for _ in range(500)]
+        assert low < sum(e.prompt == STACK_TASK for e in episodes) / len(episodes) < high  # None keeps the default 0.25
+
+    def test_all_original_and_no_original_are_the_two_extremes(self) -> None:
+        for share, expected in ((1.0, True), (0.0, False)):
+            sampler, randomizer = self.sampler_and_randomizer(share)
+            assert {randomizer.episode(sampler).prompt == STACK_TASK for _ in range(60)} == {expected}
+
+    @pytest.mark.parametrize("share", ["1.5", "-0.1"])
+    def test_a_share_outside_zero_to_one_is_a_usage_error(self, tmp_path: Path, share: str) -> None:
+        args = ["demos", str(tmp_path / "d"), "--randomize", "--role-agnostic", "--original-share", share]
+        assert CliRunner().invoke(app, args).exit_code == 2
+
+
 def test_role_agnostic_without_randomize_is_a_usage_error(tmp_path: Path) -> None:
     result = CliRunner().invoke(app, ["demos", str(tmp_path / "d"), "--role-agnostic"])
     assert result.exit_code == 2 and "--randomize" in " ".join(result.output.split())

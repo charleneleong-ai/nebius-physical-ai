@@ -75,6 +75,7 @@ class Recipe:
     camera_mix: tuple[float, float, float] = DEFAULT_CAMERA_MIX
     real_objects: Path = REPO / "data/capture/real_objects.json"
     role_agnostic: bool = True
+    original_share: float = 0.25  # share of role-agnostic episodes that keep the blue and red cubes and their prompt
     layout: str = "stock"  # joint layout: stock (5 arm joints + gripper) or split (wrist roll in its own block)
     seed: int = 42
     save_steps: int = 2000
@@ -151,7 +152,7 @@ class Recipe:
         argv = (
             ("uv", "run", "npai", "demos", str(self.data_dir), "--episodes", str(self.episodes))
             + ("--seed", str(self.seed), "--randomize", "--real-objects", str(self.real_objects))
-            + (("--role-agnostic",) if self.role_agnostic else ())
+            + (("--role-agnostic", "--original-share", str(self.original_share)) if self.role_agnostic else ())
             + (("--layout", self.layout) if self.layout != "stock" else ())
             + (camera if self.uses_pose else ())
         )
@@ -221,6 +222,12 @@ def run(
     role_agnostic: Annotated[
         bool, typer.Option(help="Name the objects by their looks, one prompt per episode (off: blue and red only)")
     ] = True,
+    original_share: Annotated[
+        float, typer.Option(min=0.0, max=1.0, help="Share of episodes that keep the blue and red cubes and prompt")
+    ] = 0.25,
+    learning_rate: Annotated[
+        float, typer.Option(help="Peak learning rate; lower it to forget less of the base")
+    ] = 1e-4,
     layout: Annotated[
         str, typer.Option(help="Joint layout: stock (5 arm joints + gripper) or split (wrist roll in its own block)")
     ] = "stock",
@@ -248,6 +255,8 @@ def run(
         camera_mix=camera_mix_option(camera_mix),
         real_objects=real_objects,
         role_agnostic=role_agnostic,
+        original_share=original_share,
+        learning_rate=learning_rate,
         layout=layout,
         seed=seed,
         save_steps=save_steps,

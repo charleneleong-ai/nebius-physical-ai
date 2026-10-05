@@ -254,6 +254,22 @@ def held_out_suites(real: list[DetectedObject], layout: TwinLayout) -> list[Suit
     return suites
 
 
+def diagnostic_suites(layout: TwinLayout) -> list[Suite]:
+    """`clean_many`: the original task (blue onto red, the original prompt) in many random scenes from the 65 degree
+    camera. The legacy `clean` cell is one scene, so on its own it cannot say whether a drop is general forgetting or
+    one bad scene; this suite can."""
+    camera = oblique_camera(layout, OBLIQUE_ELEVATION_DEG, 0.0)
+    randomizer = SceneRandomizer(layout, seed=[SEED, 20])
+    sampler = SceneSampler(layout, seed=[SEED, 20])
+
+    def draw() -> tuple[list[DetectedObject], str, str, str]:
+        return randomizer.standard_objects(sampler), "blue", "red", STACK_TASK
+
+    cases, rejected = solvable_cases("clean_many", draw, layout, camera)
+    note = "the original task in 12 random scenes from the clean camera"
+    return [Suite("clean_many", "diagnostic", cases, note, rejected)]
+
+
 def build_suites(
     real: list[DetectedObject],
     layout: TwinLayout,
@@ -261,12 +277,14 @@ def build_suites(
     only: Iterable[str] = (),
     calibrated: CameraPose | None = None,
 ) -> list[Suite]:
-    """The suites of `group` (legacy, held_out or all) whose names match any glob in `only` (default: every one)."""
+    """The suites of `group` (legacy, held_out, diagnostic or all) whose names match any glob in `only`."""
     suites: list[Suite] = []
     if group in ("legacy", "all"):
         suites += legacy_suites(real, layout, calibrated)
     if group in ("held_out", "all"):
         suites += held_out_suites(real, layout)
+    if group in ("diagnostic", "all"):
+        suites += diagnostic_suites(layout)
     patterns = list(only)
     return [s for s in suites if not patterns or any(fnmatch.fnmatch(s.name, p) for p in patterns)]
 
