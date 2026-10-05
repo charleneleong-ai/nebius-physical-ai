@@ -1,11 +1,17 @@
 import os
 from types import TracebackType
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import numpy as np
 import wandb
 
 from nebius_physical_ai.twin.rehearsal import VARIANT_COLUMNS, SceneRun
+
+if TYPE_CHECKING:
+    from nebius_physical_ai.pipeline import PipelineResult
+
+OBJECT_COLUMNS = ["label", "x_mm", "y_mm", "length_mm", "width_mm", "yaw_deg", "shape", "area_mm2", "confidence"]
+VISION_COLUMNS = ["label", "bbox_2d", "confidence"]
 
 
 class Tracker:
@@ -61,6 +67,33 @@ class Tracker:
                 f"media/scene_{run.scene_id}_start", wandb.Image(frames[0], caption=f"scene {run.scene_id}")
             )
         return logged
+
+    def log_preflight(self, frame_bgr: np.ndarray, result: "PipelineResult", seconds: float) -> None:
+        """One Preflight answer: the frame, what was perceived, the verdict and, when it was rehearsed, the rollouts."""
+        summary: dict[str, Any] = {"verdict": result.verdict, "explanation": result.explanation, "seconds": seconds}
+        tables: dict[str, tuple[list[str], list[list[Any]]]] = {}
+        if scene := result.scene:
+            summary |= {
+                "markers": len(scene.markers_found),
+                "marker_fit_mm": round(scene.residual_mm, 2),
+                "perception": round(scene.perception, 3),
+            }
+            tables["objects"] = (
+                OBJECT_COLUMNS,
+                [[getattr(o, c) for c in OBJECT_COLUMNS] for o in scene.objects],
+            )
+            tables["warnings"] = (["warning"], [[w] for w in scene.warnings])
+        if graph := result.scene_graph:
+            summary["vision_issues"] = graph.issues
+            tables["vision_model"] = (
+                VISION_COLUMNS,
+                [[o.get("label"), str(o.get("bbox_2d")), o.get("confidence")] for o in graph.objects],
+            )
+        self.run.log({"frame": wandb.Image(frame_bgr[..., ::-1], caption=f"verdict {result.verdict}")})
+        if scene and result.assessment and result.rehearsal:
+            summary |= result.rehearsal.summary() | result.assessment.record()  # raw counts and the calibrated answer
+            self.log_scene(SceneRun(0, scene.objects, result.rehearsal, seconds))
+        self.log_summary(summary, tables)
 
     def log_summary(self, metrics: dict[str, Any], tables: dict[str, tuple[list[str], list[list[Any]]]]) -> None:
         """Run-level results (written to the summary, not the per-scene history) plus named tables."""
