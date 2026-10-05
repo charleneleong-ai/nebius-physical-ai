@@ -17,7 +17,7 @@ import fnmatch
 import itertools
 import math
 from collections.abc import Callable, Iterable
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from typing import Any
 
 import numpy as np
@@ -105,6 +105,8 @@ class Cell:
     cases: int
     seconds: float
     per_case: list[int] = field(default_factory=list)  # successes per case, in suite order
+    # First success and first failure rollout, kind -> (caption, frames); only when videos were asked for, never saved
+    examples: dict[str, tuple[str, list[np.ndarray]]] = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def p(self) -> float:
@@ -114,8 +116,10 @@ class Cell:
         return RehearsalResult(self.successes, self.n, [], []).wilson() if self.n else (0.0, 1.0)
 
     def record(self) -> dict[str, Any]:
+        """JSON-ready row: the counts, the rate and its interval (not the rollout frames)."""
         lo, hi = self.wilson()
-        return asdict(self) | {"p": round(self.p, 3), "ci95": [round(lo, 3), round(hi, 3)]}
+        saved = {f.name: getattr(self, f.name) for f in fields(self) if f.name != "examples"}
+        return saved | {"p": round(self.p, 3), "ci95": [round(lo, 3), round(hi, 3)]}
 
 
 def oblique_camera(layout: TwinLayout, elevation_deg: float, azimuth_deg: float) -> dict[str, Any]:
@@ -267,20 +271,35 @@ def build_suites(
     return [s for s in suites if not patterns or any(fnmatch.fnmatch(s.name, p) for p in patterns)]
 
 
-def run_suite(suite: Suite, policy: Policy, layout: TwinLayout, batch_size: int = 32) -> Cell:
-    """Rehearse every case of the suite `variants` times and pool the successes."""
+def run_suite(
+    suite: Suite, policy: Policy, layout: TwinLayout, batch_size: int = 32, record_videos: bool = False
+) -> Cell:
+    """Rehearse every case of the suite `variants` times and pool the successes.
+
+    With `record_videos` the cell also keeps the first success and the first failure as rollout frames."""
     import time
 
     start, per_case = time.time(), []
+    examples: dict[str, tuple[str, list[np.ndarray]]] = {}
     for case in suite.cases:
         rehearsal = Rehearsal(
-            policy, case.prompt, StackCheck(case.pick, case.place), case.layout(layout), batch_size=batch_size,
-            record_examples=False,
-        )  # fmt: skip
-        per_case.append(rehearsal.run(case.objects, suite.variants, SEED).successes)
-    return Cell(
+            policy,
+            case.prompt,
+            StackCheck(case.pick, case.place),
+            case.layout(layout),
+            batch_size=batch_size,
+            record_examples=record_videos,
+        )
+        result = rehearsal.run(case.objects, suite.variants, SEED)
+        per_case.append(result.successes)
+        for kind, (index, frames) in result.examples.items():
+            caption = f"{suite.name} | {case.name} | {kind} | variant {index} | {case.prompt}"
+            examples.setdefault(kind, (caption, frames))
+    cell = Cell(
         suite.name, suite.group, sum(per_case), suite.n, len(suite.cases), round(time.time() - start, 1), per_case
     )
+    cell.examples = examples
+    return cell
 
 
 def verdict(a: Cell, b: Cell) -> str:

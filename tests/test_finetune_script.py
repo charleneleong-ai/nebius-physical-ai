@@ -118,8 +118,17 @@ class TestRecipe:
         self, script: ModuleType, home: SimpleNamespace
     ) -> None:
         r = recipe(script, home)
-        assert [s.title for s in r.steps()] == ["record demos", "dataset stats", "relative stats", "fine-tune"]
+        titles = [s.title for s in r.steps()]
+        assert titles == ["record demos", "log demos", "dataset stats", "relative stats", "fine-tune"]
         assert [s.title for s in r.steps(record=False)] == ["dataset stats", "relative stats", "fine-tune"]
+
+    def test_the_demos_are_logged_to_wandb_under_the_runs_name_and_can_never_stop_training(
+        self, script: ModuleType, home: SimpleNamespace
+    ) -> None:
+        step = recipe(script, home).log_demos_step()
+        assert step.argv[:4] == ("uv", "run", "python", "scripts/log_demos.py")
+        assert step.argv[4] == str(home.data / "preflight_demos_v4") and flag(step.argv, "--name") == "v4"
+        assert step.allow_failure and step.cwd == script.REPO
 
     def test_a_valid_recipe_has_no_problems(self, script: ModuleType, home: SimpleNamespace) -> None:
         assert recipe(script, home).problems() == []
@@ -180,12 +189,15 @@ class TestRunCommand:
         code, out, fake = invoke(script, home, monkeypatch)
         assert code == 0 and [c["argv"][1] for c in fake.calls] == [
             "run",
+            "run",
             "gr00t/data/stats.py",
             "-c",
             "gr00t/experiment/launch_finetune.py",
         ]
-        assert [c["check"] for c in fake.calls] == [True, False, True, True]  # only the stats step may fail
-        assert fake.calls[0]["env"]["MUJOCO_GL"] == "egl" and fake.calls[3]["env"]["WANDB_RUN_GROUP"] == "v4"
+        assert fake.calls[1]["argv"][3] == "scripts/log_demos.py"
+        # only the demo logging and the first stats step may fail without stopping the run
+        assert [c["check"] for c in fake.calls] == [True, False, False, True, True]
+        assert fake.calls[0]["env"]["MUJOCO_GL"] == "egl" and fake.calls[4]["env"]["WANDB_RUN_GROUP"] == "v4"
         assert out.endswith(f"FINETUNE_DONE {home.checkpoints}/gr00t-preflight-v4/checkpoint-4000")
 
     def test_a_stale_dataset_is_cleared_before_recording_and_kept_when_recording_is_skipped(
@@ -211,7 +223,8 @@ class TestRunCommand:
         home.camera.unlink()
         code, out, fake = invoke(script, home, monkeypatch, "--dry-run")
         assert code == 0 and fake.calls == []
-        assert "[1/4] record demos: uv run npai demos" in out and "[4/4] fine-tune:" in out and "--episodes 800" in out
+        assert "[1/5] record demos: uv run npai demos" in out and "[2/5] log demos:" in out
+        assert "[5/5] fine-tune:" in out and "--episodes 800" in out
         assert "warning: calibrated camera not found" in out and "FINETUNE_DONE" not in out
 
     def test_a_run_with_problems_refuses_to_start(
@@ -227,7 +240,7 @@ class TestRunCommand:
         (home.checkpoints / "gr00t-preflight-v4/checkpoint-2000").mkdir(parents=True)
         assert invoke(script, home, monkeypatch)[0] == 2
         code, _, fake = invoke(script, home, monkeypatch, "--force")
-        assert code == 0 and len(fake.calls) == 4
+        assert code == 0 and len(fake.calls) == 5
 
     def test_a_failing_step_stops_the_run_with_its_exit_code(
         self, script: ModuleType, home: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
@@ -240,7 +253,13 @@ class TestRunCommand:
         self, script: ModuleType, home: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         code, _, fake = invoke(script, home, monkeypatch, fake=FakeRun({"stats.py": 1}))
-        assert code == 0 and len(fake.calls) == 4
+        assert code == 0 and len(fake.calls) == 5
+
+    def test_a_failed_wandb_upload_does_not_stop_the_training(
+        self, script: ModuleType, home: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        code, out, fake = invoke(script, home, monkeypatch, fake=FakeRun({"log_demos.py": 1}))
+        assert code == 0 and len(fake.calls) == 5 and "FINETUNE_DONE" in out
 
     @pytest.mark.parametrize("mix", ["0.5,0.5", "0.6,0.3,0.2", "x,y,z"])
     def test_a_bad_camera_mix_is_a_usage_error(

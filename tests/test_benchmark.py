@@ -3,6 +3,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Self
 
 import numpy as np
 import pytest
@@ -125,6 +126,11 @@ class TestScoring:
         record = json.loads(json.dumps(Cell("clean", "legacy", 29, 96, 1, 12.5, [29]).record()))
         assert record["ci95"][0] < record["p"] < record["ci95"][1] and record["per_case"] == [29]
 
+    def test_rollout_frames_are_never_written_to_the_result_file(self) -> None:
+        frames = [np.zeros((24, 32, 3), np.uint8)] * 3
+        cell = Cell("clean", "legacy", 29, 96, 1, 12.5, [29], {"failure": ("caption", frames)})
+        assert "examples" not in cell.record() and len(json.dumps(cell.record())) < 400
+
 
 def test_a_fixed_camera_layout_overrides_only_the_camera() -> None:
     spec = {"pos": [0.1, 0.2, 0.3], "xyaxes": [1, 0, 0, 0, 1, 0], "fovy": 40.0}
@@ -201,6 +207,26 @@ def test_run_suite_sends_the_cases_own_prompt_to_the_policy_and_pools_the_rehear
     result = benchmark.run_suite(suite, policy, LAYOUT, batch_size=48)
     assert policy.tasks == {"Pick green can and place on red box"}
     assert (result.n, result.cases, len(result.per_case)) == (96, 2, 2) and result.successes == 0  # it never moves
+    assert result.examples == {}  # no videos unless asked for
+
+
+@needs_model
+def test_run_suite_keeps_one_rollout_per_outcome_when_videos_are_asked_for() -> None:
+    class Idle:
+        def act_batch(self, observations: list[Observation]) -> np.ndarray:
+            return np.zeros((len(observations), 4, 6))
+
+    case = benchmark.Case(
+        "t", [DetectedObject("blue", 131.0, 151.0, 900.0), DetectedObject("red", 221.0, 151.0, 1600.0)],
+        "blue", "red", STACK_TASK,
+    )  # fmt: skip
+    cell = benchmark.run_suite(
+        benchmark.Suite("t", "legacy", [case]), Idle(), LAYOUT, batch_size=32, record_videos=True
+    )
+    assert set(cell.examples) == {"failure"}  # an arm that never moves never stacks anything
+    caption, frames = cell.examples["failure"]
+    assert caption.startswith("t | t | failure | variant ") and STACK_TASK in caption
+    assert len(frames) >= 2 and frames[0].shape[2] == 3 and frames[0].dtype == np.uint8
 
 
 @pytest.fixture
@@ -230,6 +256,56 @@ class TestScript:
     def test_compare_needs_two_files(self, script: ModuleType, tmp_path: Path) -> None:
         one = self.write(tmp_path / "a.json", "v3", ("clean", 55))
         assert CliRunner().invoke(script.app, ["compare", str(one)]).exit_code == 2
+
+    @pytest.mark.parametrize(
+        ("flags", "expected"),
+        [(["--wandb"], True), ([], False), (["--wandb", "--no-videos"], False), (["--videos"], True)],
+    )
+    def test_rollout_videos_follow_wandb_logging_unless_overridden(
+        self, script: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, flags: list[str], expected: bool
+    ) -> None:
+        asked: list[bool] = []
+        logged: list[dict] = []
+
+        class FakeTracker:
+            def __init__(self, *_a: object, **kw: object) -> None:
+                logged.append(dict(kw))
+
+            def __enter__(self) -> Self:
+                return self
+
+            def __exit__(self, *_a: object) -> None:
+                pass
+
+            def log_cell(self, cell: Cell, step: int) -> None:
+                logged.append({"cell": cell.suite, "step": step})
+
+            def log_summary(self, *_a: object) -> None:
+                pass
+
+        class FakePolicy:
+            def __init__(self, **_k: object) -> None:
+                pass
+
+            def __enter__(self) -> Self:
+                return self
+
+            def __exit__(self, *_a: object) -> None:
+                pass
+
+        def fake_run_suite(suite: benchmark.Suite, policy: object, layout: object, batch: int, videos: bool) -> Cell:
+            asked.append(videos)
+            return Cell(suite.name, suite.group, 5, suite.n, 1, 0.1)
+
+        monkeypatch.setattr(script, "Tracker", FakeTracker)
+        monkeypatch.setattr(script, "Gr00tClient", FakePolicy)
+        monkeypatch.setattr(script, "run_suite", fake_run_suite)
+        args = ["run", "v4a", "--group", "legacy", "--only", "clean", *flags]
+        result = CliRunner().invoke(script.app, args)
+        assert result.exit_code == 0, result.output
+        assert asked == [expected]
+        assert logged[0].get("group") == "v4a"  # every run of a checkpoint shares its W&B group
+        assert {"cell": "clean", "step": 1} in logged  # each suite is logged as soon as it is scored
 
     def test_a_bad_group_is_a_usage_error(self, script: ModuleType) -> None:
         result = CliRunner().invoke(script.app, ["run", "x", "--group", "nope", "--dry-run"])

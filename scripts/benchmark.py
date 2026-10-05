@@ -61,9 +61,17 @@ def run(
     out: Annotated[Path | None, typer.Option(help="Write the cells to this JSON file")] = None,
     batch_size: int = 32,
     wandb_log: Annotated[bool, typer.Option("--wandb/--no-wandb")] = False,
+    videos: Annotated[
+        bool | None,
+        typer.Option(help="Record a success and a failure rollout per suite (default: whenever W&B logging is on)"),
+    ] = None,
+    wandb_group: Annotated[str | None, typer.Option(help="W&B group (default: the label)")] = None,
     dry_run: Annotated[bool, typer.Option(help="Build and list the suites without scoring them")] = False,
 ) -> None:
-    """Score the checkpoint served on --port on every suite."""
+    """Score the checkpoint served on --port on every suite.
+
+    With --wandb every suite is logged as soon as it finishes, with its rollout videos, so a run that dies midway
+    still shows what it had."""
     if group not in GROUPS:
         raise typer.BadParameter(f"--group must be one of {GROUPS}, got {group!r}")
     layout = TwinLayout()
@@ -77,15 +85,24 @@ def run(
     empty = [s.name for s in suites if not s.cases]
     if empty:
         console.print(f"skipping suites with no scene the expert can solve: {', '.join(empty)}")
-    config = {"label": label, "port": port, "group": group, "only": only or [], "headline_n": 96}
+    record_videos = wandb_log if videos is None else videos
+    config = {
+        "label": label,
+        "port": port,
+        "group": group,
+        "only": only or [],
+        "headline_n": 96,
+        "videos": record_videos,
+    }
     cells: list[Cell] = []
     with (
-        Tracker("benchmark", name=label, config=config, enabled=wandb_log) as tracker,
+        Tracker("benchmark", name=label, config=config, enabled=wandb_log, group=wandb_group or label) as tracker,
         Gr00tClient(port=port) as policy,
     ):
         for suite in (s for s in suites if s.cases):
-            cell = run_suite(suite, policy, layout, batch_size)
+            cell = run_suite(suite, policy, layout, batch_size, record_videos)
             cells.append(cell)
+            tracker.log_cell(cell, step=len(cells))
             lo, hi = cell.wilson()
             console.print(
                 f"{label} | {cell.suite}: {cell.successes}/{cell.n} ({cell.p:.0%}, 95% CI {lo:.0%} to {hi:.0%})"
@@ -104,6 +121,29 @@ def load_cells(path: Path) -> tuple[str, dict[str, Cell]]:
     data = json.loads(path.read_text())
     keep = Cell.__dataclass_fields__
     return data["label"], {c["suite"]: Cell(**{k: v for k, v in c.items() if k in keep}) for c in data["cells"]}
+
+
+@app.command()
+def upload(
+    result: Annotated[Path, typer.Argument(help="Result file from `run`")],
+    wandb_group: Annotated[str | None, typer.Option(help="W&B group (default: the label)")] = None,
+) -> None:
+    """Log the cells of a finished run's JSON to W&B (scores only: the rollouts are not saved in the file)."""
+    label, cells = load_cells(result)
+    with Tracker(
+        "benchmark", name=label, config={"label": label, "source": str(result)}, group=wandb_group or label
+    ) as t:
+        for step, cell in enumerate(cells.values(), start=1):
+            t.log_cell(cell, step=step)
+        rows = [
+            [c.suite, c.group, c.successes, c.n, round(c.p, 3), *(round(v, 3) for v in c.wilson())]
+            for c in cells.values()
+        ]
+        t.log_summary(
+            {f"p/{c.suite}": c.p for c in cells.values()},
+            {"cells": (["suite", "group", "successes", "n", "p", "ci_lo", "ci_hi"], rows)},
+        )
+    print(f"logged {len(cells)} cells for {label}")
 
 
 @app.command()

@@ -126,6 +126,11 @@ class Recipe:
         )
         return Step("record demos", argv, REPO, {"MUJOCO_GL": "egl"})
 
+    def log_demos_step(self) -> Step:
+        """Sample demo videos and prompts to W&B, in this run's group. A W&B hiccup must never stop the training."""
+        argv = ("uv", "run", "python", "scripts/log_demos.py", str(self.data_dir), "--name", self.name)
+        return Step("log demos", argv, REPO, allow_failure=True)
+
     def stats_steps(self) -> list[Step]:
         data = str(self.data_dir)
         stats = (self.python, "gr00t/data/stats.py", "--dataset-path", data, "--embodiment-tag", "NEW_EMBODIMENT")
@@ -148,7 +153,8 @@ class Recipe:
         return Step("fine-tune", argv, self.gr00t_dir, {"WANDB_RUN_GROUP": self.name})
 
     def steps(self, record: bool = True) -> list[Step]:
-        return [*([self.record_step()] if record else []), *self.stats_steps(), self.train_step()]
+        recording = [self.record_step(), self.log_demos_step()] if record else []
+        return [*recording, *self.stats_steps(), self.train_step()]
 
 
 def camera_mix_option(text: str) -> tuple[float, float, float]:

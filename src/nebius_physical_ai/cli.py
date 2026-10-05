@@ -301,6 +301,7 @@ def evaluate(
     sampler = SceneSampler(layout, seed=seed)
     episodes = [(sampler.sample(), sampler.start_pose()) for _ in range(scenes)]
     results: list[RolloutResult] = []
+    examples: dict[str, list[np.ndarray]] = {}  # the first success and first failure, as rollout frames
     successes = 0
     config = {"scenes": scenes, "seed": seed, "max_steps": max_steps, "port": port, "task": task, "camera": str(camera)}
     with Tracker("eval", name=name, config=config, enabled=wandb_log) as tracker, Gr00tClient(port=port) as client:
@@ -308,7 +309,11 @@ def evaluate(
             with ExitStack() as stack:
                 batch = episodes[start : start + batch_size]
                 twins = [stack.enter_context(Twin.from_objects(o, layout, start_pose=p)) for o, p in batch]
-                results += BatchRollout(twins, client, task).run(StackCheck(), max_steps)
+                batch_results = BatchRollout(twins, client, task, record=wandb_log).run(StackCheck(), max_steps)
+            for r in batch_results:  # keep two rollouts, not one per episode
+                examples.setdefault("success" if r.success else "failure", r.frames)
+                r.frames = []
+            results += batch_results
             successes = sum(r.success for r in results)
             print(f"{len(results)}/{scenes}: {successes} successes")
         rows = [[i, r.success, r.steps] for i, r in enumerate(results)]
@@ -316,6 +321,8 @@ def evaluate(
             {"success_rate": successes / scenes, "successes": successes, "n": scenes},
             {"episodes": (["scene", "success", "steps"], rows)},
         )
+        if wandb_log and (shown := {k: f for k, f in examples.items() if f}):
+            tracker.log_rollouts(shown, name)
     print(f"{name}: {successes}/{scenes} successes")
 
 

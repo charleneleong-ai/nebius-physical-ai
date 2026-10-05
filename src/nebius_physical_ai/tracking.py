@@ -8,6 +8,7 @@ import wandb
 from nebius_physical_ai.twin.rehearsal import VARIANT_COLUMNS, SceneRun
 
 if TYPE_CHECKING:
+    from nebius_physical_ai.benchmark import Cell
     from nebius_physical_ai.pipeline import PipelineResult
 
 OBJECT_COLUMNS = ["label", "x_mm", "y_mm", "length_mm", "width_mm", "yaw_deg", "shape", "area_mm2", "confidence"]
@@ -21,13 +22,20 @@ class Tracker:
     """
 
     def __init__(
-        self, job_type: str, name: str | None = None, config: dict[str, Any] | None = None, enabled: bool = True
+        self,
+        job_type: str,
+        name: str | None = None,
+        config: dict[str, Any] | None = None,
+        enabled: bool = True,
+        group: str | None = None,
     ) -> None:
+        """`group` collects the runs of one checkpoint (its demos, training and benchmark) under one name."""
         self.run = wandb.init(
             project=os.environ.get("WANDB_PROJECT", "preflight"),
             entity=os.environ.get("WANDB_ENTITY"),
             job_type=job_type,
             name=name,
+            group=group,
             config=config or {},
             mode=None if enabled else "disabled",
         )
@@ -49,6 +57,32 @@ class Tracker:
         metrics = {"p": r.p, "ci_lo": lo, "ci_hi": hi, "successes": r.successes, "n": r.n, "seconds": run.seconds}
         self.run.log({"scene_id": run.scene_id, **metrics, **run.tags, **extra, **self.media(run)}, step=run.scene_id)
         self.variant_rows += r.variant_rows(run.scene_id, run.scene[0])
+
+    def log_cell(self, cell: "Cell", step: int, fps: int = 4) -> None:
+        """One benchmark suite's score as soon as it is known, with its success and failure rollouts when recorded."""
+        lo, hi = cell.wilson()
+        logged: dict[str, Any] = {
+            "suite_index": step,
+            f"p/{cell.suite}": cell.p,
+            f"ci_lo/{cell.suite}": lo,
+            f"ci_hi/{cell.suite}": hi,
+            f"successes/{cell.suite}": cell.successes,
+        }
+        for kind, (caption, frames) in cell.examples.items():
+            logged[f"video/{cell.suite}_{kind}"] = self.video(frames, caption, fps)
+            logged.setdefault(f"media/{cell.suite}_start", wandb.Image(frames[0], caption=caption))
+        self.run.log(logged, step=step)
+
+    @staticmethod
+    def video(frames: list[np.ndarray], caption: str, fps: int = 4) -> Any:
+        """RGB (H, W, 3) frames as a W&B video."""
+        return wandb.Video(
+            np.stack(frames).transpose(0, 3, 1, 2), fps=fps, caption=caption, format="mp4"
+        )  # (T, C, H, W)
+
+    def log_rollouts(self, examples: dict[str, list[np.ndarray]], caption: str) -> None:
+        """A success and a failure rollout (kind -> frames) for jobs that score without a per-scene log."""
+        self.run.log({f"video/{kind}": self.video(frames, f"{caption} | {kind}") for kind, frames in examples.items()})
 
     @staticmethod
     def media(run: SceneRun, fps: int = 4) -> dict[str, Any]:
