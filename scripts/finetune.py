@@ -14,6 +14,7 @@ Runs on the A100 from the repo root. Needs ~/Isaac-GR00T on branch n1d6 (>= 9b37
 saved every --save-steps and the last --save-total-limit are kept; each is about 22 GB.
 """
 
+import json
 import os
 import shlex
 import shutil
@@ -25,6 +26,8 @@ from typing import Annotated
 import typer
 
 from nebius_physical_ai.capture.camera import DEFAULT_CAMERA_MIX, parse_camera_mix
+from nebius_physical_ai.policy.gr00t import LAYOUTS
+from nebius_physical_ai.twin.dataset import modality
 
 REPO = Path(__file__).resolve().parent.parent
 HOME = Path.home()
@@ -33,13 +36,16 @@ BASE_MULTITASK = HOME / "checkpoints/gr00t-n1.6-so101-multitask"  # the communit
 MIX_TEXT = ",".join(str(share) for share in DEFAULT_CAMERA_MIX)
 # Run in GR00T's own environment: relative-action statistics need the SO-100 modality config registered first.
 REL_STATS = """
+import importlib.util
 import sys
-sys.path.insert(0, "examples/SO100")
-import so100_config  # noqa: F401 - registers the NEW_EMBODIMENT modality config
+spec = importlib.util.spec_from_file_location("modality_config", sys.argv[2])
+spec.loader.exec_module(importlib.util.module_from_spec(spec))  # registers the NEW_EMBODIMENT modality config
 from gr00t.data.embodiment_tags import EmbodimentTag
 from gr00t.data.stats import generate_rel_stats
 generate_rel_stats(sys.argv[1], EmbodimentTag.NEW_EMBODIMENT)
 """
+STOCK_MODALITY_CONFIG = "examples/SO100/so100_config.py"  # relative to the GR00T checkout
+SPLIT_MODALITY_CONFIG = REPO / "scripts/modality_configs/so101_split.py"
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -69,9 +75,11 @@ class Recipe:
     camera_mix: tuple[float, float, float] = DEFAULT_CAMERA_MIX
     real_objects: Path = REPO / "data/capture/real_objects.json"
     role_agnostic: bool = True
+    layout: str = "stock"  # joint layout: stock (5 arm joints + gripper) or split (wrist roll in its own block)
     seed: int = 42
     save_steps: int = 2000
     save_total_limit: int = 2
+    save_only_model: bool = False  # checkpoints without optimizer state: about a third the size, not resumable
     batch_size: int = 32
     learning_rate: float = 1e-4
     gr00t_dir: Path = HOME / "Isaac-GR00T"
@@ -92,13 +100,35 @@ class Recipe:
         return str(self.gr00t_dir / ".venv/bin/python")
 
     @property
+    def modality_config(self) -> str:
+        """The GR00T modality config for this layout (the stock one is relative to the GR00T checkout)."""
+        return str(SPLIT_MODALITY_CONFIG) if self.layout == "split" else STOCK_MODALITY_CONFIG
+
+    @property
     def uses_pose(self) -> bool:
         """Whether any episode takes its camera from the calibrated pose (the first share of the mix)."""
         return self.camera_mix[0] > 0
 
+    def layout_problems(self, record: bool) -> list[str]:
+        """An unknown layout, or a reused dataset whose modality.json groups the joints another way."""
+        if self.layout not in LAYOUTS:
+            return [f"--layout must be one of {sorted(LAYOUTS)}, got {self.layout!r}"]
+        declared = self.data_dir / "meta/modality.json"
+        if record or not declared.exists():
+            return []
+        blocks = tuple(json.loads(declared.read_text()).get("action", {}))
+        if blocks == LAYOUTS[self.layout].keys:
+            return []
+        wanted = list(LAYOUTS[self.layout].keys)
+        message = (
+            f"{declared} splits the joints as {list(blocks)} but --layout {self.layout} trains on {wanted}: "
+            f"relink the dataset with --layout {self.layout}"
+        )
+        return [message]
+
     def problems(self, record: bool = True, force: bool = False) -> list[str]:
         """Everything that would stop the run, so it fails before recording for an hour, not after."""
-        found = []
+        found = self.layout_problems(record)
         if record and self.episodes < 1:
             found.append(f"--episodes must be at least 1, got {self.episodes}")
         if self.max_steps < 1 or self.save_steps < 1 or self.save_steps > self.max_steps:
@@ -122,6 +152,7 @@ class Recipe:
             ("uv", "run", "npai", "demos", str(self.data_dir), "--episodes", str(self.episodes))
             + ("--seed", str(self.seed), "--randomize", "--real-objects", str(self.real_objects))
             + (("--role-agnostic",) if self.role_agnostic else ())
+            + (("--layout", self.layout) if self.layout != "stock" else ())
             + (camera if self.uses_pose else ())
         )
         return Step("record demos", argv, REPO, {"MUJOCO_GL": "egl"})
@@ -137,16 +168,17 @@ class Recipe:
         # The first call can fail until the modality config is registered; the relative stats step fixes that.
         return [
             Step("dataset stats", stats, self.gr00t_dir, allow_failure=True),
-            Step("relative stats", (self.python, "-c", REL_STATS, data), self.gr00t_dir),
+            Step("relative stats", (self.python, "-c", REL_STATS, data, self.modality_config), self.gr00t_dir),
         ]
 
     def train_step(self) -> Step:
         argv = (
             (self.python, "gr00t/experiment/launch_finetune.py")
             + ("--base-model-path", str(self.base), "--dataset-path", str(self.data_dir))
-            + ("--modality-config-path", "examples/SO100/so100_config.py", "--embodiment-tag", "NEW_EMBODIMENT")
+            + ("--modality-config-path", self.modality_config, "--embodiment-tag", "NEW_EMBODIMENT")
             + ("--num-gpus", "1", "--output-dir", str(self.out_dir), "--max-steps", str(self.max_steps))
             + ("--save-steps", str(self.save_steps), "--save-total-limit", str(self.save_total_limit))
+            + (("--save-only-model",) if self.save_only_model else ())
             + ("--global-batch-size", str(self.batch_size), "--dataloader-num-workers", "8")
             + ("--learning-rate", str(self.learning_rate), "--use-wandb", "--wandb-project", self.wandb_project)
         )
@@ -181,10 +213,17 @@ def run(
     role_agnostic: Annotated[
         bool, typer.Option(help="Name the objects by their looks, one prompt per episode (off: blue and red only)")
     ] = True,
+    layout: Annotated[
+        str, typer.Option(help="Joint layout: stock (5 arm joints + gripper) or split (wrist roll in its own block)")
+    ] = "stock",
     seed: int = 42,
     save_steps: int = 2000,
     save_total_limit: int = 2,
-    gr00t_dir: Annotated[Path, typer.Option(help="Isaac-GR00T checkout (branch n1d6)")] = HOME / "Isaac-GR00T",
+    save_only_model: Annotated[
+        bool, typer.Option(help="Save weights without optimizer state: about a third the size, not resumable")
+    ] = False,
+    gr00t_dir: Annotated[Path, typer.Option(help="Isaac-GR00T checkout (n1d6 for N1.6, main for N1.7)")] = HOME
+    / "Isaac-GR00T",
     data_root: Path = HOME / "data",
     checkpoint_root: Path = HOME / "checkpoints",
     skip_demos: Annotated[bool, typer.Option(help="Reuse the dataset already recorded under this name")] = False,
@@ -201,9 +240,11 @@ def run(
         camera_mix=camera_mix_option(camera_mix),
         real_objects=real_objects,
         role_agnostic=role_agnostic,
+        layout=layout,
         seed=seed,
         save_steps=save_steps,
         save_total_limit=save_total_limit,
+        save_only_model=save_only_model,
         gr00t_dir=gr00t_dir,
         data_root=data_root,
         checkpoint_root=checkpoint_root,
@@ -235,9 +276,15 @@ def link_dataset(
     source: Annotated[Path, typer.Argument(help="A dataset recorded by `npai demos`")],
     dest: Annotated[Path, typer.Argument(help="Where the linked copy goes")],
     force: Annotated[bool, typer.Option(help="Replace an existing linked copy (never touches the source)")] = False,
+    layout: Annotated[
+        str | None, typer.Option(help="Rewrite the copy's modality.json for this joint layout (stock or split)")
+    ] = None,
 ) -> None:
     """A second view of a recorded dataset for another GR00T version: its episodes and videos are linked, not copied,
-    and its meta/ is copied, so that version can rewrite the statistics without touching the original."""
+    and its meta/ is copied, so that version can rewrite the statistics (and, with --layout, regroup the joints)
+    without touching the original."""
+    if layout is not None and layout not in LAYOUTS:
+        raise typer.BadParameter(f"--layout must be one of {sorted(LAYOUTS)}, got {layout!r}")
     if not (source / "meta/episodes.jsonl").exists():
         raise typer.BadParameter(f"{source} is not a recorded dataset (no meta/episodes.jsonl)")
     if dest.exists() or dest.is_symlink():
@@ -250,7 +297,10 @@ def link_dataset(
     for name in ("data", "videos"):
         (dest / name).symlink_to((source / name).resolve(), target_is_directory=True)
     shutil.copytree(source / "meta", dest / "meta")
-    print(f"{dest}: data and videos linked to {source}, meta copied")
+    if layout is not None:
+        (dest / "meta/modality.json").write_text(json.dumps(modality(layout), indent=4))
+    regrouped = f", joints grouped as {list(LAYOUTS[layout].keys)}" if layout else ""
+    print(f"{dest}: data and videos linked to {source}, meta copied{regrouped}")
 
 
 @app.command()

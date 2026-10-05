@@ -18,7 +18,7 @@ from nebius_physical_ai.capture.markers import DPI, render_marker_sheet
 from nebius_physical_ai.capture.mat import ARUCO_DICT, DetectedObject, MatSpec, ScenePerceiver
 from nebius_physical_ai.capture.server import create_app
 from nebius_physical_ai.pipeline import add_pipeline_cli
-from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, Gr00tClient
+from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, LAYOUTS, Gr00tClient
 from nebius_physical_ai.tracking import Tracker
 from nebius_physical_ai.trust.plots import StressPlots
 from nebius_physical_ai.trust.stress import StressCase, StressReport
@@ -123,6 +123,10 @@ def demos(
             help="Name the pick and place objects by their looks, with a prompt per episode (needs --randomize)"
         ),
     ] = False,
+    layout: Annotated[
+        str,
+        typer.Option(help="Joint layout in modality.json: stock (5 arm joints + gripper) or split (wrist roll apart)"),
+    ] = "stock",
     width_mm: WidthOpt = A3_MAT.width_mm,
     height_mm: HeightOpt = A3_MAT.height_mm,
 ) -> None:
@@ -134,7 +138,9 @@ def demos(
         raise typer.BadParameter("--camera and --role-agnostic need --randomize: only randomized episodes vary")
     sampler = SceneSampler(TwinLayout(MatSpec(width_mm, height_mm)), seed=seed)
     randomizer = build_randomizer(sampler, seed, real_objects, camera, camera_mix, role_agnostic) if randomize else None
-    writer, attempts = LeRobotWriter(out), 0
+    if layout not in LAYOUTS:
+        raise typer.BadParameter(f"--layout must be one of {sorted(LAYOUTS)}, got {layout!r}")
+    writer, attempts = LeRobotWriter(out, layout=layout), 0
     for _ in track(range(episodes), description="recording demos"):
         while True:
             attempts += 1

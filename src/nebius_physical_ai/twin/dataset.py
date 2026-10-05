@@ -8,19 +8,30 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from nebius_physical_ai.policy.gr00t import CAMERA_KEYS
+from nebius_physical_ai.policy.gr00t import CAMERA_KEYS, LAYOUTS
 from nebius_physical_ai.twin.expert import Frame
 from nebius_physical_ai.twin.rollout import CONTROL_HZ
 from nebius_physical_ai.twin.scene import ARM_JOINTS
 
 JOINT_NAMES = [f"{j}.pos" for j in ARM_JOINTS]
 CAMERAS = {name: f"observation.images.{name}" for name in CAMERA_KEYS}
-MODALITY = {  # matches Isaac-GR00T examples/SO100/modality.json
-    "state": {"single_arm": {"start": 0, "end": 5}, "gripper": {"start": 5, "end": 6}},
-    "action": {"single_arm": {"start": 0, "end": 5}, "gripper": {"start": 5, "end": 6}},
-    "video": {name: {"original_key": key} for name, key in CAMERAS.items()},
-    "annotation": {"human.task_description": {"original_key": "task_index"}},
-}
+
+
+def modality(layout: str = "stock") -> dict[str, Any]:
+    """The dataset's meta/modality.json for a joint layout: `stock` matches Isaac-GR00T examples/SO100/modality.json,
+    `split` gives the wrist roll a block of its own, as the community SO-101 checkpoints expect."""
+    if layout not in LAYOUTS:
+        raise ValueError(f"unknown layout {layout!r}; choose from {sorted(LAYOUTS)}")
+    blocks = {key: {"start": start, "end": end} for key, start, end in LAYOUTS[layout].blocks}
+    return {
+        "state": blocks,
+        "action": dict(blocks),
+        "video": {name: {"original_key": key} for name, key in CAMERAS.items()},
+        "annotation": {"human.task_description": {"original_key": "task_index"}},
+    }
+
+
+MODALITY = modality()
 
 
 @dataclass
@@ -32,6 +43,7 @@ class LeRobotWriter:
 
     root: Path
     robot_type: str = "so101_follower"
+    layout: str = "stock"  # joint layout written to modality.json (see `modality`)
     image_size: tuple[int, int] = (480, 640)
     tasks: list[str] = field(default_factory=list)
     episodes: list[dict[str, Any]] = field(default_factory=list)
@@ -129,7 +141,7 @@ class LeRobotWriter:
         meta = self.root / "meta"
         meta.mkdir(parents=True, exist_ok=True)
         (meta / "info.json").write_text(json.dumps(self.info(), indent=4))
-        (meta / "modality.json").write_text(json.dumps(MODALITY, indent=4))
+        (meta / "modality.json").write_text(json.dumps(modality(self.layout), indent=4))
         (meta / "episodes.jsonl").write_text("".join(json.dumps(e) + "\n" for e in self.episodes))
         (meta / "tasks.jsonl").write_text(
             "".join(json.dumps({"task_index": i, "task": t}) + "\n" for i, t in enumerate(self.tasks))

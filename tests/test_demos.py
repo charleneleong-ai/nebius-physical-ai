@@ -1,3 +1,4 @@
+import itertools
 import json
 from pathlib import Path
 
@@ -68,3 +69,39 @@ def test_writer_produces_readable_lerobot_v21(tmp_path: Path) -> None:
         decoded = list(c.decode(video=0))
     assert len(decoded) == 12 and decoded[0].height == 48
     assert json.loads((tmp_path / "meta/modality.json").read_text())["state"]["gripper"] == {"start": 5, "end": 6}
+
+
+@pytest.mark.parametrize(
+    ("layout", "blocks"),
+    [
+        ("stock", {"single_arm": (0, 5), "gripper": (5, 6)}),
+        ("split", {"single_arm": (0, 4), "wrist_roll": (4, 5), "gripper": (5, 6)}),
+    ],
+)
+def test_modality_json_covers_all_six_joints_once_in_either_layout(layout: str, blocks: dict, tmp_path: Path) -> None:
+    rng = np.random.default_rng(42)
+    img = rng.integers(0, 255, (48, 64, 3), np.uint8)
+    frames = [Frame(Observation(img, img, rng.normal(size=6), "t"), rng.normal(size=6)) for _ in range(3)]
+    writer = LeRobotWriter(tmp_path, image_size=(48, 64), layout=layout)
+    writer.add_episode(frames, "t")
+    writer.finalize()
+    written = json.loads((tmp_path / "meta/modality.json").read_text())
+    for part in ("state", "action"):
+        assert {k: (v["start"], v["end"]) for k, v in written[part].items()} == blocks
+        spans = sorted((v["start"], v["end"]) for v in written[part].values())
+        assert spans[0][0] == 0 and spans[-1][1] == 6 and all(a[1] == b[0] for a, b in itertools.pairwise(spans))
+    assert set(written["video"]) == {"front", "wrist"} and written["annotation"] == {
+        "human.task_description": {"original_key": "task_index"}
+    }
+
+
+def test_an_unknown_layout_is_rejected_by_the_writer_and_the_demos_command(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from nebius_physical_ai.cli import app
+
+    writer = LeRobotWriter(tmp_path / "a", layout="wide")
+    with pytest.raises(ValueError, match="unknown layout"):
+        writer.finalize()
+    result = CliRunner().invoke(app, ["demos", str(tmp_path / "b"), "--layout", "wide"])
+    assert result.exit_code == 2 and "--layout must be one of" in " ".join(result.output.replace("│", " ").split())

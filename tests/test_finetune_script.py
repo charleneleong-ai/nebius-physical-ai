@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -111,8 +112,55 @@ class TestRecipe:
     ) -> None:
         first, second = recipe(script, home).stats_steps()
         assert first.allow_failure and not second.allow_failure  # the first can fail until the config is registered
-        assert second.argv[1] == "-c" and "so100_config" in second.argv[2] and "generate_rel_stats" in second.argv[2]
+        assert second.argv[1] == "-c" and "register" in second.argv[2] and "generate_rel_stats" in second.argv[2]
         assert second.argv[3] == str(home.data / "preflight_demos_v4") and second.cwd == home.gr00t
+        assert second.argv[4] == "examples/SO100/so100_config.py"  # the config the stats are computed under
+
+    def test_the_stock_layout_trains_under_nvidias_so100_config(
+        self, script: ModuleType, home: SimpleNamespace
+    ) -> None:
+        step = recipe(script, home).train_step()
+        assert flag(step.argv, "--modality-config-path") == "examples/SO100/so100_config.py"
+        assert "--save-only-model" not in step.argv
+
+    def test_the_split_layout_trains_and_computes_statistics_under_our_split_config(
+        self, script: ModuleType, home: SimpleNamespace
+    ) -> None:
+        r = recipe(script, home, layout="split")
+        config = str(script.REPO / "scripts/modality_configs/so101_split.py")
+        assert Path(config).exists()  # the file the steps point at is really there
+        assert flag(r.train_step().argv, "--modality-config-path") == config
+        assert r.stats_steps()[1].argv[4] == config
+        assert flag(r.record_step().argv, "--layout") == "split"
+        assert "--layout" not in recipe(script, home).record_step().argv
+
+    @pytest.mark.parametrize("layout", ["stock", "split"])
+    def test_wandb_logging_is_on_for_every_layout_in_the_runs_group(
+        self, script: ModuleType, home: SimpleNamespace, layout: str
+    ) -> None:
+        step = recipe(script, home, layout=layout).train_step()
+        assert "--use-wandb" in step.argv and flag(step.argv, "--wandb-project") == "preflight"
+        assert step.env["WANDB_RUN_GROUP"] == "v4"
+
+    def test_checkpoints_can_be_saved_without_optimizer_state(self, script: ModuleType, home: SimpleNamespace) -> None:
+        assert "--save-only-model" in recipe(script, home, save_only_model=True).train_step().argv
+
+    def test_a_dataset_grouped_for_the_other_layout_is_a_problem_before_anything_runs(
+        self, script: ModuleType, home: SimpleNamespace
+    ) -> None:
+        stock = recipe(script, home)
+        meta = stock.data_dir / "meta"
+        meta.mkdir(parents=True)
+        (meta / "modality.json").write_text(json.dumps({"action": {"single_arm": {}, "gripper": {}}}))
+        assert stock.problems(record=False) == []
+        found = " ".join(recipe(script, home, layout="split").problems(record=False))
+        assert "['single_arm', 'gripper']" in found and "--layout split" in found and "relink" in found
+        (meta / "modality.json").write_text(json.dumps({"action": {"single_arm": {}, "wrist_roll": {}, "gripper": {}}}))
+        assert recipe(script, home, layout="split").problems(record=False) == []
+        assert "--layout" in " ".join(stock.problems(record=False))
+
+    def test_an_unknown_layout_is_a_problem(self, script: ModuleType, home: SimpleNamespace) -> None:
+        assert "--layout must be one of" in " ".join(recipe(script, home, layout="wide").problems())
 
     def test_the_steps_run_in_order_and_recording_can_be_skipped(
         self, script: ModuleType, home: SimpleNamespace
@@ -272,6 +320,17 @@ class TestRunCommand:
         out = CliRunner().invoke(script.app, ["run", "--help"]).output
         for option in ("--episodes", "--camera-mix", "--base", "--skip-demos", "--force", "--dry-run", "--save-steps"):
             assert option in out
+        for option in ("--layout", "--save-only-model"):
+            assert option in out
+
+    def test_a_dry_run_for_the_split_layout_on_a_community_checkpoint_shows_every_flag(
+        self, script: ModuleType, home: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        code, out, fake = invoke(
+            script, home, monkeypatch, "--skip-demos", "--layout", "split", "--save-only-model", "--dry-run"
+        )
+        assert code == 0 and fake.calls == []
+        assert "scripts/modality_configs/so101_split.py" in out and "--save-only-model" in out and "--use-wandb" in out
 
 
 class TestLinkDataset:
@@ -313,6 +372,24 @@ class TestLinkDataset:
         assert self.link(script, str(source), str(dest), "--force")[0] == 0
         assert (source / "data/chunk-000/episode_000000.parquet").exists()  # the links went, not their targets
         assert (source / "videos/chunk-000/episode_000000.mp4").exists()
+
+    def test_a_layout_regroups_the_joints_in_the_copy_only(
+        self, script: ModuleType, source: Path, tmp_path: Path
+    ) -> None:
+        (source / "meta/modality.json").write_text(json.dumps({"state": {"single_arm": {"start": 0, "end": 5}}}))
+        dest = tmp_path / "linked"
+        code, out = self.link(script, str(source), str(dest), "--layout", "split")
+        copied = json.loads((dest / "meta/modality.json").read_text())
+        assert code == 0 and "joints grouped as ['single_arm', 'wrist_roll', 'gripper']" in out
+        assert copied["action"]["wrist_roll"] == {"start": 4, "end": 5} and copied["state"]["single_arm"]["end"] == 4
+        assert set(copied["video"]) == {"front", "wrist"}
+        assert json.loads((source / "meta/modality.json").read_text()) == {
+            "state": {"single_arm": {"start": 0, "end": 5}}
+        }
+
+    def test_an_unknown_layout_is_refused(self, script: ModuleType, source: Path, tmp_path: Path) -> None:
+        code, out = self.link(script, str(source), str(tmp_path / "linked"), "--layout", "wide")
+        assert code == 2 and "--layout must be one of" in out and not (tmp_path / "linked").exists()
 
     def test_forcing_onto_the_source_itself_is_refused(self, script: ModuleType, source: Path) -> None:
         code, out = self.link(script, str(source), str(source), "--force")
