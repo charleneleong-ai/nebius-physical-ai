@@ -10,7 +10,15 @@ import pytest
 from typer.testing import CliRunner
 
 from nebius_physical_ai import benchmark
-from nebius_physical_ai.benchmark import HEADLINE_N, Cell, FixedCameraLayout, build_suites, legacy_suites, verdict
+from nebius_physical_ai.benchmark import (
+    HEADLINE_N,
+    Cell,
+    FixedCameraLayout,
+    build_suites,
+    legacy_suites,
+    mcnemar,
+    verdict,
+)
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import Observation
 from nebius_physical_ai.twin import roles
@@ -122,13 +130,36 @@ class TestScoring:
         assert verdict(cell(30), cell(26)) == "within noise"  # the run-to-run wobble seen on identical scenes
         assert verdict(cell(30), cell(30)) == "within noise"
 
+    @pytest.mark.parametrize(
+        ("wins", "losses", "expected"),
+        [(12, 2, "better"), (2, 12, "worse"), (8, 4, "within noise"), (0, 0, "within noise")],
+    )
+    def test_paired_verdicts_count_only_the_scenes_the_checkpoints_disagree_on(
+        self, wins: int, losses: int, expected: str
+    ) -> None:
+        both, neither = 30, 96 - 30 - wins - losses
+        a = [True] * both + [True] * wins + [False] * losses + [False] * neither
+        b = [True] * both + [False] * wins + [True] * losses + [False] * neither
+        ca, cb = (Cell("s", "legacy", sum(o), 96, 1, 0.0, [sum(o)], o) for o in (a, b))
+        assert verdict(ca, cb) == expected
+        if wins + losses:
+            assert mcnemar(ca, cb)[:2] == (wins, losses)
+
+    def test_mcnemar_matches_the_exact_binomial_and_sees_what_intervals_miss(self) -> None:
+        a = [True] * 40 + [True] * 9 + [False] + [False] * 46  # 49/96: 9 wins and 1 loss against b
+        b = [True] * 40 + [False] * 9 + [True] + [False] * 46  # 41/96
+        ca, cb = (Cell("s", "legacy", sum(o), 96, 1, 0.0, [sum(o)], o) for o in (a, b))
+        assert mcnemar(ca, cb) == (9, 1, pytest.approx(2 * (1 + 10) / 2**10))  # exact binomial, p = 0.021
+        assert verdict(cell(49), cell(41)) == "within noise" and verdict(ca, cb) == "better"
+        assert mcnemar(ca, cell(41)) is None  # no per-scene outcomes: unpaired
+
     def test_the_record_round_trips_through_json(self) -> None:
         record = json.loads(json.dumps(Cell("clean", "legacy", 29, 96, 1, 12.5, [29]).record()))
         assert record["ci95"][0] < record["p"] < record["ci95"][1] and record["per_case"] == [29]
 
     def test_rollout_frames_are_never_written_to_the_result_file(self) -> None:
         frames = [np.zeros((24, 32, 3), np.uint8)] * 3
-        cell = Cell("clean", "legacy", 29, 96, 1, 12.5, [29], {"failure": ("caption", frames)})
+        cell = Cell("clean", "legacy", 29, 96, 1, 12.5, [29], examples={"failure": ("caption", frames)})
         assert "examples" not in cell.record() and len(json.dumps(cell.record())) < 400
 
 
@@ -233,6 +264,7 @@ def test_run_suite_sends_the_cases_own_prompt_to_the_policy_and_pools_the_rehear
     assert policy.tasks == {"Pick green can and place on red box"}
     assert (result.n, result.cases, len(result.per_case)) == (96, 2, 2) and result.successes == 0  # it never moves
     assert result.examples == {}  # no videos unless asked for
+    assert result.outcomes == [False] * 96  # one outcome per rehearsal, for paired comparisons
 
 
 @needs_model

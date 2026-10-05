@@ -6,7 +6,8 @@
     uv run python scripts/benchmark.py compare logs/bench_v3.json logs/bench_v4a.json
 
 Runs on the A100 from the repo root against a GR00T server (see scripts/finetune.py serve). Every cell is 96 randomised
-rehearsals at seed 42; `compare` calls a difference only when the 95% intervals do not overlap.
+rehearsals at seed 42, the same scenes for every checkpoint, so `compare` pairs them (McNemar, p < 0.05); older result
+files without per-scene outcomes fall back to non-overlapping 95% intervals.
 """
 
 import json
@@ -17,7 +18,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from nebius_physical_ai.benchmark import Cell, Suite, build_suites, run_suite, verdict
+from nebius_physical_ai.benchmark import Cell, Suite, build_suites, mcnemar, run_suite, verdict
 from nebius_physical_ai.capture.camera import CameraPose
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, Gr00tClient
@@ -148,11 +149,21 @@ def upload(
     print(f"logged {len(cells)} cells for {label}")
 
 
+def describe(cell: Cell, base: Cell) -> str:
+    """Score and verdict against the reference, with the paired evidence when there is any."""
+    text = f"{cell.successes}/{cell.n} ({cell.p:.0%}) {verdict(cell, base)}"
+    if (paired := mcnemar(cell, base)) is None:
+        return text + " (unpaired)"
+    wins, losses, p = paired
+    return text + f" (+{wins}/-{losses}, p={p:.3f})"
+
+
 @app.command()
 def compare(
     results: Annotated[list[Path], typer.Argument(help="Result files from `run`; the first is the reference")],
 ) -> None:
-    """Side by side: each later checkpoint against the first, 'better' or 'worse' only beyond the noise."""
+    """Side by side: each later checkpoint against the first. Scene-by-scene McNemar when both runs saved per-scene
+    outcomes (+wins/-losses on the scenes where they disagree), else the interval-overlap check."""
     if len(results) < 2:
         raise typer.BadParameter("give at least two result files")
     loaded = [load_cells(p) for p in results]
@@ -162,7 +173,7 @@ def compare(
         row = [suite, f"{base.successes}/{base.n} ({base.p:.0%})"]
         for _, cells in others:
             cell = cells.get(suite)
-            row.append("-" if cell is None else f"{cell.successes}/{cell.n} ({cell.p:.0%}) {verdict(cell, base)}")
+            row.append("-" if cell is None else describe(cell, base))
         table.add_row(*row)
     console.print(table)
 

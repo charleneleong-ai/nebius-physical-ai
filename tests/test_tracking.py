@@ -173,7 +173,7 @@ class TestLogPreflight:
         from nebius_physical_ai.benchmark import Cell
 
         frames = [np.full((24, 32, 3), 40 * i, np.uint8) for i in range(3)]
-        cell = Cell("clean", "legacy", 29, 96, 1, 5.0, [29], {"failure": ("clean | failure", frames)})
+        cell = Cell("clean", "legacy", 29, 96, 1, 5.0, [29], examples={"failure": ("clean | failure", frames)})
         with tracking.Tracker("benchmark") as tracker:
             tracker.log_cell(cell, step=1)
         fake = tracker_run(run.created)

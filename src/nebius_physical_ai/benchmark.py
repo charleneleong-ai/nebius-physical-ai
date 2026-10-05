@@ -105,6 +105,7 @@ class Cell:
     cases: int
     seconds: float
     per_case: list[int] = field(default_factory=list)  # successes per case, in suite order
+    outcomes: list[bool] = field(default_factory=list)  # every rehearsal, case-major: pairs checkpoints scene by scene
     # First success and first failure rollout, kind -> (caption, frames); only when videos were asked for, never saved
     examples: dict[str, tuple[str, list[np.ndarray]]] = field(default_factory=dict, repr=False, compare=False)
 
@@ -297,7 +298,7 @@ def run_suite(
     With `record_videos` the cell also keeps the first success and the first failure as rollout frames."""
     import time
 
-    start, per_case = time.time(), []
+    start, per_case, outcomes = time.time(), [], []
     examples: dict[str, tuple[str, list[np.ndarray]]] = {}
     for case in suite.cases:
         rehearsal = Rehearsal(
@@ -310,18 +311,44 @@ def run_suite(
         )
         result = rehearsal.run(case.objects, suite.variants, SEED)
         per_case.append(result.successes)
+        outcomes += [bool(v["success"]) for v in result.variants]
         for kind, (index, frames) in result.examples.items():
             caption = f"{suite.name} | {case.name} | {kind} | variant {index} | {case.prompt}"
             examples.setdefault(kind, (caption, frames))
     cell = Cell(
-        suite.name, suite.group, sum(per_case), suite.n, len(suite.cases), round(time.time() - start, 1), per_case
+        suite.name,
+        suite.group,
+        sum(per_case),
+        suite.n,
+        len(suite.cases),
+        round(time.time() - start, 1),
+        per_case,
+        outcomes,
     )
     cell.examples = examples
     return cell
 
 
-def verdict(a: Cell, b: Cell) -> str:
-    """How `a` compares with `b`: better or worse only when their 95% intervals don't overlap, else within noise."""
+def mcnemar(a: Cell, b: Cell) -> tuple[int, int, float] | None:
+    """Exact McNemar test on the scenes both cells rehearsed: (a wins, b wins, two-sided p), or None if unpaired.
+
+    Every checkpoint sees the same scenes at the same seed, so only the scenes where they disagree carry evidence; this
+    is far more sensitive than comparing two independent intervals."""
+    if not a.outcomes or len(a.outcomes) != len(b.outcomes):
+        return None
+    wins = sum(x and not y for x, y in zip(a.outcomes, b.outcomes))
+    losses = sum(y and not x for x, y in zip(a.outcomes, b.outcomes))
+    k, n = min(wins, losses), wins + losses
+    p = min(1.0, 2 * sum(math.comb(n, i) for i in range(k + 1)) / 2**n) if n else 1.0
+    return wins, losses, p
+
+
+def verdict(a: Cell, b: Cell, alpha: float = 0.05) -> str:
+    """How `a` compares with `b`. Paired (McNemar, p < alpha) when both have per-scene outcomes; otherwise better or
+    worse only when their 95% intervals don't overlap. Anything else is within noise."""
+    if (paired := mcnemar(a, b)) is not None:
+        wins, losses, p = paired
+        return "within noise" if p >= alpha else ("better" if wins > losses else "worse")
     (a_lo, a_hi), (b_lo, b_hi) = a.wilson(), b.wilson()
     if a_lo > b_hi:
         return "better"
