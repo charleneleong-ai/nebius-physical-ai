@@ -230,6 +230,29 @@ def run(
         print(f"FINETUNE_DONE {recipe.out_dir}/checkpoint-{recipe.max_steps}")
 
 
+@app.command("link-dataset")
+def link_dataset(
+    source: Annotated[Path, typer.Argument(help="A dataset recorded by `npai demos`")],
+    dest: Annotated[Path, typer.Argument(help="Where the linked copy goes")],
+    force: Annotated[bool, typer.Option(help="Replace an existing linked copy (never touches the source)")] = False,
+) -> None:
+    """A second view of a recorded dataset for another GR00T version: its episodes and videos are linked, not copied,
+    and its meta/ is copied, so that version can rewrite the statistics without touching the original."""
+    if not (source / "meta/episodes.jsonl").exists():
+        raise typer.BadParameter(f"{source} is not a recorded dataset (no meta/episodes.jsonl)")
+    if dest.exists() or dest.is_symlink():
+        if not force:
+            raise typer.BadParameter(f"{dest} already exists: choose another name or pass --force")
+        if dest.resolve() == source.resolve() or source.resolve() in dest.resolve().parents:
+            raise typer.BadParameter(f"{dest} is the source dataset itself")
+        shutil.rmtree(dest)  # removes links, not what they point at
+    dest.mkdir(parents=True)
+    for name in ("data", "videos"):
+        (dest / name).symlink_to((source / name).resolve(), target_is_directory=True)
+    shutil.copytree(source / "meta", dest / "meta")
+    print(f"{dest}: data and videos linked to {source}, meta copied")
+
+
 @app.command()
 def preview(
     n: Annotated[int, typer.Option(min=1, help="Frames to render")] = 12,

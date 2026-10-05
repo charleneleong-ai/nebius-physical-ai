@@ -274,6 +274,56 @@ class TestRunCommand:
             assert option in out
 
 
+class TestLinkDataset:
+    @pytest.fixture
+    def source(self, tmp_path: Path) -> Path:
+        root = tmp_path / "recorded"
+        (root / "meta").mkdir(parents=True)
+        (root / "data/chunk-000").mkdir(parents=True)
+        (root / "videos/chunk-000").mkdir(parents=True)
+        (root / "meta/episodes.jsonl").write_text('{"episode_index": 0}\n')
+        (root / "meta/stats.json").write_text('{"made_by": "n1.6"}')
+        (root / "data/chunk-000/episode_000000.parquet").write_text("rows")
+        (root / "videos/chunk-000/episode_000000.mp4").write_text("video")
+        return root
+
+    def link(self, script: ModuleType, *args: str):
+        result = CliRunner().invoke(script.app, ["link-dataset", *args])
+        return result.exit_code, " ".join(result.output.replace("│", " ").split())  # rich boxes and wraps errors
+
+    def test_episodes_and_videos_are_linked_and_meta_is_a_private_copy(
+        self, script: ModuleType, source: Path, tmp_path: Path
+    ) -> None:
+        dest = tmp_path / "linked"
+        code, _ = self.link(script, str(source), str(dest))
+        assert code == 0
+        assert (dest / "data").is_symlink() and (dest / "data/chunk-000/episode_000000.parquet").read_text() == "rows"
+        assert (dest / "videos/chunk-000/episode_000000.mp4").read_text() == "video"
+        assert not (dest / "meta").is_symlink() and (dest / "meta/stats.json").read_text() == '{"made_by": "n1.6"}'
+        (dest / "meta/stats.json").write_text('{"made_by": "n1.7"}')  # what the other GR00T version does
+        assert (source / "meta/stats.json").read_text() == '{"made_by": "n1.6"}'  # the original is untouched
+
+    def test_an_existing_copy_is_kept_unless_forced_and_forcing_never_touches_the_source(
+        self, script: ModuleType, source: Path, tmp_path: Path
+    ) -> None:
+        dest = tmp_path / "linked"
+        assert self.link(script, str(source), str(dest))[0] == 0
+        code, out = self.link(script, str(source), str(dest))
+        assert code == 2 and "already exists" in out
+        assert self.link(script, str(source), str(dest), "--force")[0] == 0
+        assert (source / "data/chunk-000/episode_000000.parquet").exists()  # the links went, not their targets
+        assert (source / "videos/chunk-000/episode_000000.mp4").exists()
+
+    def test_forcing_onto_the_source_itself_is_refused(self, script: ModuleType, source: Path) -> None:
+        code, out = self.link(script, str(source), str(source), "--force")
+        assert code == 2 and "source dataset itself" in out and (source / "meta/episodes.jsonl").exists()
+
+    def test_something_that_is_not_a_recorded_dataset_is_refused(self, script: ModuleType, tmp_path: Path) -> None:
+        (tmp_path / "empty").mkdir()
+        code, out = self.link(script, str(tmp_path / "empty"), str(tmp_path / "linked"))
+        assert code == 2 and "not a recorded dataset" in out and not (tmp_path / "linked").exists()
+
+
 class TestServe:
     def serve(self, script: ModuleType, home: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, *extra: str):
         fake = FakeRun()
