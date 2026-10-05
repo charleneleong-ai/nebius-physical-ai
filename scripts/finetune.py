@@ -185,8 +185,16 @@ class Recipe:
         return Step("fine-tune", argv, self.gr00t_dir, {"WANDB_RUN_GROUP": self.name})
 
     def steps(self, record: bool = True) -> list[Step]:
-        recording = [self.record_step(), self.log_demos_step()] if record else []
-        return [*recording, *self.stats_steps(), self.train_step()]
+        """Record (unless the dataset exists), log the demos to W&B in this run's group, statistics, train.
+
+        The demos are logged for a reused dataset too: the trainer itself only writes scalars, so without this the
+        run's group would have no videos."""
+        return [
+            *([self.record_step()] if record else []),
+            self.log_demos_step(),
+            *self.stats_steps(),
+            self.train_step(),
+        ]
 
 
 def camera_mix_option(text: str) -> tuple[float, float, float]:

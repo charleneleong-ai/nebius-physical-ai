@@ -168,7 +168,8 @@ class TestRecipe:
         r = recipe(script, home)
         titles = [s.title for s in r.steps()]
         assert titles == ["record demos", "log demos", "dataset stats", "relative stats", "fine-tune"]
-        assert [s.title for s in r.steps(record=False)] == ["dataset stats", "relative stats", "fine-tune"]
+        # A reused dataset is not recorded again, but its demos still go to W&B: the trainer logs no media itself.
+        assert [s.title for s in r.steps(record=False)] == ["log demos", "dataset stats", "relative stats", "fine-tune"]
 
     def test_the_demos_are_logged_to_wandb_under_the_runs_name_and_can_never_stop_training(
         self, script: ModuleType, home: SimpleNamespace
@@ -259,11 +260,12 @@ class TestRunCommand:
         _, _, fake = invoke(script, home, monkeypatch)
         assert not stale.exists() and fake.calls[0]["argv"][3] == "demos"
 
-    def test_skipping_demos_runs_only_the_stats_and_the_training(
+    def test_skipping_the_recording_still_logs_the_demos_then_runs_the_stats_and_the_training(
         self, script: ModuleType, home: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _, _, fake = invoke(script, home, monkeypatch, "--skip-demos")
-        assert len(fake.calls) == 3 and "demos" not in fake.calls[0]["argv"]
+        assert len(fake.calls) == 4 and "npai" not in fake.calls[0]["argv"]  # nothing is recorded
+        assert fake.calls[0]["argv"][3] == "scripts/log_demos.py" and fake.calls[0]["check"] is False
 
     def test_a_dry_run_prints_the_steps_and_runs_nothing_even_with_problems(
         self, script: ModuleType, home: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
