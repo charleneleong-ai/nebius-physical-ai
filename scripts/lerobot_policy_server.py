@@ -47,17 +47,22 @@ class LeRobotGr00t:
             sample[f"observation.images.camera_{i}"] = torch.as_tensor(view).permute(2, 0, 1).float() / 255
         return sample
 
+    def batch(self, samples: list[dict[str, Any]]) -> dict[str, Any]:
+        """Samples stacked into one batch (B, ...), tasks as a list, as LeRobot's dataloader would hand them over."""
+        stacked = {k: torch.stack([s[k] for s in samples]) for k in samples[0] if k != "task"}
+        return stacked | {"task": [s["task"] for s in samples]}
+
     @torch.no_grad()
     def act(self, observation: dict[str, Any]) -> dict[str, np.ndarray]:
         video, state = observation["video"], observation["state"]
         joints = np.concatenate([state[k] for k in ACTION_KEYS], axis=-1)[:, -1]  # (B, 6), last time step
         tasks = observation["language"]["annotation.human.task_description"]
-        chunks = []
-        for b in range(len(joints)):
-            batch = self.pre(self.sample(video["front"][b, -1], video["wrist"][b, -1], joints[b], tasks[b][0]))
-            chunk = self.post(self.policy.predict_action_chunk(batch))
-            chunks.append(np.asarray(chunk.float().cpu()).reshape(-1, 6)[: self.horizon])
-        actions = np.stack(chunks).astype(np.float32)
+        samples = [
+            self.sample(video["front"][b, -1], video["wrist"][b, -1], joints[b], tasks[b][0])
+            for b in range(len(joints))
+        ]
+        chunk = self.post(self.policy.predict_action_chunk(self.pre(self.batch(samples))))
+        actions = np.asarray(chunk.float().cpu()).reshape(len(samples), -1, 6)[:, : self.horizon].astype(np.float32)
         return {key: actions[..., lo:hi] for key, (lo, hi) in ACTION_KEYS.items()}
 
 
