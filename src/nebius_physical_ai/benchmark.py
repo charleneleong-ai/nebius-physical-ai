@@ -197,7 +197,7 @@ def solvable_cases(
     name: str,
     draw: Callable[[], tuple[list[DetectedObject], str, str, str]],
     layout: TwinLayout,
-    camera: dict[str, Any],
+    camera: dict[str, Any] | None,
     count: int = GENERATED_CASES,
 ) -> tuple[list[Case], int]:
     """Up to `count` cases from `draw` that the expert solves, and how many draws it did not."""
@@ -255,20 +255,51 @@ def held_out_suites(real: list[DetectedObject], layout: TwinLayout) -> list[Suit
     return suites
 
 
-def diagnostic_suites(layout: TwinLayout) -> list[Suite]:
-    """`clean_many`: the original task (blue onto red, the original prompt) in many random scenes from the 65 degree
-    camera. The legacy `clean` cell is one scene, so on its own it cannot say whether a drop is general forgetting or
-    one bad scene; this suite can."""
-    camera = oblique_camera(layout, OBLIQUE_ELEVATION_DEG, 0.0)
-    randomizer = SceneRandomizer(layout, seed=[SEED, 20])
-    sampler = SceneSampler(layout, seed=[SEED, 20])
+def diagnostic_suites(layout: TwinLayout, real: list[DetectedObject] | None = None) -> list[Suite]:
+    """Many-scene versions of the single-scene legacy cells, so a drop can be told apart from one bad scene.
 
-    def draw() -> tuple[list[DetectedObject], str, str, str]:
-        return randomizer.standard_objects(sampler), "blue", "red", STACK_TASK
+    `clean_many` is the original task (blue onto red, the original prompt) in 12 random scenes from the 65 degree camera;
+    `clean_top_down_many` the same from the v1/v2 camera. With a real object, `real_1_<name>_many` adds it clear of the
+    arm and `in_path_<name>_many` halfway along the arm's path to the blue block, both to just the pair (as the legacy
+    cells do). Each suite draws from its own seed stream."""
+    oblique = oblique_camera(layout, OBLIQUE_ELEVATION_DEG, 0.0)
+    base = np.array([layout.mat.width_mm / 2, layout.mat.height_mm + layout.base_offset_mm])
+    tin = next((o for o in real or [] if o.label == "pomade_tin"), (real or [None])[0])
 
-    cases, rejected = solvable_cases("clean_many", draw, layout, camera)
-    note = "the original task in 12 random scenes from the clean camera"
-    return [Suite("clean_many", "diagnostic", cases, note, rejected)]
+    def suite(name: str, stream: int, camera: dict[str, Any] | None, add: Callable[..., list[DetectedObject]]) -> Suite:
+        randomizer = SceneRandomizer(layout, seed=[SEED, stream])
+        sampler = SceneSampler(layout, seed=[SEED, stream])
+
+        def draw() -> tuple[list[DetectedObject], str, str, str]:
+            return add(randomizer, randomizer.standard_objects(sampler)), "blue", "red", STACK_TASK
+
+        cases, rejected = solvable_cases(name, draw, layout, camera)
+        return Suite(name, "diagnostic", cases, f"{name.removesuffix('_many')} in 12 random scenes", rejected)
+
+    def keep(_: SceneRandomizer, objects: list[DetectedObject]) -> list[DetectedObject]:
+        return objects
+
+    def clear_of_arm(randomizer: SceneRandomizer, objects: list[DetectedObject]) -> list[DetectedObject]:
+        pair = objects[:2]
+        spot = randomizer.free_spot(pair, tin)
+        return (
+            pair
+            if spot is None
+            else [*pair, replace(tin, x_mm=round(float(spot[0]), 1), y_mm=round(float(spot[1]), 1))]
+        )
+
+    def in_path(_: SceneRandomizer, objects: list[DetectedObject]) -> list[DetectedObject]:
+        blue = objects[0]
+        mid = (base + np.array([blue.x_mm, blue.y_mm])) / 2
+        return [*objects[:2], replace(tin, x_mm=round(float(mid[0]), 1), y_mm=round(float(mid[1]), 1))]
+
+    suites = [suite("clean_many", 20, oblique, keep), suite("clean_top_down_many", 21, None, keep)]
+    if tin is not None:
+        suites += [
+            suite(f"real_1_{tin.label}_many", 22, oblique, clear_of_arm),
+            suite(f"in_path_{tin.label}_many", 23, oblique, in_path),
+        ]
+    return suites
 
 
 def build_suites(
@@ -285,7 +316,7 @@ def build_suites(
     if group in ("held_out", "all"):
         suites += held_out_suites(real, layout)
     if group in ("diagnostic", "all"):
-        suites += diagnostic_suites(layout)
+        suites += diagnostic_suites(layout, real)
     patterns = list(only)
     return [s for s in suites if not patterns or any(fnmatch.fnmatch(s.name, p) for p in patterns)]
 

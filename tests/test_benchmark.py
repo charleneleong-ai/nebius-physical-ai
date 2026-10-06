@@ -23,7 +23,7 @@ from nebius_physical_ai.capture.camera import CameraPose
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import Observation
 from nebius_physical_ai.twin import roles
-from nebius_physical_ai.twin.randomize import outline, radius
+from nebius_physical_ai.twin.randomize import outline, radius, segment_distance
 from nebius_physical_ai.twin.rollout import STACK_TASK
 from nebius_physical_ai.twin.scene import SO101_XML, TwinLayout
 
@@ -222,25 +222,41 @@ class TestHeldOutSuites:
 @needs_model
 class TestDiagnosticSuite:
     @pytest.fixture(scope="class")
-    def clean_many(self) -> benchmark.Suite:
-        (suite,) = benchmark.diagnostic_suites(LAYOUT)
-        return suite
+    def suites(self) -> dict[str, benchmark.Suite]:
+        return by_name(benchmark.diagnostic_suites(LAYOUT, REAL))
 
-    def test_it_is_the_original_task_in_many_different_scenes(self, clean_many: benchmark.Suite) -> None:
-        assert (clean_many.name, clean_many.group) == ("clean_many", "diagnostic")
-        assert len(clean_many.cases) == benchmark.GENERATED_CASES and clean_many.n >= HEADLINE_N
-        for case in clean_many.cases:
-            assert (case.pick, case.place, case.prompt) == ("blue", "red", STACK_TASK)
-            assert [o.label for o in case.objects[:2]] == ["blue", "red"]
-        blue_positions = np.array([[c.objects[0].x_mm, c.objects[0].y_mm] for c in clean_many.cases])
-        assert blue_positions.std(axis=0).min() > 5.0  # many layouts, not one repeated
+    @pytest.fixture(scope="class")
+    def clean_many(self, suites: dict[str, benchmark.Suite]) -> benchmark.Suite:
+        return suites["clean_many"]
+
+    def test_it_is_the_original_task_in_many_different_scenes(self, suites: dict[str, benchmark.Suite]) -> None:
+        for suite in suites.values():
+            assert suite.group == "diagnostic"
+            assert len(suite.cases) == benchmark.GENERATED_CASES and suite.n >= HEADLINE_N
+            for case in suite.cases:
+                assert (case.pick, case.place, case.prompt) == ("blue", "red", STACK_TASK)
+                assert [o.label for o in case.objects[:2]] == ["blue", "red"]
+            blue_positions = np.array([[c.objects[0].x_mm, c.objects[0].y_mm] for c in suite.cases])
+            assert blue_positions.std(axis=0).min() > 5.0  # many layouts, not one repeated
 
     def test_it_uses_the_same_camera_as_the_clean_cell(self, clean_many: benchmark.Suite) -> None:
         (clean,) = by_name(legacy_suites(REAL, LAYOUT))["clean"].cases
         assert all(case.camera == clean.camera for case in clean_many.cases)
 
+    def test_tin_suites_add_exactly_the_tin_to_the_pair_clear_of_or_in_the_arms_path(
+        self, suites: dict[str, benchmark.Suite]
+    ) -> None:
+        base = np.array([LAYOUT.mat.width_mm / 2, LAYOUT.mat.height_mm + LAYOUT.base_offset_mm])
+        for name, in_path in (("real_1_pomade_tin_many", False), ("in_path_pomade_tin_many", True)):
+            for case in suites[name].cases:
+                blue, red, tin = case.objects  # the pair plus the tin, nothing else
+                assert tin.label == "pomade_tin" and {blue.label, red.label} == {"blue", "red"}
+                path_gap = segment_distance(np.array([[tin.x_mm, tin.y_mm]]), base, np.array([blue.x_mm, blue.y_mm]))[0]
+                assert (path_gap < 1.0) if in_path else (path_gap > radius(tin))
+        assert all(c.camera is None for c in suites["clean_top_down_many"].cases)  # the layout's top-down camera
+
     def test_it_is_part_of_all_and_selectable_alone(self) -> None:
-        assert {s.name for s in build_suites([], LAYOUT, "diagnostic")} == {"clean_many"}
+        assert {s.name for s in build_suites([], LAYOUT, "diagnostic")} == {"clean_many", "clean_top_down_many"}
         assert "clean_many" in {s.name for s in build_suites([], LAYOUT, "all", ["clean_many"])}
 
 
