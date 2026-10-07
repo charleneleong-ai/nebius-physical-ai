@@ -4,9 +4,11 @@
 #   DATA       aggregate training set so far (LeRobot v3.0)
 #   REF_BENCH  POLICY's result file on the gate suites
 #   ROUND      last finished round
-# A round: serve POLICY, harvest its failures on fresh training scenes, record the expert's recoveries, add them to
-# DATA (always: the aggregate grows even when a round is not promoted), fine-tune POLICY on the aggregate with a short
-# low-LR cosine schedule, benchmark the candidate and promote it only when `benchmark.py gate` passes.
+# A round: serve POLICY and rehearse fresh training scenes VARIANTS times each; keep up to BUDGET failures from scenes
+# whose success rate is in BAND (most uncertain first, balanced across failure types); record the expert's recoveries
+# and add them to DATA (always: the aggregate grows even when a round is not promoted); fine-tune POLICY on the
+# aggregate with a short low-LR cosine schedule; benchmark the candidate and promote it only when `benchmark.py gate`
+# passes.
 #   bash scripts/dagger_round.sh          # one round;  for r in 1 2 3; do bash scripts/dagger_round.sh || break; done
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
@@ -17,7 +19,8 @@ STATE=logs/dagger/state.env
 . "$STATE" || { echo "write $STATE first (POLICY, DATA, REF_BENCH, ROUND=0)"; exit 1; }
 LR=~/lerobot-n17/.venv/bin
 VLM=$HOME/checkpoints/hqfang-groot-so100_101/vlm_processor
-SCENES=${SCENES:-400} PARTS=${PARTS:-8} STEPS=${STEPS:-4000} LEARNING_RATE=${LEARNING_RATE:-1e-5}
+SCENES=${SCENES:-200} VARIANTS=${VARIANTS:-4} BUDGET=${BUDGET:-300} BAND=${BAND:-0.05,0.8}
+PARTS=${PARTS:-8} STEPS=${STEPS:-4000} LEARNING_RATE=${LEARNING_RATE:-1e-5}
 SUITES=(clean_many seen_vocabulary held_out_objects clean_top_down_many real_1_pomade_tin_many in_path_pomade_tin_many)
 R=$((ROUND + 1))
 DIR=logs/dagger/r$R RAW=$HOME/data/dagger_r$R NEXT_DATA=$HOME/data/dagger_agg_r${R}_v30
@@ -37,6 +40,7 @@ serve() {  # serve CHECKPOINT PORT LOG -> sets SERVER
 say "harvesting $SCENES scenes with $POLICY"
 serve "$POLICY" 5564 "$DIR/serve_harvest.log"
 uv run python scripts/dagger.py harvest "$DIR/snapshots.jsonl" --port 5564 --scenes "$SCENES" --seed $((900 + 10 * R)) \
+  --variants "$VARIANTS" --budget "$BUDGET" --band "$BAND" \
   || exit 1
 kill $SERVER; SERVER=""
 

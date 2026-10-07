@@ -2,10 +2,18 @@
 scenes, keep the exact state every failed rollout ended in, and let the scripted expert record a recovery from there.
 The recoveries join the training set, so the data follows the states this policy actually reaches instead of the
 expert's clean approaches. The expert takes over only where the learner failed, as in HG-DAgger (arXiv:1810.02890).
+
+Two refinements decide which failures are worth recording:
+- Uncertainty: each scene is rehearsed several times and only scenes the policy sometimes solves and sometimes fails
+  are kept (its success rate within a band, ranked by p(1-p)). Always-solved scenes have nothing to teach and
+  always-failed ones are often beyond the expert or the task; the frontier in between is where recoveries pay off.
+  The success rate is per scene, which keeps scenes comparable (raw rollout scores bunch into a narrow band).
+- Balance: the recording budget is shared round-robin across failure types (a class-balanced buffer as in GDumb,
+  arXiv:2007.14097), so one round's flood of `no_contact` cannot crowd out the rarer drops and pushes.
 """
 
-from collections import Counter
-from dataclasses import asdict, dataclass
+from collections import Counter, defaultdict
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 import mujoco
@@ -35,6 +43,12 @@ class FailureSnapshot:
     qpos: list[float]
     qvel: list[float]
     failure: str
+    scene: int = 0  # which harvested scene; its rehearsals differ only by perturbation
+    scene_p: float = 0.0  # the policy's success rate over this scene's rehearsals
+
+    @property
+    def uncertainty(self) -> float:
+        return self.scene_p * (1 - self.scene_p)
 
     def record(self) -> dict[str, Any]:
         return asdict(self)
@@ -56,7 +70,7 @@ class FailureSnapshot:
         state = {"qpos": twin.data.qpos.round(6).tolist(), "qvel": twin.data.qvel.round(6).tolist()}
         v = scene.variant
         return cls(v.objects, scene.check.top, scene.check.bottom, scene.prompt, scene.look, v.physics, **state,
-                   failure=failure)  # fmt: skip
+                   failure=failure, scene=scene.scene)  # fmt: skip
 
     def restore(self, layout: TwinLayout) -> Twin:
         """The same scene recompiled, put back in the saved state, with the arm holding where it stopped."""
@@ -70,8 +84,9 @@ class FailureSnapshot:
 
 @dataclass
 class Rehearsed:
-    """One harvested scene: the prompt, its success check, its look, and the perturbed variant that was rolled out."""
+    """One harvested rollout: its scene, the prompt, its success check, its look, and the perturbed variant."""
 
+    scene: int
     prompt: str
     check: StackCheck
     look: SceneLook
@@ -91,43 +106,84 @@ class Harvester:
         batch_size: int = 16,
         max_steps: int = REHEARSAL_MAX_STEPS,
         image_size: tuple[int, int] = REHEARSAL_IMAGE_SIZE,
+        variants: int = 1,
     ) -> None:
+        """Each scene is rehearsed `variants` times (perturbed), which is what gives every failure its `scene_p`."""
         self.policy, self.randomizer, self.sampler, self.task = policy, randomizer, sampler, task
         self.perturbation = perturbation or Perturbation()
         self.batch_size, self.max_steps, self.image_size = batch_size, max_steps, image_size
+        self.variants = variants
 
     def harvest(self, scenes: int) -> tuple[list[FailureSnapshot], Counter[str]]:
-        """Snapshots of the recoverable failures, and every outcome counted (`success` or the failure's name)."""
-        snapshots: list[FailureSnapshot] = []
+        """Snapshots of the recoverable failures (with their scene's success rate), and every outcome counted
+        (`success` or the failure's name)."""
+        rollouts = [r for scene in range(scenes) for r in self.draw(scene)]
+        failed: list[FailureSnapshot] = []
         outcomes: Counter[str] = Counter()
-        for start in range(0, scenes, self.batch_size):
-            batch = [self.draw() for _ in range(min(self.batch_size, scenes - start))]
-            twins: list[Twin] = []
-            try:
-                twins.extend(
-                    self.build(scene) for scene in batch
-                )  # inside the try: a failed build still closes the rest
-                rollout = BatchRollout(twins, self.policy, [scene.prompt for scene in batch], self.image_size)
-                results = rollout.run([scene.check for scene in batch], self.max_steps)
-                for twin, scene, r in zip(twins, batch, results):
-                    outcomes[r.failure or "success"] += 1
-                    if not r.success and r.failure not in UNRECOVERABLE:
-                        snapshots.append(FailureSnapshot.capture(twin, scene, r.failure))
-            finally:
-                for twin in twins:
-                    twin.close()
-        return snapshots, outcomes
+        wins: Counter[int] = Counter()
+        for start in range(0, len(rollouts), self.batch_size):
+            for rehearsed, failure, snapshot in self.roll(rollouts[start : start + self.batch_size]):
+                outcomes[failure or "success"] += 1
+                wins[rehearsed.scene] += not failure
+                if snapshot is not None:
+                    failed.append(snapshot)
+        return [replace(s, scene_p=wins[s.scene] / self.variants) for s in failed], outcomes
 
-    def draw(self) -> Rehearsed:
-        """A scene as the demos draw them, perturbed the way rehearsals are (positions, sizes, physics, start pose)."""
+    def roll(self, batch: list[Rehearsed]) -> list[tuple[Rehearsed, str, FailureSnapshot | None]]:
+        """(rollout, failure or "", snapshot of a recoverable failure) for one batch."""
+        twins: list[Twin] = []
+        try:
+            twins.extend(self.build(r) for r in batch)  # inside the try: a failed build still closes the rest
+            rollout = BatchRollout(twins, self.policy, [r.prompt for r in batch], self.image_size)
+            results = rollout.run([r.check for r in batch], self.max_steps)
+            return [
+                (r, res.failure, FailureSnapshot.capture(twin, r, res.failure) if self.keep(res.failure) else None)
+                for twin, r, res in zip(twins, batch, results)
+            ]
+        finally:
+            for twin in twins:
+                twin.close()
+
+    @staticmethod
+    def keep(failure: str) -> bool:
+        return bool(failure) and failure not in UNRECOVERABLE
+
+    def draw(self, scene: int) -> list[Rehearsed]:
+        """A scene as the demos draw them, perturbed `variants` times the way rehearsals are (positions, sizes,
+        physics, start pose)."""
         episode = self.randomizer.episode(self.sampler, self.task)
-        look = self.randomizer.look()
-        variant = Variant.sample(episode.objects, self.perturbation, self.sampler.rng)
-        return Rehearsed(episode.prompt, StackCheck(episode.pick, episode.place), look, variant)
+        look, check = self.randomizer.look(), StackCheck(episode.pick, episode.place)
+        return [
+            Rehearsed(
+                scene, episode.prompt, check, look, Variant.sample(episode.objects, self.perturbation, self.sampler.rng)
+            )
+            for _ in range(self.variants)
+        ]
 
     def build(self, scene: Rehearsed) -> Twin:
         v = scene.variant
         return Twin.from_objects(v.objects, self.sampler.layout, v.physics, v.start_pose, look=scene.look)
+
+
+def select(
+    snapshots: list[FailureSnapshot], budget: int, band: tuple[float, float] = (0.0, 1.0), per_scene: int = 2
+) -> list[FailureSnapshot]:
+    """Up to `budget` snapshots worth recording: from scenes whose success rate lies in `band` (inclusive), most
+    uncertain scenes first, at most `per_scene` from any one scene (its rarer failure types first), with the budget
+    shared round-robin across failure types."""
+    lo, hi = band
+    inside = [s for s in snapshots if lo <= s.scene_p <= hi]
+    frequency = Counter(s.failure for s in inside)
+    taken: Counter[int] = Counter()
+    queues: dict[str, list[FailureSnapshot]] = defaultdict(list)
+    for s in sorted(inside, key=lambda s: (-s.uncertainty, frequency[s.failure])):
+        if taken[s.scene] < per_scene:
+            taken[s.scene] += 1
+            queues[s.failure].append(s)
+    # Round-robin: the i-th snapshot of every type before any type's (i+1)-th, longer queues first within a pass.
+    order = sorted(queues, key=lambda f: -len(queues[f]))
+    ranked = sorted((i, k, s) for k, f in enumerate(order) for i, s in enumerate(queues[f]))
+    return [s for *_, s in ranked[:budget]]
 
 
 def record_recovery(
