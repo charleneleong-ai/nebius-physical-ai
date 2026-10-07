@@ -252,13 +252,16 @@ def stress(
     port: int = DEFAULT_PORT,
     task: str = STACK_TASK,
     wandb_log: Annotated[bool, typer.Option("--wandb/--no-wandb")] = True,
+    name: Annotated[str | None, typer.Option(help="W&B run name, e.g. the checkpoint (stress-v5)")] = None,
+    group: Annotated[str | None, typer.Option(help="W&B group: the checkpoint's runs together")] = None,
 ) -> None:
     """Sim-to-sim calibration test: rehearse the perceived scene, then score it on k attempts in a hidden world."""
     layout = TwinLayout()
     samplers = [SceneSampler(layout, seed=3024), SceneSampler.hard(layout, seed=3025)]
     cases: list[StressCase] = []
     config = {"scenes": scenes, "n": n, "k": k, "batch_size": batch_size, "task": task}
-    with Tracker("stress", config=config, enabled=wandb_log) as tracker, Gr00tClient(port=port) as client:
+    tracking = {"config": config, "enabled": wandb_log, "name": name, "group": group}
+    with Tracker("stress", **tracking) as tracker, Gr00tClient(port=port) as client:
         rehearsal = Rehearsal(client, task, StackCheck(), layout, batch_size=batch_size)
         for i in range(scenes):
             case = StressCase.run(rehearsal, i, samplers[i % 2].sample(), n, k, seed=i, hard=bool(i % 2))
