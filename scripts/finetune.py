@@ -31,9 +31,10 @@ from nebius_physical_ai.twin.dataset import modality
 
 REPO = Path(__file__).resolve().parent.parent
 HOME = Path.home()
-LATEST = (
-    HOME / "checkpoints/gr00t-preflight-v4c/checkpoint-4000"
-)  # the served default: v4c (paired benchmark, 2026-10-06)
+LATEST = HOME / "checkpoints/gr00t-preflight-v4c/checkpoint-4000"  # newest Isaac-GR00T fine-tune: the base for `run`
+# The served default since 2026-10-07: hqfang/groot-so100_101 fine-tuned with LeRobot (beats v4c on every suite,
+# held-out 57% vs 25%). Serve it with scripts/lerobot_policy_server.py; `serve` here runs Isaac-GR00T checkpoints.
+SERVED = HOME / "checkpoints/gr00t-preflight-v5/checkpoints/012000/pretrained_model"
 BASE_MULTITASK = HOME / "checkpoints/gr00t-n1.6-so101-multitask"  # the community SO-101 checkpoint v1 to v3 began from
 MIX_TEXT = ",".join(str(share) for share in DEFAULT_CAMERA_MIX)
 # Run in GR00T's own environment: relative-action statistics need the SO-100 modality config registered first.
