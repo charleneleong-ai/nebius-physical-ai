@@ -404,9 +404,21 @@ class TestLinkDataset:
         code, out = self.link(script, str(source), str(tmp_path / "linked"), "--layout", "wide")
         assert code == 2 and "--layout must be one of" in out and not (tmp_path / "linked").exists()
 
-    def test_forcing_onto_the_source_itself_is_refused(self, script: ModuleType, source: Path) -> None:
-        code, out = self.link(script, str(source), str(source), "--force")
+    @pytest.mark.parametrize("where", ["itself", "its parent", "inside it"])
+    def test_forcing_onto_or_around_the_source_is_refused(self, script: ModuleType, source: Path, where: str) -> None:
+        dest = {"itself": source, "its parent": source.parent, "inside it": source / "meta"}[where]
+        code, out = self.link(script, str(source), str(dest), "--force")
         assert code == 2 and "source dataset itself" in out and (source / "meta/episodes.jsonl").exists()
+
+    def test_forcing_onto_a_symlink_replaces_the_link_not_its_target(
+        self, script: ModuleType, source: Path, tmp_path: Path
+    ) -> None:
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "keep.txt").write_text("keep")
+        (tmp_path / "linked").symlink_to(elsewhere, target_is_directory=True)
+        code, _ = self.link(script, str(source), str(tmp_path / "linked"), "--force")
+        assert code == 0 and not (tmp_path / "linked").is_symlink() and (elsewhere / "keep.txt").exists()
 
     def test_something_that_is_not_a_recorded_dataset_is_refused(self, script: ModuleType, tmp_path: Path) -> None:
         (tmp_path / "empty").mkdir()

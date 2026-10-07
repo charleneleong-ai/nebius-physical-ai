@@ -310,9 +310,13 @@ def link_dataset(
     if dest.exists() or dest.is_symlink():
         if not force:
             raise typer.BadParameter(f"{dest} already exists: choose another name or pass --force")
-        if dest.resolve() == source.resolve() or source.resolve() in dest.resolve().parents:
-            raise typer.BadParameter(f"{dest} is the source dataset itself")
-        shutil.rmtree(dest)  # removes links, not what they point at
+        src, old = source.resolve(), dest.resolve()
+        if old == src or old.is_relative_to(src) or src.is_relative_to(old):
+            raise typer.BadParameter(f"{dest} is, holds or sits inside the source dataset itself")
+        if dest.is_symlink():
+            dest.unlink()  # replace the link, never the directory it points at
+        else:
+            shutil.rmtree(dest)  # a previous linked copy: removes its links, not what they point at
     dest.mkdir(parents=True)
     for name in ("data", "videos"):
         (dest / name).symlink_to((source / name).resolve(), target_is_directory=True)

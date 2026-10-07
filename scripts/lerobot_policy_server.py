@@ -89,9 +89,9 @@ def main(
     socket.bind(f"tcp://127.0.0.1:{port}")
     print(f"serving {checkpoint} on port {port} (horizon {horizon}, {cameras} camera slots)", flush=True)
     while True:
-        request = MsgCodec.unpack(socket.recv())
-        start = time.time()
-        try:
+        raw, request, start = socket.recv(), {}, time.time()
+        try:  # a request that won't decode is answered too: an unanswered REQ client hangs until its timeout
+            request = MsgCodec.unpack(raw)
             answer = reply(model, request)
         except Exception as error:  # noqa: BLE001 - report any failure to the client, keep serving
             answer = {"error": f"{type(error).__name__}: {error}"}
