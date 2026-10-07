@@ -303,6 +303,33 @@ def test_run_suite_keeps_one_rollout_per_outcome_when_videos_are_asked_for() -> 
     assert len(frames) >= 2 and frames[0].shape[2] == 3 and frames[0].dtype == np.uint8
 
 
+class TestPromotion:
+    """The gate a DAgger round must pass before its checkpoint replaces the served one."""
+
+    @staticmethod
+    def cell(suite: str, wins: int, n: int = 96) -> Cell:
+        return Cell(suite, "g", wins, n, 1, 1.0, outcomes=[True] * wins + [False] * (n - wins))
+
+    @pytest.mark.parametrize(
+        ("new", "promote", "why"),
+        [
+            ({"a": 90, "b": 80}, True, "+30 rehearsals over 2 suites, pooled better"),
+            ({"a": 71, "b": 71}, False, "pooled within noise"),  # +2 on paired scenes
+            ({"a": 96, "b": 50}, False, "worse on b"),  # better pooled, but one suite regressed
+        ],
+    )
+    def test_promotes_only_a_pooled_gain_with_no_suite_worse(self, new: dict, promote: bool, why: str) -> None:
+        ref = {"a": self.cell("a", 70), "b": self.cell("b", 70)}
+        ok, reason = benchmark.promotion({k: self.cell(k, v) for k, v in new.items()}, ref)
+        assert ok is promote and why in reason
+
+    def test_nothing_shared_is_not_promoted(self) -> None:
+        assert benchmark.promotion({"x": self.cell("x", 96)}, {"a": self.cell("a", 10)}) == (
+            False,
+            "no suites in common",
+        )
+
+
 @pytest.fixture
 def script() -> ModuleType:
     spec = importlib.util.spec_from_file_location("benchmark_script", ROOT / "scripts/benchmark.py")

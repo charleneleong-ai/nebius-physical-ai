@@ -378,6 +378,24 @@ def mcnemar(a: Cell, b: Cell) -> tuple[int, int, float] | None:
     return wins, losses, p
 
 
+def promotion(new: dict[str, Cell], ref: dict[str, Cell]) -> tuple[bool, str]:
+    """Whether `new` should replace `ref`: better on every rehearsal pooled across their shared suites (paired), and
+    worse on none of them. A round that only moves within noise is not promoted, so the served policy never drifts."""
+    shared = [suite for suite in ref if suite in new]
+    if not shared:
+        return False, "no suites in common"
+    if worse := [suite for suite in shared if verdict(new[suite], ref[suite]) == "worse"]:
+        return False, f"worse on {', '.join(worse)}"
+    pool = [
+        Cell("pooled", "pooled", sum(c.successes for c in cells), sum(c.n for c in cells), 0, 0.0,
+             outcomes=[o for c in cells for o in c.outcomes])
+        for cells in ([new[s] for s in shared], [ref[s] for s in shared])
+    ]  # fmt: skip
+    pooled = verdict(*pool)
+    gained = f"{pool[0].successes - pool[1].successes:+d} rehearsals over {len(shared)} suites, pooled {pooled}"
+    return pooled == "better", gained
+
+
 def verdict(a: Cell, b: Cell, alpha: float = 0.05) -> str:
     """How `a` compares with `b`. Paired (McNemar, p < alpha) when both have per-scene outcomes; otherwise better or
     worse only when their 95% intervals don't overlap. Anything else is within noise."""

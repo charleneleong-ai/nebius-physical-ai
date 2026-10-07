@@ -18,7 +18,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from nebius_physical_ai.benchmark import Cell, Suite, build_suites, mcnemar, run_suite, verdict
+from nebius_physical_ai.benchmark import Cell, Suite, build_suites, mcnemar, promotion, run_suite, verdict
 from nebius_physical_ai.capture.camera import CameraPose
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, Gr00tClient
@@ -177,6 +177,18 @@ def compare(
             row.append("-" if cell is None else describe(cell, base))
         table.add_row(*row)
     console.print(table)
+
+
+@app.command()
+def gate(
+    reference: Annotated[Path, typer.Argument(help="The served policy's result file")],
+    candidate: Annotated[Path, typer.Argument(help="The new checkpoint's result file, on the same suites")],
+) -> None:
+    """Exit 0 when the candidate should be promoted (`promotion`), 1 when not."""
+    (ref_label, ref), (new_label, new) = load_cells(reference), load_cells(candidate)
+    promote, why = promotion(new, ref)
+    print(f"{new_label} vs {ref_label}: {'PROMOTE' if promote else 'KEEP'} ({why})")
+    raise typer.Exit(0 if promote else 1)
 
 
 @app.command()
