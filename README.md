@@ -8,13 +8,24 @@
 > policies, or process sensor data at scale, and Nebius Serverless Endpoints to serve real-time
 > inference when needed.
 
-## Track requirements checklist
+## How Preflight uses Nebius and NVIDIA
 
-- [ ] NVIDIA model(s): Nemotron / GR00T / Cosmos / Sonic
-- [ ] Agent runtime coordinating the models
-- [ ] Nebius **Serverless Jobs** — sim / synthetic data / policy eval / sensor processing at scale
-- [ ] Nebius **Serverless Endpoints** — real-time inference
-- [ ] Demo video with ≥1 min of hardware operating (or key application modules in action)
+A phone photographs the workspace, the scene is rebuilt as a MuJoCo twin of the SO-101 arm, a GR00T policy rehearses
+the task dozens of times across randomised variants, and the calibrated success rate becomes a **GO / RETRY / ASK_HUMAN**
+verdict that a Nemotron agent explains.
+
+| Stage | Model | Runs on | Code |
+|---|---|---|---|
+| Verdict explanation | **Nemotron 3 Ultra** (Super / 3.5 Lightning selectable) | **Nebius Token Factory**, called on every verdict | [`NemotronAgent`](src/nebius_physical_ai/pipeline.py) |
+| Scene perception | **Cosmos 3** Reasoner, with a Token Factory VLM as an alternative | our GPU (vLLM) or **Nebius Token Factory** | [`CosmosClient`, `TokenFactoryVLClient`](src/nebius_physical_ai/pipeline.py), [`scripts/cosmos_local.sh`](scripts/cosmos_local.sh) |
+| Policy | **GR00T N1.7** (v5, fine-tuned from [hqfang/groot-so100_101](https://huggingface.co/hqfang/groot-so100_101)); GR00T N1.6 for v1–v4c | our A100 | [`scripts/lerobot_policy_server.py`](scripts/lerobot_policy_server.py), [`scripts/finetune.py`](scripts/finetune.py) |
+| Rehearsal, benchmark, trust score | — | our A100 (MuJoCo, headless) | [`twin/`](src/nebius_physical_ai/twin), [`benchmark.py`](src/nebius_physical_ai/benchmark.py), [`trust/`](src/nebius_physical_ai/trust) |
+
+Every verdict makes a runtime call to Token Factory; without a `NEBIUS_API_KEY` the explanation step fails rather than
+falling back to canned text (`--offline-explain` exists for offline tests only). GR00T and Cosmos run on our own GPU,
+which the [FAQ](https://nebiusglobalaihackathon.devpost.com/details/faqs) allows alongside a Token Factory call. Model
+weights are downloaded from Hugging Face and run by us; no NVIDIA model is reached through a third-party inference
+provider. Submission status: [`docs/hackathon-rules.md`](docs/hackathon-rules.md#submission-checklist).
 
 ## Quickstart
 
