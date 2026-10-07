@@ -23,6 +23,7 @@ from nebius_physical_ai.capture.camera import CameraPose
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, Gr00tClient
 from nebius_physical_ai.tracking import Tracker
+from nebius_physical_ai.twin.rollout import FailureWatch
 from nebius_physical_ai.twin.scene import TwinLayout
 
 REPO = Path(__file__).resolve().parent.parent
@@ -175,6 +176,20 @@ def compare(
             cell = cells.get(suite)
             row.append("-" if cell is None else describe(cell, base))
         table.add_row(*row)
+    console.print(table)
+
+
+@app.command()
+def failures(result: Annotated[Path, typer.Argument(help="A result file from `run`")]) -> None:
+    """How each suite's failed rehearsals failed (`FailureWatch`), with the total over every suite."""
+    label, cells = load_cells(result)
+    table = Table("suite", "failed", *FailureWatch.FAILURES, title=label)
+    total = dict.fromkeys(FailureWatch.FAILURES, 0)
+    for suite, cell in cells.items():
+        for kind in total:
+            total[kind] += cell.failures.get(kind, 0)
+        table.add_row(suite, str(cell.n - cell.successes), *(str(cell.failures.get(k, 0)) for k in total))
+    table.add_row("total", str(sum(c.n - c.successes for c in cells.values())), *map(str, total.values()))
     console.print(table)
 
 

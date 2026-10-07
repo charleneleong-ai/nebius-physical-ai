@@ -327,6 +327,21 @@ class TestScript:
         assert "52/96 (54%) within noise" in out  # 55 against 52: the wobble of identical scenes
         assert "40/96 (42%) better" in out and "3/96 (3%) worse" in out
 
+    def test_failures_tabulates_each_suite_and_the_total(self, script: ModuleType, tmp_path: Path) -> None:
+        cells = [
+            Cell("clean", "legacy", 90, 96, 1, 1.0, failures={"no_contact": 4, "dropped": 2}).record(),
+            Cell("held_out", "held_out", 86, 96, 1, 1.0, failures={"no_contact": 7, "pushed": 3}).record(),
+        ]
+        path = tmp_path / "f.json"
+        path.write_text(json.dumps({"label": "v5", "cells": cells}))
+        result = CliRunner().invoke(script.app, ["failures", str(path)], terminal_width=200)
+        cells_by_row = [[c.strip() for c in line.split("│")[1:-1]] for line in result.output.splitlines()]
+        rows = {cells[0]: cells[1:] for cells in cells_by_row if len(cells) == 8}
+        assert result.exit_code == 0
+        # failed, then no_contact pushed dropped knocked_place fell_off holding
+        assert rows["total"] == ["16", "11", "3", "2", "0", "0", "0"]
+        assert rows["clean"][:4] == ["6", "4", "0", "2"]
+
     def test_compare_needs_two_files(self, script: ModuleType, tmp_path: Path) -> None:
         one = self.write(tmp_path / "a.json", "v3", ("clean", 55))
         assert CliRunner().invoke(script.app, ["compare", str(one)]).exit_code == 2
