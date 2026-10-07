@@ -1,5 +1,6 @@
 import colorsys
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 import numpy as np
@@ -92,6 +93,9 @@ class Randomization:
     wide_distractor_width_mm: tuple[float, float] = (22.0, 65.0)
     wide_distractor_aspect: tuple[float, float] = (1.0, 2.2)
     wide_distractor_height_mm: tuple[float, float] = (15.0, 65.0)
+    # Pick-sized decoys of the pick object's own shape in other colours: only the prompt's colour word tells them
+    # apart, so a policy can't get by on "grab the small one" (v5's commonest held-out failure was never touching it).
+    lookalikes: tuple[int, int] = (0, 0)
 
 
 class SceneRandomizer:
@@ -205,10 +209,11 @@ class SceneRandomizer:
         xy: tuple[float, float] = (0.0, 0.0),
         aspect: tuple[float, float] = (1.0, 1.3),
         colour: str | None = None,
+        shape: str | None = None,
     ) -> DetectedObject:
-        """A random box or cylinder named `label`, painted `colour` (default: the label's own)."""
+        """A random box or cylinder (or the given `shape`) named `label`, painted `colour` (default: the label's own)."""
         width = self.uniform(width_mm)
-        cylinder = self.rng.random() < 0.5
+        cylinder = self.rng.random() < 0.5 if shape is None else shape == "cylinder"
         length = width if cylinder else min(width * self.uniform(aspect), max(max_length_mm, width))
         return DetectedObject(
             label,
@@ -242,11 +247,10 @@ class SceneRandomizer:
             self.block("blue", r.pick_width_mm, r.pick_height_mm, r.pick_length_mm, (pick.x_mm, pick.y_mm)),
             self.block("red", r.place_width_mm, r.place_height_mm, xy=(place.x_mm, place.y_mm)),
         ]
+        self.add_lookalikes(found, DISTRACTOR_LABELS, named=False)
         count = r.wide_distractors if self.role_agnostic else r.distractors
-        for _ in range(int(self.rng.integers(count[0], count[1] + 1))):
-            candidate = self.distractor()
-            if (xy := self.free_spot(found, candidate)) is not None:
-                found.append(replace(candidate, x_mm=round(float(xy[0]), 1), y_mm=round(float(xy[1]), 1)))
+        for _ in range(self.count(count)):
+            self.place_clear(found, self.distractor())
         return found
 
     def real_copy(self, real: DetectedObject) -> DetectedObject:
@@ -270,6 +274,19 @@ class SceneRandomizer:
         if self.role_agnostic:
             return self.wide_block(label)
         return self.block(label, self.ranges.place_width_mm, self.ranges.distractor_height_mm)
+
+    def count(self, bounds: tuple[int, int]) -> int:
+        return int(self.rng.integers(bounds[0], bounds[1] + 1))
+
+    def add_lookalikes(self, found: list[DetectedObject], colours: Sequence[str], named: bool) -> None:
+        """Pick-sized decoys shaped like `found[0]` in `colours`. Draws nothing when the range is (0, 0), so
+        recordings without lookalikes keep their scenes for a seed."""
+        if not (n := self.count(self.ranges.lookalikes)):
+            return
+        r = self.ranges
+        for colour in map(str, self.rng.permutation(colours)[:n]):
+            decoy = self.block(colour, r.pick_width_mm, r.pick_height_mm, r.pick_length_mm, shape=found[0].shape)
+            self.place_clear(found, self.named(decoy, colour) if named else decoy)
 
     def wide_block(self, colour: str) -> DetectedObject:
         r = self.ranges
@@ -303,11 +320,10 @@ class SceneRandomizer:
         else:
             place = self.block(place_colour, r.place_width_mm, r.place_height_mm, xy=(place_at.x_mm, place_at.y_mm))
             found.append(self.named(place, place_colour))
-        for _ in range(int(self.rng.integers(r.wide_distractors[0], r.wide_distractors[1] + 1))):
-            if (candidate := self.described_distractor(found)) is None:
-                continue
-            if (xy := self.free_spot(found, candidate)) is not None:
-                found.append(replace(candidate, x_mm=round(float(xy[0]), 1), y_mm=round(float(xy[1]), 1)))
+        self.add_lookalikes(found, [c for c in self.colours if c not in (pick_colour, place_colour)], named=True)
+        for _ in range(self.count(r.wide_distractors)):
+            if (candidate := self.described_distractor(found)) is not None:
+                self.place_clear(found, candidate)
         return Episode(found, found[0].label, found[1].label, roles.instruction(found[0].label, found[1].label))
 
     def described_distractor(self, taken: list[DetectedObject]) -> DetectedObject | None:
@@ -321,6 +337,11 @@ class SceneRandomizer:
             return None
         colour = str(self.rng.choice(free))
         return self.named(self.wide_block(colour), colour)
+
+    def place_clear(self, taken: list[DetectedObject], candidate: DetectedObject) -> None:
+        """Add the candidate at a `free_spot`, or leave it out when there is none."""
+        if (xy := self.free_spot(taken, candidate)) is not None:
+            taken.append(replace(candidate, x_mm=round(float(xy[0]), 1), y_mm=round(float(xy[1]), 1)))
 
     def free_spot(self, taken: list[DetectedObject], candidate: DetectedObject, tries: int = 100) -> np.ndarray | None:
         """A centre on the mat where the candidate's own outline clears every object and the arm's corridors."""

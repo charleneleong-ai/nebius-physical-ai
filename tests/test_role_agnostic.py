@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -202,6 +203,38 @@ class TestClutter:
         assert blocks and max(o.height_mm for o in blocks) <= 45
 
 
+class TestLookalikes:
+    """Pick-sized decoys of the pick's shape, told apart only by the prompt's colour word."""
+
+    @pytest.mark.parametrize("original_share", [0.0, 1.0])
+    def test_nearly_every_scene_has_a_decoy_shaped_like_the_pick_in_another_colour(self, original_share: float) -> None:
+        ranges = Randomization(original_share=original_share, lookalikes=(1, 2))
+        episodes = draw(200, ranges=ranges)
+        widest = ranges.pick_width_mm[1] + 0.1
+        decoyed = 0
+        for e in episodes:
+            pick = e.objects[0]
+            decoyed += any(
+                o.shape == pick.shape and o.width_mm <= widest and colour_word(o.label) != colour_word(pick.label)
+                for o in e.objects[2:]
+            )
+            if original_share == 0.0:  # described prompts must still single out one object per colour word
+                words = [colour_word(o.label) for o in e.objects if colour_word(o.label) in roles.PALETTE]
+                assert len(words) == len(set(words))
+        assert decoyed >= 0.95 * len(episodes)
+
+    @pytest.mark.parametrize(("role_agnostic", "fingerprint"), [(True, "ddd27a8752f0"), (False, "d980e9d05a24")])
+    def test_without_lookalikes_a_seed_draws_the_scenes_it_always_did(
+        self, role_agnostic: bool, fingerprint: str
+    ) -> None:
+        scenes = [
+            (o.label, round(float(o.x_mm), 1), round(float(o.y_mm), 1), round(o.width_mm, 1))
+            for e in draw(20, role_agnostic=role_agnostic)
+            for o in e.objects
+        ]
+        assert hashlib.sha1(repr(scenes).encode()).hexdigest()[:12] == fingerprint  # pinned before lookalikes existed
+
+
 class TestOriginalShare:
     def sampler_and_randomizer(self, share: float | None):
         from nebius_physical_ai.cli import build_randomizer
@@ -228,8 +261,9 @@ class TestOriginalShare:
         assert CliRunner().invoke(app, args).exit_code == 2
 
 
-def test_role_agnostic_without_randomize_is_a_usage_error(tmp_path: Path) -> None:
-    result = CliRunner().invoke(app, ["demos", str(tmp_path / "d"), "--role-agnostic"])
+@pytest.mark.parametrize("flags", [["--role-agnostic"], ["--lookalikes", "2"]])
+def test_scene_options_without_randomize_are_a_usage_error(tmp_path: Path, flags: list[str]) -> None:
+    result = CliRunner().invoke(app, ["demos", str(tmp_path / "d"), *flags])
     assert result.exit_code == 2 and "--randomize" in " ".join(result.output.split())
 
 
