@@ -9,7 +9,7 @@ from nebius_physical_ai.capture.camera import CameraPose
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.twin.expert import SceneSampler, start_pose
 from nebius_physical_ai.twin.randomize import SceneRandomizer
-from nebius_physical_ai.twin.rollout import StackCheck
+from nebius_physical_ai.twin.rollout import FailureWatch, StackCheck
 from nebius_physical_ai.twin.scene import SO101_XML, BlockPhysics, Twin, TwinLayout, TwinRenderer
 
 pytestmark = pytest.mark.skipif(not SO101_XML.exists(), reason="SO-101 menagerie model not fetched")
@@ -168,3 +168,46 @@ def test_randomized_scene_compiles_and_shows_the_task_blocks() -> None:
         assert image.std() > 10  # a real scene, not a blank frame
         twin.settle(0.5)
         assert all(twin.block_pos(name)[2] > 0 for name in twin.blocks)  # nothing knocked through the floor
+
+
+class TestFailureWatch:
+    """Each failure is staged by moving the blocks the way a rollout would, then asking for the verdict."""
+
+    @staticmethod
+    def move(twin: Twin, name: str, offset: tuple[float, float, float]) -> None:
+        adr = twin.model.jnt_qposadr[twin.model.body(name).jntadr[0]]
+        twin.data.qpos[adr : adr + 3] += offset
+        mujoco.mj_forward(twin.model, twin.data)
+
+    @pytest.fixture
+    def twin(self) -> Twin:
+        return Twin.from_objects(
+            [DetectedObject("blue", 131.0, 151.0, 900.0), DetectedObject("red", 221.0, 151.0, 1600.0)], A3
+        )
+
+    def stage(self, twin: Twin, path: list[tuple[str, tuple[float, float, float]]]) -> str:
+        watch = FailureWatch(twin, StackCheck())
+        for name, offset in path:
+            self.move(twin, name, offset)
+            watch.update(twin)
+        return watch.verdict(twin)
+
+    def test_untouched_blocks_mean_no_contact(self, twin: Twin) -> None:
+        assert self.stage(twin, []) == "no_contact"
+
+    def test_sliding_the_pick_block_is_a_push(self, twin: Twin) -> None:
+        assert self.stage(twin, [("blue", (0.03, 0.0, 0.0))]) == "pushed"
+
+    def test_lifting_then_setting_down_away_from_the_target_is_a_drop(self, twin: Twin) -> None:
+        assert self.stage(twin, [("blue", (0.0, 0.0, 0.05)), ("blue", (0.03, 0.0, -0.05))]) == "dropped"
+
+    def test_carried_over_the_target_but_not_on_it_fell_off(self, twin: Twin) -> None:
+        red, blue = twin.block_pos("red"), twin.block_pos("blue")
+        over = (red[0] - blue[0], red[1] - blue[1], 0.06)
+        assert self.stage(twin, [("blue", over), ("blue", (0.05, 0.0, -0.06))]) == "fell_off"
+
+    def test_still_in_the_air_at_the_end_is_holding(self, twin: Twin) -> None:
+        assert self.stage(twin, [("blue", (0.0, 0.0, 0.05))]) == "holding"
+
+    def test_shoving_the_place_block_first_is_knocked_place(self, twin: Twin) -> None:
+        assert self.stage(twin, [("red", (0.03, 0.0, 0.0))]) == "knocked_place"

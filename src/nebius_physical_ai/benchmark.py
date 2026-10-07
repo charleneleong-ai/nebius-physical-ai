@@ -16,6 +16,7 @@ Success is judged on the *named* pair of blocks, so stacking the wrong object co
 import fnmatch
 import itertools
 import math
+from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, fields, replace
 from typing import Any
@@ -106,6 +107,7 @@ class Cell:
     seconds: float
     per_case: list[int] = field(default_factory=list)  # successes per case, in suite order
     outcomes: list[bool] = field(default_factory=list)  # every rehearsal, case-major: pairs checkpoints scene by scene
+    failures: dict[str, int] = field(default_factory=dict)  # how the failed rehearsals failed (FailureWatch)
     # First success and first failure rollout, kind -> (caption, frames); only when videos were asked for, never saved
     examples: dict[str, tuple[str, list[np.ndarray]]] = field(default_factory=dict, repr=False, compare=False)
 
@@ -329,7 +331,7 @@ def run_suite(
     With `record_videos` the cell also keeps the first success and the first failure as rollout frames."""
     import time
 
-    start, per_case, outcomes = time.time(), [], []
+    start, per_case, outcomes, failures = time.time(), [], [], Counter()
     examples: dict[str, tuple[str, list[np.ndarray]]] = {}
     for case in suite.cases:
         rehearsal = Rehearsal(
@@ -343,6 +345,7 @@ def run_suite(
         result = rehearsal.run(case.objects, suite.variants, SEED)
         per_case.append(result.successes)
         outcomes += [bool(v["success"]) for v in result.variants]
+        failures.update(v["failure"] for v in result.variants if not v["success"])
         for kind, (index, frames) in result.examples.items():
             caption = f"{suite.name} | {case.name} | {kind} | variant {index} | {case.prompt}"
             examples.setdefault(kind, (caption, frames))
@@ -355,6 +358,7 @@ def run_suite(
         round(time.time() - start, 1),
         per_case,
         outcomes,
+        dict(failures.most_common()),
     )
     cell.examples = examples
     return cell
