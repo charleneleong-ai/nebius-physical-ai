@@ -56,7 +56,7 @@ def run(
     label: Annotated[str, typer.Argument(help="Name of the checkpoint being scored, e.g. v4a")],
     port: int = DEFAULT_PORT,
     group: Annotated[
-        str, typer.Option(help="legacy (the v2 and v3 cells), held_out, diagnostic (clean_many), or all")
+        str, typer.Option(help="legacy (the v2 and v3 cells), held_out, diagnostic (clean_many), appearance, or all")
     ] = "all",
     only: Annotated[list[str] | None, typer.Option(help="Only suites matching this glob; repeatable")] = None,
     real_objects: Annotated[Path, typer.Option(help="Real objects (npai lift output)")] = REPO

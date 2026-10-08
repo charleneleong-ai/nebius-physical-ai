@@ -2,6 +2,7 @@ import colorsys
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from typing import Any
 
 import numpy as np
 
@@ -11,6 +12,7 @@ from nebius_physical_ai.twin import roles
 from nebius_physical_ai.twin.expert import SceneSampler
 from nebius_physical_ai.twin.rollout import STACK_TASK
 from nebius_physical_ai.twin.scene import FLOOR_RGBA, SceneLook, TwinLayout
+from nebius_physical_ai.twin.textures import HELD_OUT_SEED, KINDS
 
 DISTRACTOR_LABELS = ("yellow", "green", "purple", "dark")
 TASK_LABELS = ("blue", "red")  # the expert and StackCheck look these up by name, so nothing else may use them
@@ -50,6 +52,33 @@ def rotated(v: np.ndarray, axis: np.ndarray, degrees: float) -> np.ndarray:
     """`v` turned about the unit `axis` by `degrees` (Rodrigues)."""
     a = np.radians(degrees)
     return v * np.cos(a) + np.cross(axis, v) * np.sin(a) + axis * (axis @ v) * (1 - np.cos(a))
+
+
+# Wrist cameras in the gripper's camera-mount frame: the menagerie model's own mount, and the Seeed SO-ARM101 mount
+# so101-benchmark uses (measured from its scene against the same gripper body).
+MENAGERIE_WRIST = {
+    "mount": "menagerie",
+    "pos": [-0.00296, 0.05436, -0.0531],
+    "quat": [0.95828, -0.28579, -0.00156, 0.00455],
+    "fovy": 61.0,
+}
+SEEED_WRIST = {"mount": "seeed", "pos": [0.0025, 0.07145, -0.00322], "quat": [0.9763, -0.21644, 0.0, 0.0], "fovy": 65.0}
+
+
+def jittered_mount(
+    mount: dict[str, Any], rng: np.random.Generator, pos_m: float, tilt_deg: float, fovy_deg: float
+) -> dict[str, Any]:
+    """`mount` moved up to `pos_m` per axis, tilted up to `tilt_deg` about the camera's own x axis, fovy jittered."""
+    half = np.radians(rng.uniform(-tilt_deg, tilt_deg)) / 2
+    w, x, y, z = mount["quat"]
+    c, s = np.cos(half), np.sin(half)  # mount * (cos, sin, 0, 0): a turn about the camera's x axis
+    quat = [w * c - x * s, w * s + x * c, y * c + z * s, z * c - y * s]
+    return {
+        "mount": mount["mount"],
+        "pos": [round(float(v + rng.uniform(-pos_m, pos_m)), 5) for v in mount["pos"]],
+        "quat": [round(float(v), 5) for v in quat],
+        "fovy": round(float(mount["fovy"]) + float(rng.uniform(-fovy_deg, fovy_deg)), 2),
+    }
 
 
 def segment_distance(p: np.ndarray, a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -96,6 +125,15 @@ class Randomization:
     # Pick-sized decoys of the pick object's own shape in other colours: only the prompt's colour word tells them
     # apart, so a policy can't get by on "grab the small one" (v5's commonest held-out failure was never touching it).
     lookalikes: tuple[int, int] = (0, 0)
+    # Visual domain randomisation: a share of floors get a procedural texture (seeds below the held-out ones), and the
+    # wrist camera is drawn between the menagerie and Seeed mounts with jitter. Both off by default.
+    texture_share: float = 0.0
+    texture_seeds: tuple[int, int] = (0, HELD_OUT_SEED)
+    wrist_randomize: bool = False
+    seeed_share: float = 0.5
+    wrist_jitter_m: float = 0.006
+    wrist_tilt_jitter_deg: float = 5.0
+    wrist_fovy_jitter_deg: float = 3.0
 
 
 class SceneRandomizer:
@@ -147,7 +185,24 @@ class SceneRandomizer:
             light_diffuse=self.uniform(r.light_diffuse),
             ambient=self.uniform(r.ambient),
             floor_grey=self.uniform(r.floor_grey),
+            floor_texture=self.floor_texture(),
+            wrist_camera=self.wrist_camera(),
         )
+
+    def floor_texture(self) -> str:
+        """A procedural floor for `texture_share` of episodes; draws nothing when the share is 0."""
+        r = self.ranges
+        if not r.texture_share or self.rng.random() >= r.texture_share:
+            return ""
+        return f"{self.rng.choice(KINDS)}:{int(self.rng.integers(*r.texture_seeds))}"
+
+    def wrist_camera(self) -> dict[str, Any] | None:
+        """The menagerie or Seeed wrist mount, jittered in position, tilt and field of view; None when not randomised."""
+        r = self.ranges
+        if not r.wrist_randomize:
+            return None
+        mount = SEEED_WRIST if self.rng.random() < r.seeed_share else MENAGERIE_WRIST
+        return jittered_mount(mount, self.rng, r.wrist_jitter_m, r.wrist_tilt_jitter_deg, r.wrist_fovy_jitter_deg)
 
     def camera(self) -> dict[str, list[float] | float]:
         """This episode's camera: from the mix when a pose was given, else the wide arc. Counts each source."""
