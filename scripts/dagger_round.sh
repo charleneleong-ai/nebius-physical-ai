@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # One DAgger round in the twin (scripts/dagger.py has the why). State lives in logs/dagger/state.env:
 #   POLICY     served checkpoint (a LeRobot pretrained_model dir)
-#   DATA       aggregate training set so far (LeRobot v3.0)
+#   DATA       aggregate training set so far (LeRobot v3.0); with BASE set, the base demos alone
+#   BASE       optional: the base demos; when set, recoveries are kept apart in RECOVERIES and upweighted
+#   RECOVERIES optional: every round's recoveries so far (LeRobot v3.0), empty before the first
 #   REF_BENCH  POLICY's result file on the gate suites
 #   ROUND      last finished round
 # A round: serve POLICY and rehearse fresh training scenes VARIANTS times each; keep up to BUDGET failures from scenes
@@ -22,9 +24,14 @@ VLM=$HOME/checkpoints/hqfang-groot-so100_101/vlm_processor
 STAGE=${STAGE:-harvest}  # harvest | aggregate | train: resume a failed round from that stage
 SCENES=${SCENES:-200} VARIANTS=${VARIANTS:-4} BUDGET=${BUDGET:-300} BAND=${BAND:-0.05,0.8}
 PARTS=${PARTS:-8} STEPS=${STEPS:-4000} LEARNING_RATE=${LEARNING_RATE:-1e-5}
+# With BASE set, training sees the base demos plus UPWEIGHT copies of all recoveries, so a few dozen recoveries are not
+# drowned out by thousands of clean demos (round 1: 85 of 2,485 episodes, 3.5%, and no measurable change).
+BASE=${BASE:-} RECOVERIES=${RECOVERIES:-} UPWEIGHT=${UPWEIGHT:-8}
+TRAIN_WHEN=${TRAIN_WHEN:-true}  # shell condition polled before training, e.g. to wait for another job's GPU
 SUITES=(clean_many seen_vocabulary held_out_objects clean_top_down_many real_1_pomade_tin_many in_path_pomade_tin_many)
 R=$((ROUND + 1))
 DIR=$PWD/logs/dagger/r$R RAW=$HOME/data/dagger_r$R NEXT_DATA=$HOME/data/dagger_agg_r${R}_v30
+NEXT_RECOVERIES=${BASE:+$HOME/data/dagger_recoveries_r$R}
 CAND=$HOME/checkpoints/gr00t-preflight-dagger-r$R
 mkdir -p "$DIR"
 say() { echo "[$(date -u +%T)] round $R: $*"; }
@@ -67,8 +74,8 @@ for k in $(seq 0 $((PARTS - 1))); do
   $LR/python -m lerobot.scripts.convert_dataset_v21_to_v30 --repo-id "local/dagger_r${R}_$k" --root "$RAW/part_$k" \
     --push-to-hub false > "$DIR/convert_$k.log" 2>&1 || { say "convert $k failed"; exit 1; }
 done
-rm -rf "$NEXT_DATA"
-$LR/python - "$DATA" "$RAW" "$PARTS" "$R" "$NEXT_DATA" <<'PY' || exit 1
+rm -rf "$NEXT_DATA" ${NEXT_RECOVERIES:+"$NEXT_RECOVERIES"}
+$LR/python - "$DATA" "$RAW" "$PARTS" "$R" "$NEXT_DATA" "$BASE" "$RECOVERIES" "$UPWEIGHT" "$NEXT_RECOVERIES" <<'PY' || exit 1
 import json
 import sys
 from pathlib import Path
@@ -76,23 +83,31 @@ from pathlib import Path
 from lerobot.datasets.dataset_tools import merge_datasets
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
-data, raw, parts, r, out = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]
+data, raw, parts, r, out, base, recoveries, upweight, next_recoveries = sys.argv[1:10]
+parts = int(parts)
 # The v2.1 -> v3.0 converter writes extra per-feature keys (fps, video encoder settings) that a merged set lacks, and
 # merging insists the feature dicts match exactly; the data are the same, so the parts adopt the aggregate's schema.
-features = json.loads(Path(data, "meta/info.json").read_text())["features"]
+features = json.loads(Path(base or data, "meta/info.json").read_text())["features"]
 for k in range(parts):
     info_path = Path(raw, f"part_{k}", "meta/info.json")
     info = json.loads(info_path.read_text())
     assert {n: f["shape"] for n, f in info["features"].items()} == {n: f["shape"] for n, f in features.items()}
     info_path.write_text(json.dumps({**info, "features": features}, indent=4))
-sets = [LeRobotDataset("local/aggregate", root=data)]
-sets += [LeRobotDataset(f"local/dagger_r{r}_{k}", root=f"{raw}/part_{k}") for k in range(parts)]
-merged = merge_datasets(sets, f"local/dagger_agg_r{r}", output_dir=out)
+new = [LeRobotDataset(f"local/dagger_r{r}_{k}", root=f"{raw}/part_{k}") for k in range(parts)]
+if not base:  # plain DAgger: the aggregate simply grows
+    merged = merge_datasets([LeRobotDataset("local/aggregate", root=data), *new], f"local/dagger_agg_r{r}", output_dir=out)
+else:  # recoveries kept apart and upweighted against the base demos
+    earlier = [LeRobotDataset("local/recoveries", root=recoveries)] if recoveries else []
+    kept = merge_datasets([*earlier, *new], f"local/dagger_recoveries_r{r}", output_dir=next_recoveries)
+    base_set = LeRobotDataset("local/base", root=base)
+    merged = merge_datasets([base_set] + [kept] * int(upweight), f"local/dagger_agg_r{r}", output_dir=out)
+    print(f"recoveries: {kept.meta.total_episodes} episodes, x{upweight} against {base_set.meta.total_episodes} base")
 print(f"aggregate: {merged.meta.total_episodes} episodes, {merged.meta.total_frames} frames")
 PY
 rm -rf "$RAW"
 fi  # STAGE!=train
 
+until eval "$TRAIN_WHEN"; do sleep 120; done
 # The final save writes about 12 GB of weights plus up to 36 GB of optimizer state before it is pruned.
 free_gb=$(df --output=avail -BG "$HOME" | tail -1 | tr -dc 0-9)
 [ "$free_gb" -ge 50 ] || { say "only ${free_gb} GB free; the final save needs about 50"; exit 1; }
@@ -126,11 +141,14 @@ if uv run python scripts/benchmark.py gate "$REF_BENCH" "$DIR/bench.json" | tee 
   POLICY=$NEW REF_BENCH=$DIR/bench.json
 fi
 # The state is written before anything is deleted, so it never points at a removed checkpoint.
-printf 'POLICY=%s\nDATA=%s\nREF_BENCH=%s\nROUND=%s\n' "$POLICY" "$NEXT_DATA" "$REF_BENCH" "$R" > "$STATE"
+printf 'POLICY=%s\nDATA=%s\nREF_BENCH=%s\nROUND=%s\nBASE=%s\nRECOVERIES=%s\n' \
+  "$POLICY" "${BASE:-$NEXT_DATA}" "$REF_BENCH" "$R" "$BASE" "${NEXT_RECOVERIES:-}" > "$STATE"
 if [ "$POLICY" = "$NEW" ]; then
   case "$OLD_POLICY" in *gr00t-preflight-dagger-r*) rm -rf "${OLD_POLICY%/checkpoints/*}" ;; esac  # superseded round
 else
   rm -rf "$CAND"
 fi
 [[ "$OLD_DATA" == *dagger_agg_r* ]] && rm -rf "$OLD_DATA"  # the new aggregate contains it
+[[ -n "$BASE" && "$RECOVERIES" == *dagger_recoveries_r* ]] && rm -rf "$RECOVERIES"  # superseded by NEXT_RECOVERIES
+[ -n "$BASE" ] && rm -rf "$NEXT_DATA"  # upweighted training copy: rebuilt from BASE and RECOVERIES every round
 say "DAGGER_ROUND_DONE; serving next: $POLICY"
