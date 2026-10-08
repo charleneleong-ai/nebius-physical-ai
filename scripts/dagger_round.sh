@@ -93,6 +93,9 @@ PY
 rm -rf "$RAW"
 fi  # STAGE!=train
 
+# The final save writes about 12 GB of weights plus up to 36 GB of optimizer state before it is pruned.
+free_gb=$(df --output=avail -BG "$HOME" | tail -1 | tr -dc 0-9)
+[ "$free_gb" -ge 55 ] || { say "only ${free_gb} GB free; the final save needs about 50"; exit 1; }
 say "fine-tuning $STEPS steps at lr $LEARNING_RATE from $POLICY"
 rm -rf "$CAND"
 ln -sfn "$VLM" "$POLICY/vlm_processor"
