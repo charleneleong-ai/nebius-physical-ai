@@ -55,7 +55,9 @@ class FluxDriver:
     def __init__(self, checkpoint: str = CHECKPOINT, bridge: bool = True, device: str = "cuda") -> None:
         self.policy = Flux3Policy.from_pretrained(checkpoint).to(device).eval()
         self.pre, self.post = make_pre_post_processors(self.policy.config, pretrained_path=checkpoint)
-        stats = Path(hf_hub_download(checkpoint, "dataset_statistics.json"))
+        # A LoRA keeps the base's statistics, which its saved folder may not copy: fall back to the base's on the Hub.
+        local = Path(checkpoint) / "dataset_statistics.json"
+        stats = local if local.exists() else Path(hf_hub_download(CHECKPOINT, "dataset_statistics.json"))
         self.bridge = QuantileBridge.for_checkpoint(stats) if bridge else None
         self.device = device
 
@@ -124,11 +126,12 @@ def suites(
     only: Annotated[list[str] | None, typer.Option(help="Only suites matching this glob; repeatable")] = None,
     group: str = "all",
     native: Annotated[bool, typer.Option(help="Feed our units unmapped (no QuantileBridge)")] = False,
+    checkpoint: Annotated[str, typer.Option(help="Hub id or a fine-tuned pretrained_model folder")] = CHECKPOINT,
     out: Path = Path("logs/bench_flux3.json"),
 ) -> None:
     layout = TwinLayout()
     real = [DetectedObject(**o) for o in json.loads((REPO / "data/capture/real_objects.json").read_text())]
-    driver, cells = FluxDriver(bridge=not native), []
+    driver, cells = FluxDriver(checkpoint, bridge=not native), []
     for suite in build_suites(real, layout, group, only or ()):
         cells.append(score_suite(driver, suite, layout))
         c = cells[-1]
@@ -159,6 +162,7 @@ def external(
     episodes: int = 50,
     benchmark: Path = SO101_BENCHMARK,
     native: bool = False,
+    checkpoint: str = CHECKPOINT,
     out: Path = Path("logs/so101bench_flux3.json"),
 ) -> None:
     """so101-benchmark's own scene, from its checkout's config (needs its package importable)."""
@@ -167,11 +171,11 @@ def external(
     from lerobot_env_so101.env import SO101Env
 
     cfg = load_config(benchmark / "configs/benchmark.yaml", {"sim": {"render_backend": "egl"}})
-    env, driver, results = SO101Env(task, cfg.sim, cfg.task_paths), FluxDriver(bridge=not native), []
+    env, driver, results = SO101Env(task, cfg.sim, cfg.task_paths), FluxDriver(checkpoint, bridge=not native), []
     for seed in range(episodes):
         results.append(external_episode(driver, env, seed, env.task_description))
         print(f"{task} {seed + 1}/{episodes}: {results[-1]} | {sum(r['success'] for r in results)}", flush=True)
-        out.write_text(json.dumps({"task": task, "policy": CHECKPOINT, "episodes": results}, indent=1))
+        out.write_text(json.dumps({"task": task, "policy": checkpoint, "episodes": results}, indent=1))
     env.close()
 
 
