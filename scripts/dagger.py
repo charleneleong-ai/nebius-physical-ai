@@ -18,7 +18,7 @@ from rich.progress import track
 
 from nebius_physical_ai.cli import build_randomizer
 from nebius_physical_ai.policy.gr00t import Gr00tClient
-from nebius_physical_ai.twin.dagger import FailureSnapshot, Harvester, record_recovery
+from nebius_physical_ai.twin.dagger import FailureSnapshot, Harvester, record_recovery, select
 from nebius_physical_ai.twin.dataset import LeRobotWriter
 from nebius_physical_ai.twin.expert import SceneSampler
 from nebius_physical_ai.twin.scene import TwinLayout
@@ -32,6 +32,12 @@ def harvest(
     out: Annotated[Path, typer.Argument(help="Snapshots, one JSON object per line")],
     port: int = 5564,
     scenes: int = 400,
+    variants: Annotated[
+        int, typer.Option(help="Rehearsals per scene, which give each failure its scene's success rate")
+    ] = 1,
+    budget: Annotated[int, typer.Option(help="Snapshots kept by uncertainty selection (0 = keep every failure)")] = 0,
+    band: Annotated[str, typer.Option(help="With --budget, keep scenes whose success rate is within LO,HI")] = "0,1",
+    per_scene: int = 2,
     seed: int = 900,
     lookalikes: int = 2,
     original_share: float = 0.35,
@@ -42,12 +48,17 @@ def harvest(
     """Roll the served policy out on fresh training scenes and save every recoverable failure's final state."""
     sampler = SceneSampler(TwinLayout(), seed=seed)
     randomizer = build_randomizer(sampler, seed, real_objects, camera, camera_mix, True, original_share, lookalikes)
+    lo, hi = (float(v) for v in band.split(","))
     with Gr00tClient(port=port) as policy:
-        snapshots, outcomes = Harvester(policy, randomizer, sampler).harvest(scenes)
+        harvested, outcomes = Harvester(policy, randomizer, sampler, variants=variants).harvest(scenes)
+    chosen = select(harvested, budget, (lo, hi), per_scene) if budget else harvested
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("".join(json.dumps(s.record()) + "\n" for s in snapshots))
-    print(f"{outcomes['success']}/{scenes} succeeded; outcomes {dict(outcomes.most_common())}")
-    print(f"wrote {len(snapshots)} snapshots to {out}")
+    out.write_text("".join(json.dumps(s.record()) + "\n" for s in chosen))
+    rollouts = scenes * variants
+    print(f"{outcomes['success']}/{rollouts} rollouts succeeded; outcomes {dict(outcomes.most_common())}")
+    rates = Counter(round(s.scene_p, 2) for s in harvested)
+    print(f"failures by their scene's success rate: {dict(sorted(rates.items()))}")
+    print(f"kept {len(chosen)} of {len(harvested)} snapshots: {dict(Counter(s.failure for s in chosen))} -> {out}")
 
 
 @app.command()

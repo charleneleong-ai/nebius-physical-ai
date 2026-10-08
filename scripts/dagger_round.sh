@@ -4,9 +4,11 @@
 #   DATA       aggregate training set so far (LeRobot v3.0)
 #   REF_BENCH  POLICY's result file on the gate suites
 #   ROUND      last finished round
-# A round: serve POLICY, harvest its failures on fresh training scenes, record the expert's recoveries, add them to
-# DATA (always: the aggregate grows even when a round is not promoted), fine-tune POLICY on the aggregate with a short
-# low-LR cosine schedule, benchmark the candidate and promote it only when `benchmark.py gate` passes.
+# A round: serve POLICY and rehearse fresh training scenes VARIANTS times each; keep up to BUDGET failures from scenes
+# whose success rate is in BAND (most uncertain first, balanced across failure types); record the expert's recoveries
+# and add them to DATA (always: the aggregate grows even when a round is not promoted); fine-tune POLICY on the
+# aggregate with a short low-LR cosine schedule; benchmark the candidate and promote it only when `benchmark.py gate`
+# passes.
 #   bash scripts/dagger_round.sh          # one round;  for r in 1 2 3; do bash scripts/dagger_round.sh || break; done
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
@@ -17,10 +19,12 @@ STATE=logs/dagger/state.env
 . "$STATE" || { echo "write $STATE first (POLICY, DATA, REF_BENCH, ROUND=0)"; exit 1; }
 LR=~/lerobot-n17/.venv/bin
 VLM=$HOME/checkpoints/hqfang-groot-so100_101/vlm_processor
-SCENES=${SCENES:-400} PARTS=${PARTS:-8} STEPS=${STEPS:-4000} LEARNING_RATE=${LEARNING_RATE:-1e-5}
+STAGE=${STAGE:-harvest}  # harvest | aggregate | train: resume a failed round from that stage
+SCENES=${SCENES:-200} VARIANTS=${VARIANTS:-4} BUDGET=${BUDGET:-300} BAND=${BAND:-0.05,0.8}
+PARTS=${PARTS:-8} STEPS=${STEPS:-4000} LEARNING_RATE=${LEARNING_RATE:-1e-5}
 SUITES=(clean_many seen_vocabulary held_out_objects clean_top_down_many real_1_pomade_tin_many in_path_pomade_tin_many)
 R=$((ROUND + 1))
-DIR=logs/dagger/r$R RAW=$HOME/data/dagger_r$R NEXT_DATA=$HOME/data/dagger_agg_r${R}_v30
+DIR=$PWD/logs/dagger/r$R RAW=$HOME/data/dagger_r$R NEXT_DATA=$HOME/data/dagger_agg_r${R}_v30
 CAND=$HOME/checkpoints/gr00t-preflight-dagger-r$R
 mkdir -p "$DIR"
 say() { echo "[$(date -u +%T)] round $R: $*"; }
@@ -34,42 +38,64 @@ serve() {  # serve CHECKPOINT PORT LOG -> sets SERVER
   until grep -q serving "$3"; do kill -0 $SERVER 2>/dev/null || { say "server died: $3"; exit 1; }; sleep 10; done
 }
 
-say "harvesting $SCENES scenes with $POLICY"
-serve "$POLICY" 5564 "$DIR/serve_harvest.log"
-uv run python scripts/dagger.py harvest "$DIR/snapshots.jsonl" --port 5564 --scenes "$SCENES" --seed $((900 + 10 * R)) \
-  || exit 1
-kill $SERVER; SERVER=""
+if [ "$STAGE" = harvest ]; then
+  say "harvesting $SCENES scenes with $POLICY"
+  serve "$POLICY" 5564 "$DIR/serve_harvest.log"
+  uv run python scripts/dagger.py harvest "$DIR/snapshots.jsonl" --port 5564 --scenes "$SCENES" --seed $((900 + 10 * R)) \
+    --variants "$VARIANTS" --budget "$BUDGET" --band "$BAND" \
+    || exit 1
+  kill $SERVER; SERVER=""
 
-say "recording recoveries in $PARTS parts"
-pids=()
-for k in $(seq 0 $((PARTS - 1))); do
-  rm -rf "$RAW/part_$k"
-  uv run python scripts/dagger.py recover "$DIR/snapshots.jsonl" "$RAW/part_$k" --part "$k" --parts "$PARTS" \
-    > "$DIR/recover_$k.log" 2>&1 &
-  pids+=($!)
-done
-for p in "${pids[@]}"; do wait "$p" || { say "a recovery part failed; see $DIR/recover_*.log"; exit 1; }; done
-grep -h recovered "$DIR"/recover_*.log
+  say "recording recoveries in $PARTS parts"
+  pids=()
+  for k in $(seq 0 $((PARTS - 1))); do
+    rm -rf "$RAW/part_$k"
+    uv run python scripts/dagger.py recover "$DIR/snapshots.jsonl" "$RAW/part_$k" --part "$k" --parts "$PARTS" \
+      > "$DIR/recover_$k.log" 2>&1 &
+    pids+=($!)
+  done
+  for p in "${pids[@]}"; do wait "$p" || { say "a recovery part failed; see $DIR/recover_*.log"; exit 1; }; done
+  grep -h recovered "$DIR"/recover_*.log
 
+fi  # STAGE=harvest
+
+if [ "$STAGE" != train ]; then
 say "aggregating into $NEXT_DATA"
 for k in $(seq 0 $((PARTS - 1))); do
+  grep -q '"codebase_version": "v3.0"' "$RAW/part_$k/meta/info.json" && continue  # converted by an earlier attempt
   $LR/python scripts/episode_stats.py "$RAW/part_$k" > /dev/null || exit 1
   $LR/python -m lerobot.scripts.convert_dataset_v21_to_v30 --repo-id "local/dagger_r${R}_$k" --root "$RAW/part_$k" \
     --push-to-hub false > "$DIR/convert_$k.log" 2>&1 || { say "convert $k failed"; exit 1; }
 done
 rm -rf "$NEXT_DATA"
 $LR/python - "$DATA" "$RAW" "$PARTS" "$R" "$NEXT_DATA" <<'PY' || exit 1
+import json
 import sys
+from pathlib import Path
+
 from lerobot.datasets.dataset_tools import merge_datasets
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
 data, raw, parts, r, out = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]
+# The v2.1 -> v3.0 converter writes extra per-feature keys (fps, video encoder settings) that a merged set lacks, and
+# merging insists the feature dicts match exactly; the data are the same, so the parts adopt the aggregate's schema.
+features = json.loads(Path(data, "meta/info.json").read_text())["features"]
+for k in range(parts):
+    info_path = Path(raw, f"part_{k}", "meta/info.json")
+    info = json.loads(info_path.read_text())
+    assert {n: f["shape"] for n, f in info["features"].items()} == {n: f["shape"] for n, f in features.items()}
+    info_path.write_text(json.dumps({**info, "features": features}, indent=4))
 sets = [LeRobotDataset("local/aggregate", root=data)]
 sets += [LeRobotDataset(f"local/dagger_r{r}_{k}", root=f"{raw}/part_{k}") for k in range(parts)]
 merged = merge_datasets(sets, f"local/dagger_agg_r{r}", output_dir=out)
 print(f"aggregate: {merged.meta.total_episodes} episodes, {merged.meta.total_frames} frames")
 PY
 rm -rf "$RAW"
+fi  # STAGE!=train
 
+# The final save writes about 12 GB of weights plus up to 36 GB of optimizer state before it is pruned.
+free_gb=$(df --output=avail -BG "$HOME" | tail -1 | tr -dc 0-9)
+[ "$free_gb" -ge 50 ] || { say "only ${free_gb} GB free; the final save needs about 50"; exit 1; }
 say "fine-tuning $STEPS steps at lr $LEARNING_RATE from $POLICY"
 rm -rf "$CAND"
 ln -sfn "$VLM" "$POLICY/vlm_processor"
