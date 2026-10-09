@@ -37,6 +37,13 @@ ARM_JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wris
 A3_MAT = MatSpec(width_mm=350.0, height_mm=227.0)  # the printed A3 sheet; MatSpec defaults to the A4 cut-outs
 
 
+def lerobot_to_qpos(joints: np.ndarray, limits: np.ndarray) -> np.ndarray:
+    """LeRobot units (arm joints in [-100, 100], gripper in [0, 100]) to radians across `limits` (6, 2)."""
+    lo, hi = limits.T
+    unit = np.concatenate([(joints[..., :5] + 100) / 200, joints[..., 5:] / 100], axis=-1)
+    return lo + np.clip(unit, 0, 1) * (hi - lo)
+
+
 @dataclass(frozen=True)
 class TwinLayout:
     """Robot base sits beyond the mat's bottom edge, centred, facing up the mat.
@@ -293,9 +300,7 @@ class Twin:
         return np.concatenate([unit[:5] * 200 - 100, unit[5:] * 100])
 
     def from_lerobot(self, joints: np.ndarray) -> np.ndarray:
-        lo, hi = self.arm_limits().T
-        unit = np.concatenate([(joints[:5] + 100) / 200, joints[5:] / 100])
-        return lo + np.clip(unit, 0, 1) * (hi - lo)
+        return lerobot_to_qpos(joints, self.arm_limits())
 
     def reset_arm(self, qpos: np.ndarray) -> None:
         for joint, q in zip(ARM_JOINTS, qpos):
