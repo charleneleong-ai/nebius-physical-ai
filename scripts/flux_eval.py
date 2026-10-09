@@ -55,8 +55,13 @@ app = typer.Typer(add_completion=False, no_args_is_help=True)
 class FluxDriver:
     """FLUX 3 Action one tick at a time: images and joints in, the next joint target out, in our units."""
 
-    def __init__(self, checkpoint: str = CHECKPOINT, bridge: bool = True, device: str = "cuda") -> None:
+    def __init__(
+        self, checkpoint: str = CHECKPOINT, bridge: bool = True, device: str = "cuda", action_steps: int = 0
+    ) -> None:
+        """`action_steps` overrides how many of each predicted chunk run before replanning (0 = the checkpoint's)."""
         self.policy = self.load(checkpoint).to(device).eval()
+        if action_steps:
+            self.policy.config.n_action_steps = action_steps
         self.pre, self.post = make_pre_post_processors(self.policy.config, pretrained_path=checkpoint)
         # A LoRA keeps the base's statistics, which its saved folder may not copy: fall back to the base's on the Hub.
         local = Path(checkpoint) / "dataset_statistics.json"
@@ -152,14 +157,21 @@ def suites(
     group: str = "all",
     native: Annotated[bool, typer.Option(help="Feed our units unmapped (no QuantileBridge)")] = False,
     checkpoint: Annotated[str, typer.Option(help="Hub id or a fine-tuned pretrained_model folder")] = CHECKPOINT,
+    action_steps: Annotated[int, typer.Option(help="Actions run per chunk before replanning (0 = checkpoint's)")] = 0,
     out: Path = Path("logs/bench_flux3.json"),
     wandb_log: Annotated[bool, typer.Option("--wandb/--no-wandb", help="Scores and rollout videos to W&B")] = True,
     wandb_group: str = "flux3",
 ) -> None:
     layout = TwinLayout()
     real = [DetectedObject(**o) for o in json.loads((REPO / "data/capture/real_objects.json").read_text())]
-    driver, cells = FluxDriver(checkpoint, bridge=not native), []
-    config = {"checkpoint": checkpoint, "bridge": not native, "group": group, "only": only}
+    driver, cells = FluxDriver(checkpoint, bridge=not native, action_steps=action_steps), []
+    config = {
+        "checkpoint": checkpoint,
+        "bridge": not native,
+        "group": group,
+        "only": only,
+        "action_steps": action_steps,
+    }
     with Tracker("benchmark", name=label, config=config, enabled=wandb_log, group=wandb_group) as tracker:
         for suite in build_suites(real, layout, group, only or ()):
             cells.append(score_suite(driver, suite, layout))
