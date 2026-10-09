@@ -29,6 +29,7 @@ import typer
 from huggingface_hub import hf_hub_download
 from lerobot.policies.factory import make_pre_post_processors
 from lerobot.policies.flux3 import Flux3Policy
+from peft import PeftConfig, PeftModel
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
@@ -55,13 +56,22 @@ class FluxDriver:
     """FLUX 3 Action one tick at a time: images and joints in, the next joint target out, in our units."""
 
     def __init__(self, checkpoint: str = CHECKPOINT, bridge: bool = True, device: str = "cuda") -> None:
-        self.policy = Flux3Policy.from_pretrained(checkpoint).to(device).eval()
+        self.policy = self.load(checkpoint).to(device).eval()
         self.pre, self.post = make_pre_post_processors(self.policy.config, pretrained_path=checkpoint)
         # A LoRA keeps the base's statistics, which its saved folder may not copy: fall back to the base's on the Hub.
         local = Path(checkpoint) / "dataset_statistics.json"
         stats = local if local.exists() else Path(hf_hub_download(CHECKPOINT, "dataset_statistics.json"))
         self.bridge = QuantileBridge.for_checkpoint(stats) if bridge else None
         self.device = device
+
+    @staticmethod
+    def load(checkpoint: str) -> Flux3Policy:
+        """A full checkpoint, or a LoRA adapter (BFL's recipe saves only the adapter) merged into its base."""
+        if not (Path(checkpoint) / "adapter_config.json").exists():
+            return Flux3Policy.from_pretrained(checkpoint)
+        adapter = PeftConfig.from_pretrained(checkpoint)
+        base = Flux3Policy.from_pretrained(adapter.base_model_name_or_path)
+        return PeftModel.from_pretrained(base, checkpoint, config=adapter).merge_and_unload()
 
     def reset(self) -> None:
         self.policy.reset()
