@@ -98,9 +98,13 @@ if not base:  # plain DAgger: the aggregate simply grows
     merged = merge_datasets([LeRobotDataset("local/aggregate", root=data), *new], f"local/dagger_agg_r{r}", output_dir=out)
 else:  # recoveries kept apart and upweighted against the base demos
     earlier = [LeRobotDataset("local/recoveries", root=recoveries)] if recoveries else []
-    kept = merge_datasets([*earlier, *new], f"local/dagger_recoveries_r{r}", output_dir=next_recoveries)
+    # One video file per source, not re-muxed: an extracted set's timestamps and a fresh part's do not concatenate.
+    kept = merge_datasets(
+        [*earlier, *new], f"local/dagger_recoveries_r{r}", output_dir=next_recoveries, concatenate_videos=False
+    )
     base_set = LeRobotDataset("local/base", root=base)
-    merged = merge_datasets([base_set] + [kept] * int(upweight), f"local/dagger_agg_r{r}", output_dir=out)
+    copies = [base_set] + [kept] * int(upweight)
+    merged = merge_datasets(copies, f"local/dagger_agg_r{r}", output_dir=out, concatenate_videos=False)
     print(f"recoveries: {kept.meta.total_episodes} episodes, x{upweight} against {base_set.meta.total_episodes} base")
 print(f"aggregate: {merged.meta.total_episodes} episodes, {merged.meta.total_frames} frames")
 PY
