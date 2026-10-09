@@ -102,7 +102,10 @@ class Imagination:
 
     def decode(self, vae: Any) -> np.ndarray:
         """The imagined clip as (T, H, W, 3) uint8: the scene and wrist cameras side by side, as FLUX composes them."""
-        video = vae.decode_from_latent_with_ids(self.tokens[0].to(torch.bfloat16), self.ids[0])  # (3, T, H, W)
+        inner = getattr(vae, "module", vae)  # LeRobot's VideoVAE wraps the model that knows token ids
+        video = inner.decode_from_latent_with_ids(
+            self.tokens[0].to(torch.bfloat16), self.ids[0].to(self.tokens.device)
+        )  # (3, T, H, W)
         return ((video.float().clamp(-1, 1) + 1) * 127.5).byte().permute(1, 2, 3, 0).cpu().numpy()
 
 
