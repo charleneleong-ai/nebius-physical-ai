@@ -48,6 +48,7 @@ Uncontrolled weight updates during physical execution are explicitly out of scop
 | Uncertainty targeting | [PR #16](https://github.com/charleneleong-ai/nebius-physical-ai/pull/16): uncertainty/failure-balanced harvesting replaces indiscriminate replay | Implemented |
 | Visual domain randomisation | [PR #17](https://github.com/charleneleong-ai/nebius-physical-ai/pull/17): Seeed-mount score improves 15→53/96, but internal clean score regresses 81→58; external score only 1/50 | Diagnostic fix; not promoted |
 | FLUX 3 Action | [PR #18](https://github.com/charleneleong-ai/nebius-physical-ai/pull/18): 0/10 external and 0/16 initial internal zero-shot evaluation | Evaluated; adaptation pending |
+| Cross-experiment diagnosis | [PR #20](https://github.com/charleneleong-ai/nebius-physical-ai/pull/20): v5 remains unbeaten internally; external gap is mostly the wrist mount; grasp quality is the main internal failure | Consolidated diagnosis; round 2 and FLUX LoRA pending |
 
 The current evidence supports a conservative conclusion: the system has a working simulation, evaluation, failure-harvesting, and promotion foundation, but it does not yet have a validated learned world model controlling the real arm or a demonstrated online policy-improvement loop on hardware.
 
@@ -63,7 +64,7 @@ The work completed so far forms the lower half of the closed loop:
 6. **Targeted improvement.** v6 recovery/decoy demonstrations and the uncertainty-targeted DAgger loop now harvest failures, record recoveries, rebalance the data, train candidates, and gate promotion.
 7. **Trust and intervention.** Preflight produces GO / RETRY / ASK_HUMAN decisions and can explain them through the Nebius Token Factory path.
 
-The strongest measured result is the v5 GR00T N1.7 baseline: 55–82 successes out of 96 across the paired internal suites, 57% on the held-out-object headline reported in the repository, and 0/50 on the external benchmark. That gap is now a measured diagnosis rather than an unexplained failure.
+The strongest measured result is still the v5 GR00T N1.7 baseline: 55–82 successes out of 96 across the paired internal suites, 57% on the held-out-object headline reported in the repository, and 0/50 on the external benchmark. The consolidated diagnosis is now sharper: the external gap is mostly the wrist-camera contract, while grasp quality remains the main internal failure. Neither v6, DAgger round 1, visual-DR v7, nor FLUX zero-shot has beaten v5.
 
 ## Measured path to the end state
 
@@ -85,6 +86,14 @@ The order is deliberate: first make the measurements stable, then close the visu
 ## Next validation milestones
 
 The immediate next run is Step 1: produce one versioned result bundle for v5 containing all internal and external scores, failure breakdowns, environment/config fingerprints, and W&B links. That bundle becomes the reference for every subsequent candidate.
+
+The next experiments after the reference bundle are deliberately narrow:
+
+1. **Finish DAgger round 2** with recovery upweighting and inspect whether the `no_contact` / `pushed` reductions survive without increasing drops or holding failures.
+2. **Train visual generalisation from the hqfang base**, rather than continuing v5, with both wrist mounts, held-out floor textures, and the external front-camera framing represented in the training distribution.
+3. **Run the FLUX LoRA adaptation** on bridged SO-101 data and score it on the same paired suites; do not compare zero-shot FLUX against fine-tuned GR00T as if they were equivalent.
+4. **Add world-model shadow scoring** only after the policy comparison is stable; measure predicted-versus-actual outcome calibration without affecting physical control.
+5. **Move to the physical arm** only after simulation gates hold, with short-horizon actions, safety limits, failure labelling, teleoperation recovery, and rollback.
 
 ## Open PRs
 
