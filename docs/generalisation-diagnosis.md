@@ -26,12 +26,13 @@ Ranges are two runs of the same checkpoint. Re-runs move a cell by up to ±9, so
 | 2 | Targeted demos fix those modes (v6: recoveries + lookalike decoys) | [#13](https://github.com/charleneleong-ai/nebius-physical-ai/pull/13) | **Within noise.** no_contact −13 and held-out +8, but pushes +16: it reaches the right object, then mis-grasps. |
 | 3 | The external 0/50 is a visual gap | [#14](https://github.com/charleneleong-ai/nebius-physical-ai/pull/14) | **Confirmed.** Joint mapping, front camera and arm colour match; the table texture and wrist mount differ. v5 never heads for the cubes. |
 | 4 | DAgger on the policy's own failure states | [#15](https://github.com/charleneleong-ai/nebius-physical-ai/pull/15) | **Round 1: KEEP, within noise** (−2 pooled). no_contact 57 → 45 and knocked_place 11 → 0, but dropped 24 → 33 and holding 4 → 13. Its 85 recoveries were only 3.5% of training. |
-| 5 | Upweight the recoveries (round 2: 157 recoveries ×8 against 2,400 base, about 34% of training) | [#15](https://github.com/charleneleong-ai/nebius-physical-ai/pull/15) | Waiting for the GPU after the FLUX LoRA. |
+| 5 | Upweight the recoveries (round 2: 157 recoveries ×8 against 2,400 base, about 34% of training) | [#15](https://github.com/charleneleong-ai/nebius-physical-ai/pull/15) | **PROMOTE: pooled +26, no suite worse.** clean_many 81 → 86, real_1_pomade_tin_many 74 → 86 (p=0.004), in_path 73 → 81. no_contact 57 → 33, knocked_place 11 → 0–1. held_out_objects unchanged (52 → 50), and dropped/holding stay high. |
 | 6 | Visual DR closes the external gap (v7: procedural floors, wrist mount randomised) | [#17](https://github.com/charleneleong-ai/nebius-physical-ai/pull/17) | **Mostly the wrist mount.** The Seeed mount alone drops v5 from 81 to 15 on clean_many's scenes; v7 lifts that to 53 (+42/−4). But v7 regresses internally (clean_many 81 → 58) and reaches only 1/50 externally. |
 | 7 | A camera-robust world action model transfers (FLUX 3 Action, zero-shot) | [#18](https://github.com/charleneleong-ai/nebius-physical-ai/pull/18) | **Zero-shot: no.** 0/16 on clean_many against v5's 10/16 on the same scenes, 0/10 on so101-benchmark. LoRA (3,600 demos incl. visual DR): step 3,000 scored 11/64 on clean_many; final checkpoint scoring. Its imagined futures barely improve on zero-shot (L1 15.4 vs 16.5/255): FLUX already sees our scene, it maps it to the wrong actions. |
 
 ## What the evidence says so far
 
+- **Targeted on-policy data is the lever, if it is weighted.** DAgger round 2 is the first change to beat v5 (+26 pooled), with recoveries at a third of training. Round 1's identical loop at 3.5% was flat, as were v5b and v6.
 - **Data volume is not the lever.** v5b (more steps on the same data) and v6 (2× the data, targeted) both land within
   noise of v5. This matches PlugCharger, where 30× the demos moved imitation from 0.07 to 0.17 only.
 - **The bottleneck has moved from target choice to grasping.** v6 cut no_contact but raised pushed. The scripted expert
@@ -45,7 +46,7 @@ Ranges are two runs of the same checkpoint. Re-runs move a cell by up to ±9, so
 
 ## Next moves
 
-1. **Round 2's verdict** (#15): whether upweighted recoveries move the headline where round 1's 3.5% did not.
+1. **Round 3 of DAgger from the promoted round-2 checkpoint** (#15). Upweighting is what made it work: the same loop at 3.5% recoveries was flat. Drops need a recovery the expert can record from a lifted state.
 2. **The final FLUX LoRA's scores** (#18). If it stays far below v5 internally, FLUX is not worth more GPU here.
 3. **Train with the wrist mount randomised from the start, from the hqfang base**, instead of continuing v5. That should keep v7's +38 on the Seeed mount without its internal regression.
 4. **The rest of the external gap**: with the wrist mount handled internally, v7 still scores 1/50. Compare so101-benchmark's front-camera framing, start pose and episode length next.
