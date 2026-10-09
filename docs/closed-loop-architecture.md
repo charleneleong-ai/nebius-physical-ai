@@ -51,13 +51,40 @@ Uncontrolled weight updates during physical execution are explicitly out of scop
 
 The current evidence supports a conservative conclusion: the system has a working simulation, evaluation, failure-harvesting, and promotion foundation, but it does not yet have a validated learned world model controlling the real arm or a demonstrated online policy-improvement loop on hardware.
 
+## What is already built
+
+The work completed so far forms the lower half of the closed loop:
+
+1. **Scene capture and state estimation.** Phone capture, ArUco mat localisation, camera calibration, marker-corrected object geometry, configurable tasks, and Cosmos/Token Factory perception are implemented.
+2. **A physically grounded twin.** The SO-101 MuJoCo twin renders the task, randomises physics/cameras/objects/appearance, and records LeRobot-compatible demonstrations.
+3. **Policy serving and control.** GR00T N1.6/N1.7 checkpoints are served through a common policy interface; FLUX 3 Action has a separate evaluator and dataset bridge.
+4. **Internal evaluation.** Paired multi-scene suites, held-out objects, failure labels, Wilson intervals, McNemar comparisons, W&B media, and promotion gates are implemented.
+5. **External evaluation.** The independent `so101-benchmark` runner exposed a 0/50 v5 visual-contract failure, which led to the textured-floor and wrist-mount appearance suites.
+6. **Targeted improvement.** v6 recovery/decoy demonstrations and the uncertainty-targeted DAgger loop now harvest failures, record recoveries, rebalance the data, train candidates, and gate promotion.
+7. **Trust and intervention.** Preflight produces GO / RETRY / ASK_HUMAN decisions and can explain them through the Nebius Token Factory path.
+
+The strongest measured result is the v5 GR00T N1.7 baseline: 55–82 successes out of 96 across the paired internal suites, 57% on the held-out-object headline reported in the repository, and 0/50 on the external benchmark. That gap is now a measured diagnosis rather than an unexplained failure.
+
+## Measured path to the end state
+
+Each stage should produce a result before the next stage is promoted.
+
+| Step | Capability to add | Experiment | Metric / gate |
+|---|---|---|---|
+| 1 | Stable baseline | Re-run v5 on fixed internal, appearance, and external suites | Store successes, failures, 95% intervals, latency, and exact checkpoint/config; no promotion without reproducibility |
+| 2 | Visual generalisation | Compare v5, visual-DR v7, and a fresh base-trained candidate on held-out textures and wrist mounts | Improve the external score without regressing the six internal suites; report paired McNemar results |
+| 3 | Policy comparison | Score GR00T and FLUX on identical datasets, seeds, cameras, and action contracts | Select by paired success, failure mix, latency, memory, and recovery rate—not headline success alone |
+| 4 | World-model shadow mode | Give Cosmos and Isaac/MuJoCo candidate action chunks but do not let them control the arm | Calibration of predicted outcome vs rollout outcome; zero effect on physical control until the predictor is validated |
+| 5 | Closed-loop recovery | Execute short action chunks, detect failure types, replan, and invoke a scripted or human recovery | Recovery success, time-to-recovery, collision/force violations, and intervention rate; safety violations must remain zero |
+| 6 | Real episode buffer | Record real observations, actions, state, outcome, uncertainty, and human intervention | Every episode is replayable and labelled; no unverified or corrupted episode enters training |
+| 7 | Continual-learning candidate | Train asynchronously on real data plus validated Isaac/Cosmos data and DAgger recoveries | Candidate must beat the served checkpoint on held-out internal and external suites and regress on none |
+| 8 | Safe promotion | Shadow-run the candidate, canary it on a small real-task slice, and retain rollback | Promotion requires benchmark gate, canary success, bounded latency, and an immediate rollback path |
+
+The order is deliberate: first make the measurements stable, then close the visual gap, then validate prediction, then enable physical recovery, and only after that allow online experience to influence deployed weights.
+
 ## Next validation milestones
 
-1. Re-run v5 and the visual-DR candidate on the same internal appearance suites and external benchmark.
-2. Fine-tune FLUX and score it on exactly the same paired suites.
-3. Add world-model prediction in shadow mode before allowing it to select physical actions.
-4. Connect real SO-101 outcomes to the episode buffer and teleoperation recovery path.
-5. Promote candidates only when internal, appearance, and external scores improve without regression on the served suites.
+The immediate next run is Step 1: produce one versioned result bundle for v5 containing all internal and external scores, failure breakdowns, environment/config fingerprints, and W&B links. That bundle becomes the reference for every subsequent candidate.
 
 ## Open PRs
 
