@@ -7,6 +7,10 @@ looked at:
              model is fed (the v8 set's last 1,200 episodes carry the Seeed wrist mount and textured floors)
     imagine  FLUX denoises the next 42 video frames together with its actions; decoding them beside the real next
              frames of held-out demos shows whether it understands the scene before any rollout
+    bridge   whether the data bridge loses anything: our demo actions mapped into FLUX units, turned into the deltas
+             its processor normalises (and clips at 6), and mapped back, against the originals
+    openloop the model's first action on held-out demo frames against the demo's own, beside holding still, so a
+             closed-loop failure can be told apart from a model that never learned the mapping
 
     ~/lerobot-flux/.venv/bin/python scripts/flux_audit.py demos ~/data/preflight_demos_v8_v30 --name v8
     ~/lerobot-flux/.venv/bin/python scripts/flux_audit.py imagine ~/data/preflight_demos_v8_v30 \\
@@ -14,6 +18,7 @@ looked at:
 """
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from typing import Annotated, Any
@@ -21,11 +26,13 @@ from typing import Annotated, Any
 import numpy as np
 import torch
 import typer
+from huggingface_hub import hf_hub_download
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.policies.flux3 import modeling_flux3
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
+from nebius_physical_ai.policy.flux3 import QuantileBridge
 from nebius_physical_ai.tracking import Tracker
 
 CAMERAS = ("observation.images.front", "observation.images.wrist")
@@ -150,6 +157,73 @@ def imagine(
             print(f"episode {episode}: {len(imagined)} frames, mean L1 {error:.1f}/255", flush=True)
         t.run.log(logged)
         t.run.summary["imagine_l1_mean"] = float(np.mean([v for k, v in logged.items() if k.startswith("imagine_l1")]))
+
+
+def checkpoint_stats_path() -> Path:
+    return Path(hf_hub_download(load_flux_eval().CHECKPOINT, "dataset_statistics.json"))
+
+
+def episode_actions(dataset: LeRobotDataset, episode: int) -> np.ndarray:
+    start, stop = episode_range(dataset, episode)
+    return np.stack(dataset.hf_dataset[start:stop]["action"]).astype(np.float64)
+
+
+@app.command()
+def bridge(
+    root: Annotated[Path, typer.Argument(help="A LeRobot v3.0 dataset in our units")],
+    episodes: int = 200,
+) -> None:
+    """Round-trip the demo actions through the bridge and FLUX's delta normalisation; report coverage and loss."""
+    path = checkpoint_stats_path()
+    action = json.loads(path.read_text())["action"]
+    lo, span, clip = np.array(action["q01"]), np.array(action["q99"]) - np.array(action["q01"]), action["clip"]
+    unit = QuantileBridge.for_checkpoint(path)
+    dataset = LeRobotDataset(f"local/{root.name}", root=root)
+    outside, clipped, errors = [], [], []
+    for episode in evenly(episodes, dataset.meta.total_episodes):
+        ours = episode_actions(dataset, episode)
+        theirs = unit.to_theirs(ours)
+        delta = np.diff(theirs, axis=0)
+        delta[:, -1] = theirs[1:, -1]  # the gripper stays absolute
+        z = 2 * (delta - lo) / span - 1
+        outside.append(np.abs(z) > 1)
+        clipped.append(np.abs(z) > clip)
+        rebuilt_delta = (np.clip(z, -clip, clip) + 1) * span / 2 + lo
+        rebuilt = np.vstack([theirs[:1], theirs[:1] + np.cumsum(rebuilt_delta, axis=0)])
+        rebuilt[1:, -1] = rebuilt_delta[:, -1]
+        errors.append(np.abs(unit.to_ours(rebuilt) - ours).max(axis=0))
+    outside, clipped = np.concatenate(outside), np.concatenate(clipped)
+    names = ["pan", "lift", "elbow", "wrist_flex", "wrist_roll", "gripper"]
+    print("per joint: share of steps outside the checkpoint's 1-99% action range | clipped at 6 | max round-trip error")
+    for j, n in enumerate(names):
+        print(f"  {n:11s} {outside[:, j].mean():6.1%} | {clipped[:, j].mean():6.2%} | {np.max(errors, axis=0)[j]:.4f}")
+
+
+@app.command()
+def openloop(
+    root: Annotated[Path, typer.Argument(help="A LeRobot v3.0 dataset in our units")],
+    checkpoint: str = "black-forest-labs/flux-3-action-so101",
+    first_episode: Annotated[int, typer.Option(help="Held-out episodes start here (not in the training set)")] = 800,
+    samples: int = 60,
+) -> None:
+    """Mean absolute error of the first predicted action on held-out frames, against holding the current pose."""
+    driver = load_flux_eval().FluxDriver(checkpoint)
+    dataset = LeRobotDataset(f"local/{root.name}", root=root)
+    held = list(range(first_episode, dataset.meta.total_episodes))
+    rng = np.random.default_rng(0)
+    model_err, hold_err = [], []
+    for episode in rng.choice(held, size=min(samples, len(held)), replace=False):
+        start, stop = episode_range(dataset, int(episode))
+        f = dataset[int(rng.integers(start, stop - 1))]
+        state, target = f["observation.state"].numpy(), f["action"].numpy()
+        driver.reset()
+        action = driver.act(rgb(f[CAMERAS[0]]), rgb(f[CAMERAS[1]]), state, f["task"])
+        model_err.append(np.abs(action - target))
+        hold_err.append(np.abs(state - target))
+    m, h = np.mean(model_err, axis=0), np.mean(hold_err, axis=0)
+    print(f"{checkpoint}: mean |action error| per joint (LeRobot units), model vs holding still")
+    print("  model", np.round(m, 2), "mean", round(float(m.mean()), 2))
+    print("  hold ", np.round(h, 2), "mean", round(float(h.mean()), 2))
 
 
 if __name__ == "__main__":
