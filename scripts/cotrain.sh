@@ -15,6 +15,7 @@ NAME=${NAME:-v9-cotrain} REAL_SHARE=${REAL_SHARE:-0.25} STEPS=${STEPS:-12000} LE
 WAIT_FOR=${WAIT_FOR:-true}
 SUITES=(clean_many seen_vocabulary held_out_objects clean_top_down_many real_1_pomade_tin_many in_path_pomade_tin_many)
 TWIN=$HOME/data/preflight_demos_v4c_v30 REAL=$HOME/data/armnet_twin MIX=$HOME/data/${NAME}_mix
+EXTRA=${EXTRA:-}  # another converted real set mixed in, e.g. ~/data/armnet_rollouts for v9b
 BASE=$HOME/checkpoints/hqfang-groot-so100_101 RESTAT=$HOME/checkpoints/hqfang-restat-$NAME
 OUT=$HOME/checkpoints/gr00t-preflight-$NAME VLM=$BASE/vlm_processor
 LOGS=$PWD/logs/$NAME
@@ -33,7 +34,7 @@ fi
 $LR/python scripts/real_mix.py check "$REAL" "$TWIN" || die "unit check failed"
 say "mixing at real share $REAL_SHARE"
 rm -rf "$MIX"
-$LR/python scripts/real_mix.py mix "$TWIN" "$REAL" "$MIX" --real-share "$REAL_SHARE" || die "mix failed"
+$LR/python scripts/real_mix.py mix "$TWIN" "$REAL" "$MIX" --real-share "$REAL_SHARE" ${EXTRA:+--extra "$EXTRA"} || die "mix failed"
 if ! ls "$BASE"/model*.safetensors >/dev/null 2>&1; then
   say "re-downloading the base weights"
   hf download hqfang/groot-so100_101 --local-dir "$BASE" > "$LOGS/download.log" 2>&1 || die "download failed"

@@ -22,9 +22,11 @@ EPISODES = {
 
 
 class TestEpisodes:
-    @pytest.mark.parametrize(("rollouts", "expected"), [(False, [0, 1]), (True, [0, 1, 2])])
-    def test_teleop_plus_successful_rollouts_only(self, rollouts: bool, expected: list[int]):
-        assert armnet_episodes(EPISODES, rollouts) == expected
+    @pytest.mark.parametrize(
+        ("rollouts", "teleop", "expected"), [(False, True, [0, 1]), (True, True, [0, 1, 2]), (True, False, [2])]
+    )
+    def test_teleop_and_successful_rollouts_only(self, rollouts: bool, teleop: bool, expected: list[int]):
+        assert armnet_episodes(EPISODES, rollouts, teleop) == expected
 
 
 class TestUnits:

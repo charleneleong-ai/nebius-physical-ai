@@ -9,13 +9,13 @@ ARMNET = "armnet/armnetbench_v01_lerobot_so101"
 FRAME_HW = (480, 640)  # the twin's cameras
 
 
-def armnet_episodes(episodes: Mapping[str, Sequence[object]], rollouts: bool = False) -> list[int]:
-    """The 400 teleoperated reference demos, plus the policies' rollouts labelled successful when `rollouts`.
-    `episodes` holds ArmnetBench's episode table columns; a missing policy type means teleoperation."""
+def armnet_episodes(episodes: Mapping[str, Sequence[object]], rollouts: bool = False, teleop: bool = True) -> list[int]:
+    """The 400 teleoperated reference demos when `teleop`, and the policies' rollouts labelled successful when
+    `rollouts`. `episodes` holds ArmnetBench's episode table columns; a missing policy type means teleoperation."""
     keep = []
     for index, policy, outcome in zip(episodes["episode_index"], episodes["policy_type"], episodes["success_class"]):
-        teleop = not isinstance(policy, str) or policy == "teleoperated"
-        if teleop or (rollouts and outcome == "successful"):
+        is_teleop = not isinstance(policy, str) or policy == "teleoperated"
+        if (teleop and is_teleop) or (rollouts and not is_teleop and outcome == "successful"):
             keep.append(int(index))
     return keep
 

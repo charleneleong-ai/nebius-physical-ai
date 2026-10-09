@@ -92,7 +92,8 @@ def convert(
     out: Annotated[Path, typer.Argument(help="Converted LeRobot v3.0 dataset")],
     like: Annotated[Path, typer.Option(help="A twin dataset whose features and fps to copy")],
     cache: Path = ARMNET_CACHE,
-    rollouts: Annotated[bool, typer.Option(help="Also the policies' rollouts labelled successful")] = False,
+    rollouts: Annotated[bool, typer.Option(help="The policies' rollouts labelled successful")] = False,
+    teleop: Annotated[bool, typer.Option(help="The 400 teleoperated demos")] = True,
     limit: Annotated[int | None, typer.Option(help="Only the first N selected episodes (a smoke test)")] = None,
 ) -> None:
     """ArmnetBench in the twin's dataset shape, one packed video file on disk at a time."""
@@ -101,7 +102,7 @@ def convert(
     snapshot_download(ARMNET, repo_type="dataset", local_dir=cache, allow_patterns=["meta/*", "data/*"])  # 50 MB
     src_fps = json.loads((cache / "meta/info.json").read_text())["fps"]
     episodes = pd.read_parquet(cache / "meta/episodes/chunk-000/file-000.parquet")
-    chosen = episodes.set_index("episode_index").loc[armnet_episodes(episodes, rollouts)[:limit]].reset_index()
+    chosen = episodes.set_index("episode_index").loc[armnet_episodes(episodes, rollouts, teleop)[:limit]].reset_index()
     data = pd.concat(pd.read_parquet(p) for p in (cache / "data").rglob("*.parquet"))
     rows = dict(iter(data.groupby("episode_index")))
     drop_after = defaultdict(list)  # episode position -> video files no later episode needs
@@ -181,15 +182,17 @@ def mix(
     real: Annotated[Path, typer.Argument(help="Converted real dataset")],
     out: Annotated[Path, typer.Argument(help="Merged training set")],
     real_share: Annotated[float, typer.Option(help="Real frames' share of the training samples")] = 0.25,
+    extra: Annotated[list[Path] | None, typer.Option(help="More converted real datasets (e.g. the rollouts)")] = None,
 ) -> None:
-    """Twin demos repeated against the real set so real frames are about `real_share` of the merged set."""
-    t, r = LeRobotDataset("local/twin", root=twin), LeRobotDataset("local/real", root=real)
-    copies = max(1, round(r.meta.total_frames * (1 - real_share) / (real_share * t.meta.total_frames)))
-    merged = merge_datasets([*[t] * copies, r], f"local/{out.name}", output_dir=out, concatenate_videos=False)
-    share = r.meta.total_frames / merged.meta.total_frames
-    print(
-        f"{out}: twin x{copies} + {r.meta.total_episodes} real episodes = {merged.meta.total_frames} frames, real {share:.0%}"
-    )
+    """Twin demos repeated against the real sets so real frames are about `real_share` of the merged set."""
+    t = LeRobotDataset("local/twin", root=twin)
+    reals = [LeRobotDataset(f"local/real_{i}", root=root) for i, root in enumerate([real, *(extra or [])])]
+    real_frames = sum(r.meta.total_frames for r in reals)
+    copies = max(1, round(real_frames * (1 - real_share) / (real_share * t.meta.total_frames)))
+    merged = merge_datasets([*[t] * copies, *reals], f"local/{out.name}", output_dir=out, concatenate_videos=False)
+    episodes = sum(r.meta.total_episodes for r in reals)
+    share = real_frames / merged.meta.total_frames
+    print(f"{out}: twin x{copies} + {episodes} real episodes = {merged.meta.total_frames} frames, real {share:.0%}")
 
 
 if __name__ == "__main__":
