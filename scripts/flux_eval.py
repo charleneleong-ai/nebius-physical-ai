@@ -35,6 +35,7 @@ sys.path.insert(0, str(REPO / "src"))
 from nebius_physical_ai.benchmark import SEED, Cell, Suite, build_suites
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.flux3 import QuantileBridge
+from nebius_physical_ai.tracking import Tracker
 from nebius_physical_ai.twin.rehearsal import (
     REHEARSAL_IMAGE_SIZE,
     REHEARSAL_MAX_STEPS,
@@ -46,6 +47,7 @@ from nebius_physical_ai.twin.scene import Twin, TwinLayout, TwinRenderer
 
 CHECKPOINT = "black-forest-labs/flux-3-action-so101"
 SO101_BENCHMARK = Path.home() / "so101-benchmark"
+FRAME_EVERY = 8  # ticks between recorded frames: a 320-tick rollout becomes a 40-frame video
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
 
@@ -84,31 +86,42 @@ class FluxDriver:
         return self.bridge.to_ours(target) if self.bridge else target
 
 
-def rollout(driver: FluxDriver, twin: Twin, check: StackCheck, prompt: str, renderer: TwinRenderer) -> str:
-    """Empty string on success, else how it failed (FailureWatch)."""
+def rollout(
+    driver: FluxDriver, twin: Twin, check: StackCheck, prompt: str, renderer: TwinRenderer, record: bool = False
+) -> tuple[str, list[np.ndarray]]:
+    """(empty string on success, else how it failed (FailureWatch); top-camera frames every FRAME_EVERY ticks)."""
     driver.reset()
-    watch = FailureWatch(twin, check)
-    for _ in range(REHEARSAL_MAX_STEPS):
+    watch, frames = FailureWatch(twin, check), []
+    for tick in range(REHEARSAL_MAX_STEPS):
         obs = twin.observe(prompt, REHEARSAL_IMAGE_SIZE, renderer)
+        if record and tick % FRAME_EVERY == 0:
+            frames.append(obs.front)
         twin.step_towards(twin.from_lerobot(driver.act(obs.front, obs.wrist, obs.joints, prompt)), 1 / CONTROL_HZ)
         if check(twin):
-            return ""
+            return "", frames + ([twin.render("front_cam", REHEARSAL_IMAGE_SIZE, renderer)] if record else [])
         watch.update(twin)
-    return watch.verdict(twin)
+    return watch.verdict(twin), frames
 
 
 def score_suite(driver: FluxDriver, suite: Suite, layout: TwinLayout) -> Cell:
     """Every case's variants drawn exactly as `Rehearsal.run` draws them, so outcomes pair with GR00T's."""
     start, per_case, outcomes, failures = time.time(), [], [], Counter()
+    examples: dict[str, tuple[str, list[np.ndarray]]] = {}  # first success and first failure, for W&B
     for case in suite.cases:
         case_layout, rng = case.layout(layout), np.random.default_rng(SEED)
         variants = [Variant.sample(case.objects, Perturbation(), rng) for _ in range(suite.variants)]
         template = Twin.from_objects(case.objects, case_layout)
         renderer = TwinRenderer(template.model, REHEARSAL_IMAGE_SIZE)
         try:
-            for v in variants:
+            for i, v in enumerate(variants):
                 twin = template.variant(v.objects, case_layout, v.physics, v.start_pose)
-                failure = rollout(driver, twin, StackCheck(case.pick, case.place), case.prompt, renderer)
+                record = len(examples) < 2
+                check = StackCheck(case.pick, case.place)
+                failure, frames = rollout(driver, twin, check, case.prompt, renderer, record)
+                kind = "failure" if failure else "success"
+                if frames:
+                    caption = f"{suite.name} | {case.name} | {kind} {failure} | variant {i} | {case.prompt}"
+                    examples.setdefault(kind, (caption, frames))
                 outcomes.append(not failure)
                 failures.update([failure] if failure else [])
         finally:
@@ -116,8 +129,10 @@ def score_suite(driver: FluxDriver, suite: Suite, layout: TwinLayout) -> Cell:
         per_case.append(sum(outcomes[-len(variants) :]))
         print(f"  {suite.name} {case.name}: {per_case[-1]}/{len(variants)}", flush=True)
     seconds = round(time.time() - start, 1)
-    return Cell(suite.name, suite.group, sum(per_case), suite.n, len(suite.cases), seconds, per_case, outcomes,
+    cell = Cell(suite.name, suite.group, sum(per_case), suite.n, len(suite.cases), seconds, per_case, outcomes,
                 dict(failures.most_common()))  # fmt: skip
+    cell.examples = examples
+    return cell
 
 
 @app.command()
@@ -128,32 +143,42 @@ def suites(
     native: Annotated[bool, typer.Option(help="Feed our units unmapped (no QuantileBridge)")] = False,
     checkpoint: Annotated[str, typer.Option(help="Hub id or a fine-tuned pretrained_model folder")] = CHECKPOINT,
     out: Path = Path("logs/bench_flux3.json"),
+    wandb_log: Annotated[bool, typer.Option("--wandb/--no-wandb", help="Scores and rollout videos to W&B")] = True,
+    wandb_group: str = "flux3",
 ) -> None:
     layout = TwinLayout()
     real = [DetectedObject(**o) for o in json.loads((REPO / "data/capture/real_objects.json").read_text())]
     driver, cells = FluxDriver(checkpoint, bridge=not native), []
-    for suite in build_suites(real, layout, group, only or ()):
-        cells.append(score_suite(driver, suite, layout))
-        c = cells[-1]
-        print(f"{label} | {c.suite}: {c.successes}/{c.n} failures {c.failures}", flush=True)
-        out.write_text(json.dumps({"label": label, "cells": [cell.record() for cell in cells]}, indent=1))
+    config = {"checkpoint": checkpoint, "bridge": not native, "group": group, "only": only}
+    with Tracker("benchmark", name=label, config=config, enabled=wandb_log, group=wandb_group) as tracker:
+        for suite in build_suites(real, layout, group, only or ()):
+            cells.append(score_suite(driver, suite, layout))
+            c = cells[-1]
+            tracker.log_cell(c, step=len(cells) - 1)
+            print(f"{label} | {c.suite}: {c.successes}/{c.n} failures {c.failures}", flush=True)
+            out.write_text(json.dumps({"label": label, "cells": [cell.record() for cell in cells]}, indent=1))
 
 
-def external_episode(driver: FluxDriver, env: Any, seed: int, prompt: str) -> dict[str, Any]:
-    """One so101-benchmark episode, one FLUX tick per environment step."""
+def external_episode(
+    driver: FluxDriver, env: Any, seed: int, prompt: str, record: bool = False
+) -> tuple[dict[str, Any], list[np.ndarray]]:
+    """One so101-benchmark episode, one FLUX tick per environment step, with its front frames when recorded."""
     # Imported here: the GR00T runner imports so101-benchmark's package, which only `external` needs installed.
     from so101_bench_eval import from_lerobot, to_lerobot
 
     obs, _ = env.reset(seed=seed)
     driver.reset()
     info: dict[str, Any] = {"is_success": False}
-    done = False
+    done, frames, step = False, [], 0
     while not done:
+        if record and step % (4 * FRAME_EVERY) == 0:  # episodes run 1,800 steps
+            frames.append(obs["pixels"]["front"])
+        step += 1
         joints = to_lerobot(env.to_sim(obs["agent_pos"]))
         target = driver.act(obs["pixels"]["front"], obs["pixels"]["wrist"], joints, prompt)
         obs, _, terminated, truncated, info = env.step(env.from_sim(from_lerobot(target)))
         done = terminated or truncated
-    return {"seed": seed, "success": bool(info.get("is_success")), "reason": info.get("failure_reason")}
+    return {"seed": seed, "success": bool(info.get("is_success")), "reason": info.get("failure_reason")}, frames
 
 
 @app.command()
@@ -164,6 +189,9 @@ def external(
     native: bool = False,
     checkpoint: str = CHECKPOINT,
     out: Path = Path("logs/so101bench_flux3.json"),
+    wandb_log: Annotated[bool, typer.Option("--wandb/--no-wandb")] = True,
+    wandb_group: str = "flux3",
+    label: str = "flux3-so101bench",
 ) -> None:
     """so101-benchmark's own scene, from its checkout's config (needs its package importable)."""
     sys.path.insert(0, str(REPO / "scripts"))
@@ -172,10 +200,19 @@ def external(
 
     cfg = load_config(benchmark / "configs/benchmark.yaml", {"sim": {"render_backend": "egl"}})
     env, driver, results = SO101Env(task, cfg.sim, cfg.task_paths), FluxDriver(checkpoint, bridge=not native), []
-    for seed in range(episodes):
-        results.append(external_episode(driver, env, seed, env.task_description))
-        print(f"{task} {seed + 1}/{episodes}: {results[-1]} | {sum(r['success'] for r in results)}", flush=True)
-        out.write_text(json.dumps({"task": task, "policy": checkpoint, "episodes": results}, indent=1))
+    examples: dict[str, list[np.ndarray]] = {}
+    config = {"checkpoint": checkpoint, "task": task, "episodes": episodes}
+    with Tracker("so101-benchmark", name=label, config=config, enabled=wandb_log, group=wandb_group) as tracker:
+        for seed in range(episodes):
+            result, frames = external_episode(driver, env, seed, env.task_description, record=len(examples) < 2)
+            results.append(result)
+            if frames:
+                examples.setdefault("success" if result["success"] else "failure", frames)
+            wins = sum(r["success"] for r in results)
+            print(f"{task} {seed + 1}/{episodes}: {result} | {wins}", flush=True)
+            out.write_text(json.dumps({"task": task, "policy": checkpoint, "episodes": results}, indent=1))
+            tracker.run.log({f"so101bench/{task}_successes": wins, "episodes": seed + 1}, step=seed)
+        tracker.log_rollouts(examples, f"so101-benchmark {task}")
     env.close()
 
 
