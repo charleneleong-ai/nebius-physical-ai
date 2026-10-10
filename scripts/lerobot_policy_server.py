@@ -7,7 +7,8 @@ checkpoint is scored exactly like our own. Runs in a LeRobot >= 0.6 environment 
 
 Our front and wrist frames go to camera_0 and camera_1; joints stay in LeRobot units (arm in [-100, 100], gripper in
 [0, 100]), the SO-101 defaults the checkpoint's datasets were recorded in. Each reply is the first `--horizon` steps of
-the 40-step chunk, the length our rollouts execute.
+the 40-step chunk, the length our rollouts execute. `--samples N` draws N chunks per observation and returns their
+consensus (`best_of_n.medoid`).
 """
 
 import os
@@ -25,6 +26,7 @@ from lerobot.policies.groot.modeling_groot import GrootPolicy
 
 # The wire format is kept in one place: the project's own client module, importable without its heavy deps.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from nebius_physical_ai.policy.best_of_n import medoid
 from nebius_physical_ai.policy.gr00t import MsgCodec
 
 ACTION_KEYS = {"single_arm": (0, 5), "gripper": (5, 6)}
@@ -34,11 +36,11 @@ app = typer.Typer(add_completion=False)
 class LeRobotGr00t:
     """One LeRobot GR00T policy with its saved processors, answering batches in Isaac-GR00T's layout."""
 
-    def __init__(self, checkpoint: Path, horizon: int, cameras: int) -> None:
+    def __init__(self, checkpoint: Path, horizon: int, cameras: int, samples: int = 1) -> None:
         os.chdir(checkpoint)  # the saved processor names its VLM processor by a path relative to the checkpoint
         self.policy = GrootPolicy.from_pretrained(str(checkpoint)).to("cuda").eval()
         self.pre, self.post = make_pre_post_processors(self.policy.config, pretrained_path=str(checkpoint))
-        self.horizon, self.cameras = horizon, cameras
+        self.horizon, self.cameras, self.samples = horizon, cameras, samples
 
     def sample(self, front: np.ndarray, wrist: np.ndarray, joints: np.ndarray, task: str) -> dict[str, Any]:
         views = [front, wrist, front, wrist][: self.cameras]
@@ -61,8 +63,10 @@ class LeRobotGr00t:
             self.sample(video["front"][b, -1], video["wrist"][b, -1], joints[b], tasks[b][0])
             for b in range(len(joints))
         ]
-        chunk = self.post(self.policy.predict_action_chunk(self.pre(self.batch(samples))))
-        actions = np.asarray(chunk.float().cpu()).reshape(len(samples), -1, 6)[:, : self.horizon].astype(np.float32)
+        # every sample repeated `self.samples` times: each copy draws its own flow-matching noise, so its own chunk
+        chunk = self.post(self.policy.predict_action_chunk(self.pre(self.batch(samples * self.samples))))
+        drawn = np.asarray(chunk.float().cpu()).reshape(self.samples, len(samples), -1, 6)[:, :, : self.horizon]
+        actions = medoid(drawn).astype(np.float32)
         return {key: actions[..., lo:hi] for key, (lo, hi) in ACTION_KEYS.items()}
 
 
@@ -83,11 +87,15 @@ def main(
     port: int = 5562,
     horizon: Annotated[int, typer.Option(help="Steps of each 40-step chunk to return")] = 16,
     cameras: Annotated[int, typer.Option(help="Views fed: front and wrist, repeated to fill 3 or 4 slots")] = 4,
+    samples: Annotated[int, typer.Option(help="Chunks drawn per observation; the consensus (medoid) is returned")] = 1,
 ) -> None:
-    model = LeRobotGr00t(checkpoint.expanduser().resolve(), horizon, cameras)
+    model = LeRobotGr00t(checkpoint.expanduser().resolve(), horizon, cameras, samples)
     socket = zmq.Context.instance().socket(zmq.REP)
     socket.bind(f"tcp://127.0.0.1:{port}")
-    print(f"serving {checkpoint} on port {port} (horizon {horizon}, {cameras} camera slots)", flush=True)
+    print(
+        f"serving {checkpoint} on port {port} (horizon {horizon}, {cameras} camera slots, best of {samples})",
+        flush=True,
+    )
     while True:
         raw, request, start = socket.recv(), {}, time.time()
         try:  # a request that won't decode is answered too: an unanswered REQ client hangs until its timeout
