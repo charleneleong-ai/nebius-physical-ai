@@ -29,6 +29,7 @@ import typer
 from huggingface_hub import hf_hub_download
 from lerobot.policies.factory import make_pre_post_processors
 from lerobot.policies.flux3 import Flux3Policy
+from lerobot.policies.flux3.processor_flux3 import ObservationHistoryNormalizerProcessorStep
 from peft import PeftConfig, PeftModel
 
 REPO = Path(__file__).resolve().parent.parent
@@ -87,16 +88,30 @@ class FluxDriver:
     def image(frame: np.ndarray) -> torch.Tensor:
         return torch.from_numpy(frame).permute(2, 0, 1)[None].float() / 255
 
-    def act(self, scene: np.ndarray, wrist: np.ndarray, joints: np.ndarray, task: str) -> np.ndarray:
+    def batch(self, scene: np.ndarray, wrist: np.ndarray, joints: np.ndarray, task: str) -> dict[str, Any]:
         state = self.bridge.to_theirs(joints) if self.bridge else joints
-        batch = {
+        return {
             "observation.images.scene": self.image(scene),
             "observation.images.wrist": self.image(wrist),
             "observation.state": torch.tensor(state, dtype=torch.float32)[None],
             "task": [task],
         }
+
+    def observe(self, scene: np.ndarray, wrist: np.ndarray, joints: np.ndarray, task: str, command: np.ndarray) -> None:
+        """Push one past frame into FLUX's observation history (it conditions on the last `n_obs_steps`) without
+        predicting, with `command` as the target sent at that frame (our units)."""
+        command = self.bridge.to_theirs(command) if self.bridge else command
+        self.history.last_command = torch.tensor(command, dtype=torch.float32, device=self.device)[None]
         with torch.inference_mode():
-            action = self.post(self.policy.select_action(self.pre(batch)))
+            self.pre(self.batch(scene, wrist, joints, task))
+
+    @property
+    def history(self) -> ObservationHistoryNormalizerProcessorStep:
+        return next(s for s in self.pre.steps if isinstance(s, ObservationHistoryNormalizerProcessorStep))
+
+    def act(self, scene: np.ndarray, wrist: np.ndarray, joints: np.ndarray, task: str) -> np.ndarray:
+        with torch.inference_mode():
+            action = self.post(self.policy.select_action(self.pre(self.batch(scene, wrist, joints, task))))
         target = action[0].float().cpu().numpy()
         return self.bridge.to_ours(target) if self.bridge else target
 

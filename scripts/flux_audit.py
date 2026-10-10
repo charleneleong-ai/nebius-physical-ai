@@ -23,9 +23,14 @@ import sys
 from pathlib import Path
 from typing import Annotated, Any
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import typer
+import wandb
 from huggingface_hub import hf_hub_download
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.policies.flux3 import modeling_flux3
@@ -199,31 +204,149 @@ def bridge(
         print(f"  {n:11s} {outside[:, j].mean():6.1%} | {clipped[:, j].mean():6.2%} | {np.max(errors, axis=0)[j]:.4f}")
 
 
+JOINT_NAMES = ("pan", "lift", "elbow", "wrist flex", "wrist roll", "gripper")
+
+
+def chunk_errors(predicted: np.ndarray, demo: np.ndarray, state: np.ndarray, horizons: list[int]) -> np.ndarray:
+    """(2, len(horizons), 6): |error| of the model's h-th action and of holding `state`, against the demo's h-th."""
+    return np.stack(
+        [
+            np.abs(np.stack([x[h - 1] for h in horizons]) - demo[np.array(horizons) - 1])
+            for x in (predicted, np.broadcast_to(state, demo.shape))
+        ]
+    )
+
+
+def latex_table(horizons: list[int], model: np.ndarray, hold: np.ndarray, caption: str) -> str:
+    """A booktabs table: mean |action error| per joint at each horizon, model above holding still."""
+    head = " & ".join(["Horizon", "Policy", *JOINT_NAMES, "Mean"])
+    rows = []
+    for i, h in enumerate(horizons):
+        for label, e in (("FLUX LoRA", model[i]), ("Hold pose", hold[i])):
+            cells = " & ".join(f"{v:.2f}" for v in (*e, e.mean()))
+            rows.append(f"{h if label == 'FLUX LoRA' else ''} & {label} & {cells} \\\\")
+        rows.append("\\midrule" if i < len(horizons) - 1 else "")
+    body = "\n".join(r for r in rows if r)
+    return (
+        "\\begin{table}[t]\n\\centering\n\\small\n\\begin{tabular}{ll"
+        + "r" * 7
+        + "}\n\\toprule\n"
+        + head
+        + " \\\\\n\\midrule\n"
+        + body
+        + "\n\\bottomrule\n\\end{tabular}\n"
+        + f"\\caption{{{caption}}}\n\\label{{tab:flux-openloop}}\n\\end{{table}}\n"
+    )
+
+
+def trajectory_figure(samples: list[tuple[np.ndarray, np.ndarray, np.ndarray, str]]) -> Any:
+    """One row per sample, one column per joint: the demo's next actions, FLUX's chunk, and the held pose."""
+    fig, axes = plt.subplots(len(samples), 6, figsize=(15, 2.2 * len(samples)), squeeze=False, sharex=True)
+    for row, (predicted, demo, state, label) in zip(axes, samples):
+        steps = np.arange(1, len(demo) + 1)
+        for j, ax in enumerate(row):
+            ax.plot(steps, demo[:, j], color="black", lw=1.5, label="demo")
+            ax.plot(steps, predicted[:, j], color="tab:blue", lw=1.2, label="FLUX LoRA")
+            ax.axhline(state[j], color="tab:gray", ls="--", lw=1, label="hold")
+            ax.set_title(f"{JOINT_NAMES[j]}" if row is axes[0] else "", fontsize=9)
+        row[0].set_ylabel(label, fontsize=8)
+    axes[0, 0].legend(fontsize=7, loc="best")
+    for ax in axes[-1]:
+        ax.set_xlabel("steps ahead (30 Hz)", fontsize=8)
+    fig.tight_layout()
+    return fig
+
+
+def horizon_figure(horizons: list[int], model: np.ndarray, hold: np.ndarray) -> Any:
+    fig, ax = plt.subplots(figsize=(4.5, 3.2))
+    ax.plot(horizons, model.mean(axis=1), marker="o", label="FLUX LoRA")
+    ax.plot(horizons, hold.mean(axis=1), marker="s", ls="--", color="tab:gray", label="hold pose")
+    ax.set_xlabel("steps ahead (30 Hz)")
+    ax.set_ylabel("mean |action error| (LeRobot units)")
+    ax.legend()
+    fig.tight_layout()
+    return fig
+
+
 @app.command()
 def openloop(
     root: Annotated[Path, typer.Argument(help="A LeRobot v3.0 dataset in our units")],
     checkpoint: str = "black-forest-labs/flux-3-action-so101",
     first_episode: Annotated[int, typer.Option(help="Held-out episodes start here (not in the training set)")] = 800,
     samples: int = 60,
+    horizons: Annotated[str, typer.Option(help="Steps ahead to score, within one executed chunk")] = "1,8,16,32",
+    name: str = "flux3",
+    group: str = "flux3",
+    out: Annotated[Path, typer.Option(help="PDF figures and the LaTeX table land here")] = REPO / "docs/figures",
 ) -> None:
-    """Mean absolute error of the first predicted action on held-out frames, against holding the current pose."""
+    """FLUX's predicted chunk on held-out demo frames against the demo's next actions, beside holding the pose, at
+    several horizons. The first action is a tick ahead, where holding still is nearly exact; later ones separate a
+    model that learned the task from one that copies its input. FLUX conditions on its last `n_obs_steps` frames, so
+    those are fed from the demo first (without them it sees an arm at rest and starts late). Logged to W&B with trajectory plots; a PDF figure and
+    a booktabs table are written for the report."""
+    steps = sorted(int(h) for h in horizons.split(","))
     driver = load_flux_eval().FluxDriver(checkpoint)
+    history = driver.policy.config.n_obs_steps
     dataset = LeRobotDataset(f"local/{root.name}", root=root)
     held = list(range(first_episode, dataset.meta.total_episodes))
     rng = np.random.default_rng(0)
-    model_err, hold_err = [], []
+    errors, shown = [], []
     for episode in rng.choice(held, size=min(samples, len(held)), replace=False):
         start, stop = episode_range(dataset, int(episode))
-        f = dataset[int(rng.integers(start, stop - 1))]
-        state, target = f["observation.state"].numpy(), f["action"].numpy()
+        if stop - start <= steps[-1] + 1:
+            continue
+        t = int(rng.integers(min(start + history, stop - steps[-1] - 1), stop - steps[-1]))
+        f = dataset[t]
+        state = f["observation.state"].numpy()
+        demo = np.stack(dataset.hf_dataset[t : t + steps[-1]]["action"]).astype(np.float64)
         driver.reset()
-        action = driver.act(rgb(f[CAMERAS[0]]), rgb(f[CAMERAS[1]]), state, f["task"])
-        model_err.append(np.abs(action - target))
-        hold_err.append(np.abs(state - target))
-    m, h = np.mean(model_err, axis=0), np.mean(hold_err, axis=0)
-    print(f"{checkpoint}: mean |action error| per joint (LeRobot units), model vs holding still")
-    print("  model", np.round(m, 2), "mean", round(float(m.mean()), 2))
-    print("  hold ", np.round(h, 2), "mean", round(float(h.mean()), 2))
+        for i in range(max(start, t - history + 1), t):  # the frames FLUX conditions on, with the targets sent then
+            g = dataset[i]
+            driver.observe(
+                rgb(g[CAMERAS[0]]), rgb(g[CAMERAS[1]]), g["observation.state"].numpy(), g["task"], g["action"].numpy()
+            )
+        # the same frame each tick: every action comes from the one chunk predicted at t
+        predicted = np.stack(
+            [driver.act(rgb(f[CAMERAS[0]]), rgb(f[CAMERAS[1]]), state, f["task"]) for _ in range(steps[-1])]
+        )
+        errors.append(chunk_errors(predicted, demo, state, steps))
+        if len(shown) < 4:
+            shown.append((predicted, demo, state, f"ep {episode}, t={t - start}"))
+    model, hold = np.mean(errors, axis=0)  # (horizons, 6) each
+    print(f"{checkpoint}: mean |action error| per joint (LeRobot units) on {len(errors)} held-out frames")
+    for i, h in enumerate(steps):
+        print(
+            f"  {h:>2} ahead  model {np.round(model[i], 2)} mean {model[i].mean():.2f} | hold {np.round(hold[i], 2)} mean {hold[i].mean():.2f}"
+        )
+    out.mkdir(parents=True, exist_ok=True)
+    figures = {
+        "openloop_trajectories": trajectory_figure(shown),
+        "openloop_horizons": horizon_figure(steps, model, hold),
+    }
+    for stem, fig in figures.items():
+        fig.savefig(out / f"{stem}_{name}.pdf")
+        fig.savefig(out / f"{stem}_{name}.png", dpi=150)
+    caption = (
+        f"Open-loop action error of {name} on {len(errors)} held-out demo frames: mean absolute error per joint "
+        "(LeRobot units) of the action $h$ steps ahead in one predicted chunk, against holding the current pose."
+    )
+    (out / f"openloop_{name}.tex").write_text(latex_table(steps, model, hold, caption))
+    config = {"checkpoint": checkpoint, "root": str(root), "samples": len(errors), "horizons": steps}
+    with Tracker("openloop", name=f"{name}-openloop", config=config, group=group) as t:
+        t.run.log({stem: wandb.Image(str(out / f"{stem}_{name}.png")) for stem in figures})
+        cols = ["horizon", "policy", *JOINT_NAMES, "mean"]
+        rows = [
+            [h, p, *map(float, e), float(e.mean())]
+            for i, h in enumerate(steps)
+            for p, e in (("flux", model[i]), ("hold", hold[i]))
+        ]
+        metrics = {
+            f"openloop/{p}_h{h}": float(e[i].mean())
+            for i, h in enumerate(steps)
+            for p, e in (("model", model), ("hold", hold))
+        }
+        t.log_summary(metrics, {"openloop": (cols, rows)})
+    print(f"wrote {out}/openloop_*_{name}.pdf and openloop_{name}.tex")
 
 
 if __name__ == "__main__":
