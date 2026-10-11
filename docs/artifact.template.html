@@ -64,7 +64,7 @@ footer { font-size: 13px; color: var(--muted); }
 
 <main>
 <header>
-  <div class="eyebrow">Preflight · SO-101 · MuJoCo twin · updated 11 Oct 2026, 07:00 UTC</div>
+  <div class="eyebrow">Preflight · SO-101 · MuJoCo twin · updated 11 Oct 2026, 07:30 UTC</div>
   <h1>Nine attempts to make a GR00T arm policy generalise. One passed the gate; one moved new objects.</h1>
   <p class="lede">Every candidate runs the same six suites (12 scenes × 8 perturbed rehearsals, seed 42) and is compared with v5 scene by scene (paired McNemar). It is promoted only with a pooled gain and no suite significantly worse, a gate fixed before the first round was scored. Everything is simulation; the physical arm has not arrived.</p>
   <div class="headline">
@@ -120,7 +120,7 @@ flowchart LR
 
 <section>
   <h2>An RL expert to recover what the script cannot</h2>
-  <p class="takeaway">A residual policy on top of the scripted expert recovers 71.9% of held-out failure snapshots; the expert alone recovers 45.9%.</p>
+  <p class="takeaway">A residual policy on top of the scripted expert recovers 74.0% of held-out failure snapshots; the expert alone recovers 45.9%.</p>
   <p>Recovery from DAgger failure states the policy never trained on (W&amp;B run <code>fb6yv89f</code>), with fresh scenes still at 100%. Shaped PPO from scratch stays near 6% training success and is not shown. The next DAgger round records recoveries with this expert.</p>
   <div class="chart"><!--RL--></div>
 </section>
@@ -134,7 +134,7 @@ flowchart LR
     <div class="row"><span class="pill rejected">Rejected</span><div><strong>FLUX 3 Action LoRA (fair)</strong>Same 800 demos, same sample volume: 50 vs 438, worse on every suite (p &lt; 0.001), 0/7 externally. Executing 16 instead of 32 actions per chunk did not help.</div></div>
     <div class="row"><span class="pill flat">Flat</span><div><strong>Targeted demos (v6)</strong>Staged-mistake recoveries plus lookalike decoys: 421 vs 438, within noise.</div></div>
     <div class="row"><span class="pill rejected">Rejected</span><div><strong>Visual domain randomisation (v7)</strong>Lifts the Seeed wrist-mount scenes 15 → 53 but drops clean_many 81 → 58; 1/50 on so101-benchmark.</div></div>
-    <div class="row"><span class="pill flat">Kept</span><div><strong>RL expert (residual PPO)</strong>71.9% held-out snapshot recovery vs the scripted expert's 45.9%. Plain PPO stopped at 1% after its reward paid hovering; shaped PPO from scratch stays near 6%.</div></div>
+    <div class="row"><span class="pill flat">Kept</span><div><strong>RL expert (residual PPO)</strong>74.0% held-out snapshot recovery vs the scripted expert's 45.9%. Plain PPO stopped at 1% after its reward paid hovering; shaped PPO from scratch stays near 6%.</div></div>
     <div class="row"><span class="pill flat">Flat</span><div><strong>Best-of-8 chunk consensus</strong>Medoid of 8 flow-matching samples on round 2: held_out_objects 55 vs 50 (p=0.41), clean_many 87 vs 86. Within noise at 8× inference cost.</div></div>
     <div class="row"><span class="pill running">Training</span><div><strong>Real-data co-training (v9, v9b)</strong>400 ArmnetBench SO-101 teleop demos of new objects at 23% of samples; v9b adds 515 successful real rollouts.</div></div>
   </div>

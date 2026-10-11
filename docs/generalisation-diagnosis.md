@@ -34,7 +34,7 @@ Ranges are two runs of the same checkpoint. Re-runs move a cell by up to ±9, so
 
 - **Targeted on-policy data is the lever, if it is weighted.** DAgger round 2 is the first change to beat v5 (+26 pooled), with recoveries at a third of training. Round 1's identical loop at 3.5% was flat, as were v5b and v6. Round 3 adds +17 pooled (within noise) and is the first candidate to move held_out_objects (50 → 61, +18/−7, p=0.043); its checkpoint was deleted on KEEP and a retrain is queued to check the gain replicates.
 - **Test-time sampling is not a lever here.** Best-of-8 medoid consensus is within noise on held_out_objects (55 vs 50, p=0.41) and clean_many (87 vs 86). DiVeR (arXiv 2610.04933) reports consensus selection flat in its own baselines and gains only from a trained verifier.
-- **The DAgger yield is shrinking** (85 → 72 → 59 recoveries) because the policy fails less and the scripted expert recovers only about 40% of kept states. A residual PPO expert on the script recovers 71.9% of held-out failure snapshots (fresh scenes still 100%).
+- **The DAgger yield is shrinking** (85 → 72 → 59 recoveries) because the policy fails less and the scripted expert recovers only about 40% of kept states. A residual PPO expert on the script recovers 74.0% of held-out failure snapshots (fresh scenes still 100%).
 - **Data volume is not the lever.** v5b (more steps on the same data) and v6 (2× the data, targeted) both land within
   noise of v5. This matches PlugCharger, where 30× the demos moved imitation from 0.07 to 0.17 only.
 - **The bottleneck has moved from target choice to grasping.** v6 cut no_contact but raised pushed. The scripted expert

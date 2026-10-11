@@ -11,7 +11,7 @@
 - **Recoveries from the policy's own failure states are the only lever that moved the gate**: round 2 (+26 pooled over v5) and round 3 (+17 more, held_out_objects +11).
 - **Upweighting matters more than volume**: round 1's recoveries were 3.5% of training and did nothing; ×8 (about a third) made round 2.
 - **Swapping the model or adding sampling did not help**: FLUX 3 Action LoRA 50/576; best-of-8 consensus within noise.
-- **A residual RL expert recovers 71.9% of failure snapshots vs the scripted expert's 45.9%**, so it can feed DAgger states the script cannot recover.
+- **A residual RL expert recovers 74.0% of failure snapshots vs the scripted expert's 45.9%**, so it can feed DAgger states the script cannot recover.
 
 **Pooled progression (gate suites, 6 × 96)**
 
@@ -40,7 +40,7 @@ The served policy is GR00T N1.7 (`hqfang/groot-so100_101`) fine-tuned with LeRob
 |---|---|
 | DAgger recoveries ×8 (round 2) | +26 pooled vs v5, real_1_pomade_tin +12 (p=0.004) |
 | A further DAgger round (round 3) | +17 pooled vs round 2 (within noise), held_out_objects +11 (p=0.043) |
-| Residual RL on the scripted expert | snapshot recovery 45.9% → 71.9% |
+| Residual RL on the scripted expert | snapshot recovery 45.9% → 74.0% |
 
 **Closed / do not retry**
 

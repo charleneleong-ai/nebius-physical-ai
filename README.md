@@ -95,7 +95,7 @@ flowchart LR
 
 The funnel above is round 3 (harvested with round 2). Round 3 is the first candidate to move new objects (61 vs 50 of
 96, one suite of six and one seed, so a retrain is queued to check it replicates); the external benchmark is still
-0–1/50. A residual RL expert on the scripted expert recovers 71.9% of failure snapshots against the script's 45.9%,
+0–1/50. A residual RL expert on the scripted expert recovers 74.0% of failure snapshots against the script's 45.9%,
 which is the next source of DAgger recoveries. Latest literature sweep:
 [`reports/so101-generalisation-sota-2026-10-11.md`](reports/so101-generalisation-sota-2026-10-11.md).
 

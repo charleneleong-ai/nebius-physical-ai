@@ -39,7 +39,7 @@ and what remains unmeasured. Results and reasoning: [`report.pdf`](report.pdf) (
 | FLUX | zero-shot, LoRA v8, fair LoRA, 16-step | 0 promoted | all four worse than v5 |
 | DAgger r3 retrain | queued | — | first r3 checkpoint deleted by the round script on KEEP |
 | Best-of-8 | 2 suites × 96 on round 2 | 142 succeeded | within noise; not adopted |
-| RL expert | plain PPO (stopped at 4.4M steps), 2 relaunches killed for bugs | residual PPO: 71.9% held-out snapshot recovery at 2.5M steps; shaped PPO ~6% training success | runs tagged `superseded` in W&B |
+| RL expert | plain PPO (stopped at 4.4M steps), 2 relaunches killed for bugs | residual PPO: 74.0% held-out snapshot recovery at 3.0M steps; shaped PPO ~6% training success | runs tagged `superseded` in W&B |
 | ArmnetBench conversion | 400 teleop + 515 successful rollouts selected from 2,499 episodes | all 915 converted | 1,532 failed and 52 suboptimal rollouts excluded by design |
 
 ## Filters: before or after seeing results

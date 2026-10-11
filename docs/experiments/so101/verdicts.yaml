@@ -82,7 +82,7 @@ experiments:
     runs: {fb6yv89f: train}
     baseline: scripted expert 45.9% snapshot recovery
     gate: S1
-    result: held-out snapshot recovery 71.9% vs the expert's 45.9% at 2.5M steps (61.6% at 500k), fresh scenes 100%. Clears its bar; next step is recording its recoveries as DAgger data.
+    result: held-out snapshot recovery 74.0% vs the expert's 45.9% at 3.0M steps (61.6% at 500k); stopped 11 Oct to free CPU, best checkpoint kept, fresh scenes 100%. Clears its bar; next step is recording its recoveries as DAgger data.
     verdict: KEEP
     pr: 25
   - label: RL expert, shaped PPO from scratch (grasp reward)

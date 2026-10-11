@@ -41,7 +41,15 @@ OPENLOOP = {
     "hold pose": [0.53, 2.47, 4.66, 8.24],
 }
 HORIZONS = [1, 8, 16, 32]
-RL_RECOVERY = [(0, 45.9), (500, 61.6), (1000, 67.8), (1500, 69.9), (2000, 71.2), (2500, 71.9)]  # held-out snapshots, %
+RL_RECOVERY = [
+    (0, 45.9),
+    (500, 61.6),
+    (1000, 67.8),
+    (1500, 69.9),
+    (2000, 71.2),
+    (2500, 71.9),
+    (3000, 74.0),
+]  # held-out snapshots, %
 EXPERT_RECOVERY = RL_RECOVERY[0][1]  # step 0: the scripted expert alone (zero residual)
 BASELINE = sum(SCORES["v5"])
 POOLED_N = HEADLINE_N * len(SUITES)
@@ -194,7 +202,7 @@ def openloop_chart() -> str:
 def rl_chart() -> str:
     return lines(
         {"residual PPO on the scripted expert": RL_RECOVERY},
-        2600,
+        3200,
         100,
         "thousand env steps",
         "held-out recovery %",
