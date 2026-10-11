@@ -15,12 +15,13 @@ scenes; evaluation uses round 3's snapshots, never seen in training.
 
 Fail fast: if held-out recovery is not clearly above the scripted expert's within a day of CPU, stop.
 
-    ~/rl-venv/bin/python scripts/rl_expert.py baseline
-    ~/rl-venv/bin/python scripts/rl_expert.py train --steps 20000000 --envs 12 --out ~/checkpoints/rl-expert
+    DAGGER_LOGS=~/nebius-physical-ai/logs/dagger uv run --extra rl python scripts/rl_expert.py baseline
+    OMP_NUM_THREADS=1 uv run --extra rl python scripts/rl_expert.py train --residual --envs 12 --out ~/checkpoints/rl-expert-residual
 """
 
-import json
+import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
@@ -33,22 +34,23 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, VecNorma
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from nebius_physical_ai.tracking import Tracker
 from nebius_physical_ai.twin.dagger import FailureSnapshot, record_recovery
-from nebius_physical_ai.twin.rl_env import PickPlaceEnv
+from nebius_physical_ai.twin.rl_env import GAMMA, PickPlaceEnv
 from nebius_physical_ai.twin.scene import TwinLayout
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 EVAL_SEED = 10_000  # fresh evaluation scenes never seen in training (training envs use seeds 0..envs-1)
-DAGGER = Path.home() / "nebius-physical-ai/logs/dagger"
+DAGGER = Path(os.environ.get("DAGGER_LOGS", "logs/dagger"))  # where scripts/dagger_round.sh writes rN/snapshots.jsonl
 
 
 def snapshots(rounds: list[int]) -> list[FailureSnapshot]:
-    rows = [json.loads(line) for r in rounds for line in (DAGGER / f"r{r}/snapshots.jsonl").read_text().splitlines()]
-    return [FailureSnapshot.from_record(row) for row in rows]
+    return [s for r in rounds for s in FailureSnapshot.load(DAGGER / f"r{r}/snapshots.jsonl")]
 
 
-def make_env(seed: int, hard: bool, train_rounds: list[int], shards: int = 1, residual: bool = False):
+def make_env(
+    seed: int, hard: bool, pool: list[FailureSnapshot], shards: int = 1, residual: bool = False
+) -> Callable[[], PickPlaceEnv]:
     """Env `seed` gets every `shards`-th snapshot: each compiles and keeps only its own share of the scenes."""
-    share = snapshots(train_rounds)[seed % shards :: shards]
+    share = pool[seed % shards :: shards]
     return lambda: PickPlaceEnv(seed=seed, hard=hard, snapshots=share, residual=residual)
 
 
@@ -140,7 +142,8 @@ def train(
 ) -> None:
     out.mkdir(parents=True, exist_ok=True)
     rounds = [int(r) for r in train_rounds.split(",")]
-    workers = SubprocVecEnv([make_env(i, hard, rounds, envs, residual) for i in range(envs)])
+    pool = snapshots(rounds)
+    workers = SubprocVecEnv([make_env(i, hard, pool, envs, residual) for i in range(envs)])
     # VecMonitor gives PPO's log (and W&B) episode return, length and training success rate
     vec = VecNormalize(VecMonitor(workers, info_keywords=("is_success",)), norm_obs=True, norm_reward=True)
     model = PPO(
@@ -150,7 +153,7 @@ def train(
         batch_size=4096,
         n_epochs=10,
         learning_rate=3e-4,
-        gamma=0.99,
+        gamma=GAMMA,
         gae_lambda=0.95,
         clip_range=0.2,
         ent_coef=0.0,
@@ -172,7 +175,9 @@ def train(
 @app.command()
 def evaluate(policy: Path, episodes: int = 200, hard: bool = False, eval_round: int = 3) -> None:
     model = PPO.load(policy / "policy")
-    stats = VecNormalize.load(str(policy / "vecnormalize.pkl"), SubprocVecEnv([make_env(0, hard, [eval_round])]))
+    stats = VecNormalize.load(
+        str(policy / "vecnormalize.pkl"), SubprocVecEnv([make_env(0, hard, snapshots([eval_round]))])
+    )
     stats.training = False
     fresh, recover = success_rate(model, stats, episodes, hard), success_rate(model, stats, 0, hard, eval_round)
     print(f"RL expert: fresh {fresh:.0%} on {episodes} scenes; recovers {recover:.0%} of round {eval_round}'s failures")

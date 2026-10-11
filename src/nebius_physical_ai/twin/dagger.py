@@ -12,8 +12,10 @@ Two refinements decide which failures are worth recording:
   arXiv:2007.14097), so one round's flood of `no_contact` cannot crowd out the rarer drops and pushes.
 """
 
+import json
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, replace
+from pathlib import Path
 from typing import Any
 
 import mujoco
@@ -66,6 +68,11 @@ class FailureSnapshot:
         )
 
     @classmethod
+    def load(cls, path: Path) -> list["FailureSnapshot"]:
+        """Every snapshot in a `harvest` JSONL file."""
+        return [cls.from_record(json.loads(line)) for line in path.read_text().splitlines() if line.strip()]
+
+    @classmethod
     def capture(cls, twin: Twin, scene: "Rehearsed", failure: str) -> "FailureSnapshot":
         state = {"qpos": twin.data.qpos.round(6).tolist(), "qvel": twin.data.qvel.round(6).tolist()}
         v = scene.variant
@@ -74,7 +81,10 @@ class FailureSnapshot:
 
     def restore(self, layout: TwinLayout) -> Twin:
         """The same scene recompiled, put back in the saved state, with the arm holding where it stopped."""
-        twin = Twin.from_objects(self.objects, layout, self.physics, look=self.look)
+        return self.apply(Twin.from_objects(self.objects, layout, self.physics, look=self.look))
+
+    def apply(self, twin: Twin) -> Twin:
+        """Put this snapshot's saved state into an already compiled twin of the same scene."""
         twin.data.qpos[:] = self.qpos
         twin.data.qvel[:] = self.qvel
         twin.data.ctrl[: len(ARM_JOINTS)] = twin.arm_qpos()

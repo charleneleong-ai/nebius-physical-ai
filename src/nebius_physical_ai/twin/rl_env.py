@@ -18,7 +18,6 @@ arXiv 2412.13630), so a zero policy is the scripted expert and learning only has
 from typing import Any
 
 import gymnasium as gym
-import mujoco
 import numpy as np
 
 from nebius_physical_ai.twin.dagger import FailureSnapshot
@@ -52,7 +51,8 @@ class PickPlaceEnv(gym.Env):
         self.layout = TwinLayout()
         self.sampler = SceneSampler.hard(self.layout, seed) if hard else SceneSampler(self.layout, seed)
         self.template = Twin.from_objects(self.sampler.sample(), self.layout, start_pose=self.sampler.start_pose())
-        self.snapshots, self.snapshot_share = snapshots or [], snapshot_share if snapshots else 0.0
+        self.snapshots = snapshots or []
+        self.snapshot_share = snapshot_share if self.snapshots else 0.0
         self.restored: dict[int, Twin] = {}
         self.rng = np.random.default_rng(seed)
         self.horizon, self.residual = round(horizon_s * POLICY_HZ), residual
@@ -70,28 +70,36 @@ class PickPlaceEnv(gym.Env):
             objects, start = self.sampler.sample(), self.sampler.start_pose()
             self.twin, self.check = self.template.variant(objects, self.layout, BlockPhysics(), start), StackCheck()
         else:
-            self.twin, self.check = self.from_snapshot(index), StackCheck(*self.pick_place(index))
-        self.site, self.limits = self.twin.model.site("gripperframe").id, self.twin.arm_limits()
+            s = self.snapshots[index]
+            self.twin, self.check = self.from_snapshot(index), StackCheck(s.pick, s.place)
+        self.cache_ids()
         self.target, self.steps, self.tick = self.twin.arm_qpos(), 0, 0
-        self.lifted = self.height() > LIFTED_M
+        self.lifted = self.height(self.pick_pos()) > LIFTED_M
         self.plan = self.expert_plan() if self.residual else [self.target]
-        self.last_potential = self.potential()
-        return self.observe(), {"snapshot": index}
+        self.last_potential = self.potential(self.gripper(), self.pick_pos(), self.grasped())
+        return self.observe(self.grasped()), {"snapshot": index}
+
+    def cache_ids(self) -> None:
+        """Model ids and block sizes for this episode's twin, looked up once instead of by name every step."""
+        model = self.twin.model
+        self.site, self.limits = model.site("gripperframe").id, self.twin.arm_limits()
+        self.pick_id, self.place_id = model.body(self.check.top).id, model.body(self.check.bottom).id
+        self.jaw_ids = np.array([model.body(j).id for j in JAWS])
+        self.qadr = np.array([model.jnt_qposadr[model.joint(j).id] for j in ARM_JOINTS])
+        self.dadr = np.array([model.jnt_dofadr[model.joint(j).id] for j in ARM_JOINTS])
+        self.pick_half = np.asarray(self.twin.geometry(self.check.top).half, dtype=float)
+        self.place_half = np.asarray(self.twin.geometry(self.check.bottom).half, dtype=float)
+        self.rise = np.array([0.0, 0.0, self.place_half[2] + self.pick_half[2]])
 
     def expert_plan(self) -> list[np.ndarray]:
         """The scripted expert's joint targets, one per control tick, from where the episode starts (the arm holds its
         pose if the expert can't reach a waypoint)."""
-        expert = PickPlaceExpert(self.twin, "", self.check.top, self.check.bottom)
+        start = self.twin.arm_qpos()
         try:
-            segments = expert.waypoints()
+            segments = PickPlaceExpert(self.twin, "", self.check.top, self.check.bottom).waypoints()
         except UnreachableTarget:
-            return [self.twin.arm_qpos()]
-        plan, start = [], self.twin.arm_qpos()
-        for arm, grip, seconds in segments:
-            goal = np.append(arm, grip)
-            plan += list(np.linspace(start, goal, max(1, round(seconds * CONTROL_HZ)) + 1)[1:])
-            start = goal
-        return plan
+            return [start]
+        return list(PickPlaceExpert.targets(segments, start))
 
     def base(self) -> np.ndarray:
         return self.plan[min(self.tick, len(self.plan) - 1)]
@@ -99,65 +107,56 @@ class PickPlaceEnv(gym.Env):
     def grasped(self) -> bool:
         """Both jaws in contact with the pick block."""
         model, data = self.twin.model, self.twin.data
-        pick, touching = model.body(self.check.top).id, set()
-        for c in data.contact[: data.ncon]:
-            bodies = {model.geom_bodyid[c.geom1], model.geom_bodyid[c.geom2]}
-            if pick in bodies:
-                touching |= {model.body(b).name for b in bodies}
-        return all(jaw in touching for jaw in JAWS)
-
-    def pick_place(self, index: int) -> tuple[str, str]:
-        s = self.snapshots[index]
-        return s.pick, s.place
+        b1 = model.geom_bodyid[data.contact.geom1[: data.ncon]]
+        b2 = model.geom_bodyid[data.contact.geom2[: data.ncon]]
+        touching = np.concatenate([b2[b1 == self.pick_id], b1[b2 == self.pick_id]])
+        return bool(np.isin(self.jaw_ids, touching).all())
 
     def from_snapshot(self, index: int) -> Twin:
         s = self.snapshots[index]
         if index not in self.restored:
             self.restored[index] = s.restore(self.layout)
-        twin = self.restored[index]
-        twin.data.qpos[:], twin.data.qvel[:] = s.qpos, s.qvel
-        twin.data.ctrl[: len(ARM_JOINTS)] = twin.arm_qpos()
-        mujoco.mj_forward(twin.model, twin.data)
-        return twin
+        return s.apply(self.restored[index])
 
     def gripper(self) -> np.ndarray:
         return self.twin.data.site_xpos[self.site].copy()
 
-    def height(self) -> float:
+    def pick_pos(self) -> np.ndarray:
+        return self.twin.data.xpos[self.pick_id].copy()
+
+    def place_pos(self) -> np.ndarray:
+        return self.twin.data.xpos[self.place_id].copy()
+
+    def height(self, pick: np.ndarray) -> float:
         """How far the pick block is above resting on the table (the table top is under the place block)."""
-        pick, place = self.twin.block_pos(self.check.top), self.twin.block_pos(self.check.bottom)
-        table = place[2] - self.twin.geometry(self.check.bottom).half[2]
-        return float(pick[2] - table - self.twin.geometry(self.check.top).half[2])
+        table = self.place_pos()[2] - self.place_half[2]
+        return float(pick[2] - table - self.pick_half[2])
 
     def stack_point(self) -> np.ndarray:
         """Where the pick block's centre sits when stacked."""
-        place = self.twin.block_pos(self.check.bottom)
-        rise = self.twin.geometry(self.check.bottom).half[2] + self.twin.geometry(self.check.top).half[2]
-        return place + np.array([0.0, 0.0, rise])
+        return self.place_pos() + self.rise
 
-    def observe(self) -> np.ndarray:
-        grip, pick, place = self.gripper(), self.twin.block_pos(self.check.top), self.twin.block_pos(self.check.bottom)
-        qvel = np.array([self.twin.data.joint(j).qvel[0] for j in ARM_JOINTS])
-        sizes = [np.asarray(self.twin.geometry(n).half, dtype=float) for n in (self.check.top, self.check.bottom)]
+    def observe(self, grasped: bool) -> np.ndarray:
+        grip, pick, place = self.gripper(), self.pick_pos(), self.place_pos()
+        qpos, qvel = self.twin.data.qpos[self.qadr], self.twin.data.qvel[self.dadr]
         vectors = [pick - grip, self.stack_point() - pick, place - grip]
         phase = min(self.tick / max(len(self.plan), 1), 1.0)
-        flags = [self.lifted, self.grasped()]
-        state = [self.twin.arm_qpos(), qvel, grip, pick, place, *sizes, *vectors, flags, self.base(), [phase]]
+        flags = [self.lifted, grasped]
+        state = [qpos, qvel, grip, pick, place, self.pick_half, self.place_half, *vectors, flags, self.base(), [phase]]
         return np.concatenate(state).astype(np.float32)
 
-    def potential(self) -> float:
+    def potential(self, grip: np.ndarray, pick: np.ndarray, grasped: bool) -> float:
         """Progress through the task: reach, then grasp, then lift and carry towards the stack point."""
-        grip, pick = self.gripper(), self.twin.block_pos(self.check.top)
-        self.lifted |= self.height() > LIFTED_M
+        self.lifted |= self.height(pick) > LIFTED_M
         reach = 1 - np.tanh(10 * np.linalg.norm(pick - grip))
         if not self.lifted:
-            return float(reach + self.grasped())
+            return float(reach + grasped)
         return float(2 + reach + 2 * (1 - np.tanh(10 * np.linalg.norm(self.stack_point() - pick))))
 
-    def reward(self) -> tuple[float, bool]:
+    def reward(self, grasped: bool) -> tuple[float, bool]:
         """Potential-based shaping (Ng et al. 1999) plus the success bonus: paying the change in progress rather than
         progress itself, so hovering at the stack point earns nothing and only stacking pays off."""
-        previous, now = self.last_potential, self.potential()
+        previous, now = self.last_potential, self.potential(self.gripper(), self.pick_pos(), grasped)
         self.last_potential = now
         if self.check(self.twin):
             return SUCCESS_BONUS, True
@@ -174,11 +173,12 @@ class PickPlaceEnv(gym.Env):
             self.twin.step_towards(self.target, 1 / CONTROL_HZ)
             self.tick += 1
         self.steps += 1
-        reward, success = self.reward()
+        grasped = self.grasped()
+        reward, success = self.reward(grasped)
         if self.residual:
             reward -= RESIDUAL_COST * float(np.square(action).mean())
         truncated = self.steps >= self.horizon
-        return self.observe(), reward, success, truncated, {"is_success": success, "lifted": self.lifted}
+        return self.observe(grasped), reward, success, truncated, {"is_success": success, "lifted": self.lifted}
 
     def close(self) -> None:
         for twin in [self.template, *self.restored.values()]:

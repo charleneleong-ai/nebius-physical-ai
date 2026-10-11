@@ -5,7 +5,7 @@ import pytest
 
 pytest.importorskip("gymnasium")
 
-from nebius_physical_ai.twin.rl_env import GAMMA, OBS_SIZE, RESIDUAL_COST, PickPlaceEnv
+from nebius_physical_ai.twin.rl_env import GAMMA, RESIDUAL_COST, PickPlaceEnv
 from nebius_physical_ai.twin.scene import SO101_XML
 
 pytestmark = pytest.mark.skipif(not SO101_XML.exists(), reason="SO-101 menagerie model not fetched")
@@ -21,7 +21,7 @@ def residual_env() -> Iterator[PickPlaceEnv]:
 
 def test_spaces_match_observation(residual_env: PickPlaceEnv) -> None:
     obs, *_ = residual_env.step(np.zeros(residual_env.action_space.shape))
-    assert obs.shape == (OBS_SIZE,) == residual_env.observation_space.shape
+    assert obs.shape == residual_env.observation_space.shape
 
 
 def test_zero_residual_follows_the_expert_plan(residual_env: PickPlaceEnv) -> None:

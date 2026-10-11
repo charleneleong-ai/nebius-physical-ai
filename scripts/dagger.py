@@ -69,17 +69,16 @@ def recover(
     parts: int = 1,
 ) -> None:
     """The expert's demo from every snapshot it can recover; the rest are counted and left out."""
-    rows = snapshots.read_text().splitlines()[part::parts]
+    shard = FailureSnapshot.load(snapshots)[part::parts]
     writer, kept = LeRobotWriter(out), Counter()
-    for line in track(rows, description="recording recoveries"):
-        snapshot = FailureSnapshot.from_record(json.loads(line))
+    for snapshot in track(shard, description="recording recoveries"):
         frames = record_recovery(snapshot, TwinLayout())
         kept[(snapshot.failure, frames is not None)] += 1
         if frames is not None:
             writer.add_episode(frames, snapshot.prompt)
     writer.finalize()
     by_failure = {f: f"{kept[(f, True)]}/{kept[(f, True)] + kept[(f, False)]}" for f, _ in sorted(kept)}
-    print(f"recovered {len(writer.episodes)}/{len(rows)} into {out}; by failure {by_failure}")
+    print(f"recovered {len(writer.episodes)}/{len(shard)} into {out}; by failure {by_failure}")
 
 
 if __name__ == "__main__":
