@@ -167,6 +167,7 @@ class Rehearsal:
                 "objects": [asdict(o) for o in v.objects],
                 "success": r.success,
                 "steps": r.steps,
+                "failure": r.failure,
             }
             for i, (v, r) in enumerate(zip(variants, outcomes))
         ]
