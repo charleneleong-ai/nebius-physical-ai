@@ -36,6 +36,14 @@ from nebius_physical_ai.twin.textures import HELD_OUT_SEED, KINDS
 
 SEED = 42
 HEADLINE_N = 96  # rehearsals per cell: the same scene moves by about 8 of 48 between runs, so smaller cells mislead
+HEADLINE_SUITES = (  # the promotion gate's six suites (also listed in scripts/dagger_round.sh)
+    "held_out_objects",
+    "seen_vocabulary",
+    "clean_many",
+    "clean_top_down_many",
+    "real_1_pomade_tin_many",
+    "in_path_pomade_tin_many",
+)
 OBLIQUE_ELEVATION_DEG = 65.0
 AZIMUTHS_DEG = (0.0, 90.0, 130.0, 160.0, 180.0)  # 0 = across the mat facing the robot, 180 = behind the arm
 GENERATED_CASES = 12

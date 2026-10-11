@@ -32,7 +32,9 @@ Ranges are two runs of the same checkpoint. Re-runs move a cell by up to ±9, so
 
 ## What the evidence says so far
 
-- **Targeted on-policy data is the lever, if it is weighted.** DAgger round 2 is the first change to beat v5 (+26 pooled), with recoveries at a third of training. Round 1's identical loop at 3.5% was flat, as were v5b and v6.
+- **Targeted on-policy data is the lever, if it is weighted.** DAgger round 2 is the first change to beat v5 (+26 pooled), with recoveries at a third of training. Round 1's identical loop at 3.5% was flat, as were v5b and v6. Round 3 adds +17 pooled (within noise) and is the first candidate to move held_out_objects (50 → 61, +18/−7, p=0.043); its checkpoint was deleted on KEEP and a retrain is queued to check the gain replicates.
+- **Test-time sampling is not a lever here.** Best-of-8 medoid consensus is within noise on held_out_objects (55 vs 50, p=0.41) and clean_many (87 vs 86). DiVeR (arXiv 2610.04933) reports consensus selection flat in its own baselines and gains only from a trained verifier.
+- **The DAgger yield is shrinking** (85 → 72 → 59 recoveries) because the policy fails less and the scripted expert recovers only about 40% of kept states. A residual PPO expert on the script recovers 71.9% of held-out failure snapshots (fresh scenes still 100%).
 - **Data volume is not the lever.** v5b (more steps on the same data) and v6 (2× the data, targeted) both land within
   noise of v5. This matches PlugCharger, where 30× the demos moved imitation from 0.07 to 0.17 only.
 - **The bottleneck has moved from target choice to grasping.** v6 cut no_contact but raised pushed. The scripted expert
@@ -46,9 +48,9 @@ Ranges are two runs of the same checkpoint. Re-runs move a cell by up to ±9, so
 
 ## Next moves
 
-1. **Round 3 of DAgger from the promoted round-2 checkpoint** (#15). Upweighting is what made it work: the same loop at 3.5% recoveries was flat. Drops need a recovery the expert can record from a lifted state.
+1. **Retrain round 3** (queued after v9) to see whether held_out_objects 61 replicates, then **round 4 with the residual RL expert recording recoveries**, which roughly doubles the recoverable states. Failure-state synthesis (CARE, arXiv 2609.24118; Recova, arXiv 2610.01178) is the other way to grow the yield; see [`reports/so101-generalisation-sota-2026-10-11.md`](../reports/so101-generalisation-sota-2026-10-11.md).
 2. **FLUX is dropped** (#18): GR00T is the base going forward.
-3. **Test-time and data levers now queued:** best-of-8 action-chunk consensus on round 2; co-training with 400 real ArmnetBench demos of new objects (#21), aimed at held_out_objects; an RL expert (potential-shaped and residual PPO) to recover the dropped and held blocks the scripted expert cannot.
+3. **Data lever running:** co-training with 400 real ArmnetBench demos of new objects (#21), aimed at held_out_objects. Best-of-8 is closed (#24); an outcome-trained verifier (DiVeR) is the version of test-time sampling worth trying.
 4. **Train with the wrist mount randomised from the start, from the hqfang base**, instead of continuing v5. That should keep v7's +38 on the Seeed mount without its internal regression.
 5. **The rest of the external gap**: with the wrist mount handled internally, v7 still scores 1/50. Compare so101-benchmark's front-camera framing, start pose and episode length next.
 6. **Grasp quality is now the main internal failure** (pushed and dropped). The scripted expert always grasps top-down at the centre; varied grasp offsets in its demos would show the policy corrected grasps.

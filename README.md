@@ -65,7 +65,7 @@ then `lerobot.scripts.convert_dataset_v21_to_v30`), recompute the checkpoint's j
 records LeRobot units), then `lerobot-train --policy.path=<re-statted checkpoint>` with the front and wrist cameras
 renamed to `camera_0` and `camera_1`. A DAgger round then harvests the policy's failures, records expert recoveries,
 fine-tunes and gates the candidate: `bash scripts/dagger_round.sh` (state in `logs/dagger/state.env`, resumable with
-`STAGE=harvest|aggregate|train`). Isaac-GR00T fine-tunes (v1 to v4c) are served with `scripts/finetune.py serve`.
+`STAGE=harvest|aggregate|train|bench`). Isaac-GR00T fine-tunes (v1 to v4c) are served with `scripts/finetune.py serve`.
 
 ## Generalisation results
 
@@ -77,6 +77,8 @@ scene by scene with McNemar tests; a candidate is promoted only with a pooled ga
 | v5 | 438 | 52 | 0/50 | baseline |
 | DAgger round 1 (recoveries 3.5% of training) | 436 | 47 | — | kept, within noise |
 | **DAgger round 2** (recoveries ~34%) | **464** | 50 | — | **promoted** (+26; real_1_pomade_tin 74 → 86, p=0.004) |
+| DAgger round 3 (harvested with round 2) | 481 | **61** | — | kept: pooled +17 over round 2 within noise; held_out_objects 50 → 61 (p=0.043); retrain queued |
+| Best-of-8 chunk consensus on round 2 (2 suites) | — | 55 | — | within noise (p=0.41); not adopted |
 | FLUX 3 Action LoRA, fair (v5's data and volume) | 50 | 3 | 0/7 | worse on every suite; dropped |
 
 ```mermaid
@@ -91,8 +93,14 @@ flowchart LR
   G -->|pooled gain, no suite worse| P
 ```
 
-The funnel above is round 3 (harvested with round 2). New objects have not improved in any experiment, and the external
-benchmark is still 0–1/50. Full method, every denominator and what is not yet established: [`docs/report.pdf`](docs/report.pdf)
+The funnel above is round 3 (harvested with round 2). Round 3 is the first candidate to move new objects (61 vs 50 of
+96, one suite of six and one seed, so a retrain is queued to check it replicates); the external benchmark is still
+0–1/50. A residual RL expert on the scripted expert recovers 71.9% of failure snapshots against the script's 45.9%,
+which is the next source of DAgger recoveries. Latest literature sweep:
+[`reports/so101-generalisation-sota-2026-10-11.md`](reports/so101-generalisation-sota-2026-10-11.md).
+
+![pooled](experiments/progress/generalisation/pooled.png)
+![held_out_objects](experiments/progress/generalisation/held_out_objects.png) Full method, every denominator and what is not yet established: [`docs/report.pdf`](docs/report.pdf)
 ([source](docs/report.tex)), [`docs/experiment-card.md`](docs/experiment-card.md) and
 [`docs/generalisation-diagnosis.md`](docs/generalisation-diagnosis.md); runs and videos in the
 [W&B report](https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==). A one-page summary: [Preflight Generalisation Ledger](https://claude.ai/artifact/JUihdgT9xtqYc8a4ieJPQU) ([HTML](docs/artifact.html)).

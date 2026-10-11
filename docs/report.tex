@@ -17,8 +17,8 @@ We fine-tune GR00T~N1.7 for pick-and-place on a MuJoCo twin of the SO-101 arm an
 generalise. Every candidate is scored on the same six paired suites (96 rehearsals each) against the v5 baseline, with
 scene-by-scene McNemar tests and a promotion gate. One change beats v5: a DAgger round whose expert recoveries make up
 about a third of the training data (pooled $+26$ of 576 rehearsals, no suite worse). A fairly trained FLUX~3~Action LoRA
-loses on every suite despite predicting the right actions open-loop. Performance on new objects has not moved in any
-experiment. All results are in simulation; the physical arm has not been delivered.
+loses on every suite despite predicting the right actions open-loop. A third DAgger round is the first candidate to move
+new objects (61 vs 50 of 96, $p=0.043$), though its pooled gain over round~2 is within noise. All results are in simulation; the physical arm has not been delivered.
 \end{abstract}
 
 \section{Setup}
@@ -49,7 +49,7 @@ denominator; failed recoveries (the expert could not stack from the state) are c
 Round (policy) & Rollouts & Succeeded & Failures kept & Recovered & Recoveries in training\\\midrule
 1 (v5) & 800 & 456 (57\%) & 207 of 330 recoverable & 85 (41\%) & 85 of 2,485 (3.5\%)\\
 2 (v5) & 800 & 494 (62\%) & 189 of 296 recoverable & 72 (38\%) & 157 $\times8$ of 3,656 ($\approx34\%$)\\
-3 (round 2) & 800 & 574 (72\%) & 146 of 197 recoverable & 59 (40\%) & 216 $\times8$ of 4,128 (queued)\\\bottomrule
+3 (round 2) & 800 & 574 (72\%) & 146 of 197 recoverable & 59 (40\%) & 216 $\times8$ of 4,128\\\bottomrule
 \end{tabular}
 \caption{DAgger funnels. ``Recoverable'' excludes \emph{holding}, which the open-loop expert cannot recover from a lifted
 state. Round 3 harvests with the promoted round-2 policy.}\label{tab:funnel}
@@ -64,7 +64,8 @@ clean\_many & 81 & 82 & 86 & $+7/-2$, $p=0.18$\\
 clean\_top\_down\_many & 83 & 77 & 85 & $+6/-4$, $p=0.75$\\
 real\_1\_pomade\_tin\_many & 74 & 78 & \textbf{86} & $\mathbf{+14/-2}$, $\mathbf{p=0.004}$\\
 in\_path\_pomade\_tin\_many & 73 & 76 & 81 & $+13/-5$, $p=0.10$\\\midrule
-pooled (of 576) & 438 & 436 & \textbf{464} & $+26$: \textbf{promoted}\\\bottomrule
+pooled (of 576) & 438 & 436 & \textbf{464} & $+26$: \textbf{promoted}\\\midrule
+Round 3 (vs round 2) & \multicolumn{3}{r}{481; held\_out 61 vs 50, $+18/-7$, $p=0.043$} & $+17$: kept\\\bottomrule
 \end{tabular}
 \caption{Paired results. Round 1 (recoveries 3.5\% of training) was kept, not promoted. Round 2 upweighted them to about a
 third and was promoted. Round-2 failures fell from 138 to 112 (\emph{no\_contact} $57\to33$) while \emph{dropped} and
@@ -107,16 +108,18 @@ suite.
 wrist-camera mount and table texture do not.
 \item \textbf{Visual domain randomisation (v7)}: the Seeed wrist mount alone drops v5 from 81 to 15 on clean\_many's scenes;
 v7 lifts that to 53 but regresses clean\_many itself to 58, and scores 1/50 externally. Not promoted.
+\item \textbf{Best-of-8 consensus} (medoid of 8 sampled chunks, round 2): held\_out\_objects 55 vs 50 ($p=0.41$),
+clean\_many 87 vs 86; within noise at $8\times$ inference.
 \item \textbf{RL expert} (to replace the scripted expert): plain PPO on privileged state reached 1\% held-out recovery
-against the scripted expert's 40\% by 4.4M steps and was stopped; the reward paid hovering more than stacking.
-Potential-based shaping and a residual policy on the expert are running.
+by 4.4M steps and was stopped; the reward paid hovering more than stacking. A residual PPO policy on the scripted
+expert, with potential-based shaping, recovers 71.9\% of held-out failure snapshots against the expert's 45.9\%.
 \end{itemize}
 
 \section{What is not established}
 \begin{itemize}\itemsep0pt
 \item \textbf{Nothing has run on the physical arm.} Every number is from the MuJoCo twin.
-\item \textbf{Generalisation to new objects is not improved.} held\_out\_objects stays at 47--52 across all promoted and
-unpromoted candidates.
+\item \textbf{The new-object gain is one result.} Round 3's held\_out\_objects 61 vs 50 ($p=0.043$) is one suite of six,
+uncorrected, from one seed; earlier candidates stayed at 47--54. A retrain is queued.
 \item \textbf{Round 2's gain is mostly one suite.} Only real\_1\_pomade\_tin is significant on its own; the other five are
 better but within noise. The pooled gain passed a gate fixed in advance.
 \item \textbf{The FLUX failure mechanism is a hypothesis.} Conditioning on its own 8-frame history and integrating deltas
@@ -126,7 +129,7 @@ fits the slow-start, no-contact pattern, but has not been tested by retraining.
 \end{itemize}
 
 \section{Next}
-DAgger round~3 from the promoted policy; best-of-8 action-chunk consensus at test time; co-training with 400 real
+A round~3 retrain to test replication; round~4 with the residual RL expert recording recoveries; co-training with 400 real
 ArmnetBench SO-101 demos of new objects (23\% of samples), plus 515 successful real rollouts as an ablation; and an RL
 expert that can recover dropped and held blocks. Code, PRs and runs: \url{\repo}, W\&B project \texttt{chaleong/preflight}.
 

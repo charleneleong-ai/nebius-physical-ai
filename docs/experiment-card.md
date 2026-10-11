@@ -37,7 +37,9 @@ and what remains unmeasured. Results and reasoning: [`report.pdf`](report.pdf) (
 | DAgger r3 harvest (round 2) | 800 | 574; 146 of 197 kept; 59 recovered | 51 over budget; 87 unrecovered; 29 *holding* |
 | Promotion attempts | 2 rounds scored | 1 promoted (round 2) | round 1 kept, not promoted |
 | FLUX | zero-shot, LoRA v8, fair LoRA, 16-step | 0 promoted | all four worse than v5 |
-| RL expert | plain PPO (stopped at 4.4M steps), 2 relaunches killed for bugs | running: shaped PPO, residual PPO | runs tagged `superseded` in W&B |
+| DAgger r3 retrain | queued | — | first r3 checkpoint deleted by the round script on KEEP |
+| Best-of-8 | 2 suites × 96 on round 2 | 142 succeeded | within noise; not adopted |
+| RL expert | plain PPO (stopped at 4.4M steps), 2 relaunches killed for bugs | residual PPO: 71.9% held-out snapshot recovery at 2.5M steps; shaped PPO ~6% training success | runs tagged `superseded` in W&B |
 | ArmnetBench conversion | 400 teleop + 515 successful rollouts selected from 2,499 episodes | all 915 converted | 1,532 failed and 52 suboptimal rollouts excluded by design |
 
 ## Filters: before or after seeing results
@@ -54,4 +56,5 @@ and what remains unmeasured. Results and reasoning: [`report.pdf`](report.pdf) (
 - Anything on the physical arm (not delivered).
 - More than one training seed per checkpoint, or more than one benchmark seed.
 - Whether FLUX's closed-loop failure comes from its 8-frame history or its delta actions (hypothesis, untested).
-- New-object generalisation from real data (v9 co-training queued).
+- New-object generalisation from real data (v9 co-training running).
+- Whether round 3's held_out_objects gain (p=0.043, one suite of six, uncorrected) replicates on a retrain.

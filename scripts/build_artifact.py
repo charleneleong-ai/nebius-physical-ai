@@ -8,14 +8,9 @@ from pathlib import Path
 
 import typer
 
-SUITES = [
-    "held_out_objects",
-    "seen_vocabulary",
-    "clean_many",
-    "clean_top_down_many",
-    "real_1_pomade_tin_many",
-    "in_path_pomade_tin_many",
-]
+from nebius_physical_ai.benchmark import HEADLINE_N
+from nebius_physical_ai.benchmark import HEADLINE_SUITES as SUITES
+
 SCORES = {  # successes of 96 per suite, seed 42
     "v5": [52, 75, 81, 83, 74, 73],
     "v6 targeted demos": [54, 68, 76, 78, 73, 72],
@@ -24,6 +19,7 @@ SCORES = {  # successes of 96 per suite, seed 42
     "DAgger r3": [61, 80, 86, 88, 85, 81],
     "FLUX LoRA (fair)": [3, 11, 9, 17, 6, 4],
 }
+# McNemar (+, -, p) of round 2 vs v5 per suite, from `scripts/benchmark.py compare` on the two bench JSONs
 PAIRED_R2 = [(12, 14, 0.85), (8, 7, 1.0), (7, 2, 0.18), (6, 4, 0.75), (14, 2, 0.004), (13, 5, 0.10)]  # (+, -, p) vs v5
 FAILURE_KINDS = ["no_contact", "pushed", "dropped", "holding", "fell_off", "knocked_place"]
 FAILURES = {
@@ -45,41 +41,10 @@ OPENLOOP = {
     "hold pose": [0.53, 2.47, 4.66, 8.24],
 }
 HORIZONS = [1, 8, 16, 32]
-RL_RESIDUAL = [
-    (6, 0.45),
-    (25, 0.50),
-    (43, 0.45),
-    (61, 0.54),
-    (92, 0.63),
-    (123, 0.60),
-    (141, 0.73),
-    (166, 0.59),
-    (190, 0.69),
-    (215, 0.71),
-    (240, 0.76),
-    (264, 0.72),
-    (289, 0.64),
-    (313, 0.79),
-    (350, 0.79),
-    (375, 0.74),
-    (399, 0.82),
-]
-RL_GRASP = [
-    (31, 0),
-    (86, 0.04),
-    (166, 0),
-    (252, 0.01),
-    (375, 0.03),
-    (424, 0.06),
-    (497, 0.01),
-    (589, 0.02),
-    (657, 0.05),
-    (743, 0.12),
-    (792, 0.06),
-    (836, 0.09),
-    (866, 0.06),
-]
-EXPERT_MIX = 0.73  # zero-residual expert on the training mix: half fresh (100%), half snapshots (45.9%)
+RL_RECOVERY = [(0, 45.9), (500, 61.6), (1000, 67.8), (1500, 69.9), (2000, 71.2), (2500, 71.9)]  # held-out snapshots, %
+EXPERT_RECOVERY = RL_RECOVERY[0][1]  # step 0: the scripted expert alone (zero residual)
+BASELINE = sum(SCORES["v5"])
+POOLED_N = HEADLINE_N * len(SUITES)
 
 
 def svg(width: int, height: int, body: str, label: str) -> str:
@@ -89,27 +54,40 @@ def svg(width: int, height: int, body: str, label: str) -> str:
     )
 
 
+def legend(items: list[str], x: float, y: float, step: float, cls: str) -> str:
+    """A row of colour swatches, swatch i classed `{cls}{i}`."""
+    return "".join(
+        f'<rect x="{x + k * step}" y="{y}" width="10" height="10" class="{cls}{k}"/>'
+        f'<text x="{x + k * step + 14}" y="{y + 9}">{name}</text>'
+        for k, name in enumerate(items)
+    )
+
+
 def pooled_bars() -> str:
     rows, x0, scale = [], 170, 0.75
     for i, (name, s) in enumerate(SCORES.items()):
         total, y = sum(s), 10 + i * 30
-        cls = "b-good" if total > 438 else "b-bad" if total < 400 else "b-base"
+        cls = "b-good" if total > BASELINE else "b-bad" if total < 0.9 * BASELINE else "b-base"
         rows.append(
             f'<text x="{x0 - 8}" y="{y + 14}" text-anchor="end" class="lab">{name}</text>'
             f'<rect x="{x0}" y="{y}" width="{total * scale:.1f}" height="20" class="{cls}"/>'
             f'<text x="{x0 + total * scale + 6:.1f}" y="{y + 14}" class="lab">{total}</text>'
         )
-    ref = x0 + 438 * scale
+    ref = x0 + BASELINE * scale
     rows.append(
         f'<line x1="{ref}" y1="4" x2="{ref}" y2="{14 + 30 * len(SCORES)}" class="ref"/>'
-        f'<text x="{ref + 4}" y="{26 + 30 * len(SCORES)}">v5 = 438</text>'
-        f'<text x="{x0 + 576 * scale}" y="{26 + 30 * len(SCORES)}" text-anchor="end">of 576</text>'
+        f'<text x="{ref + 4}" y="{26 + 30 * len(SCORES)}">v5 = {BASELINE}</text>'
+        f'<text x="{x0 + POOLED_N * scale}" y="{26 + 30 * len(SCORES)}" text-anchor="end">of {POOLED_N}</text>'
     )
-    return svg(640, 40 + 30 * len(SCORES), "".join(rows), "Pooled successes of 576 per candidate")
+    return svg(640, 40 + 30 * len(SCORES), "".join(rows), f"Pooled successes of {POOLED_N} per candidate")
 
 
 def dumbbells() -> str:
-    x0, x = 200, lambda v: 200 + (v - 40) * 6.5  # 40..96 successes
+    x0 = 200
+
+    def x(v: float) -> float:  # 40..96 successes
+        return x0 + (v - 40) * 6.5
+
     rows = [
         f'<text x="{x(v)}" y="12" text-anchor="middle">{v}</text>'
         f'<line x1="{x(v)}" y1="18" x2="{x(v)}" y2="{24 + 34 * len(SUITES)}" class="grid"/>'
@@ -143,13 +121,9 @@ def failure_stacks() -> str:
                     )
             cursor += w
         rows.append(f'<text x="{x0 + width + 8}" y="{y + 15}" class="lab">{total} failed</text>')
-    legend = "".join(
-        f'<rect x="{x0 + k * 92}" y="{20 + 34 * len(FAILURES)}" width="10" height="10" class="f{k}"/>'
-        f'<text x="{x0 + k * 92 + 14}" y="{29 + 34 * len(FAILURES)}">{kind}</text>'
-        for k, kind in enumerate(FAILURE_KINDS)
-    )
+    key = legend(FAILURE_KINDS, x0, 20 + 34 * len(FAILURES), 92, "f")
     return svg(
-        680, 44 + 34 * len(FAILURES), "".join(rows) + legend, "Failure labels as a share of each checkpoint's failures"
+        680, 44 + 34 * len(FAILURES), "".join(rows) + key, "Failure labels as a share of each checkpoint's failures"
     )
 
 
@@ -159,17 +133,12 @@ def funnels() -> str:
         x0 = 10 + j * col
         rows.append(f'<text x="{x0}" y="14" class="lab strong">{name}</text>')
         for k, c in enumerate(counts):
-            y, w = 26 + k * 30, 190 * c / 800
+            y, w = 26 + k * 30, 190 * c / counts[0]
             rows.append(
                 f'<rect x="{x0}" y="{y}" width="{w:.1f}" height="20" class="fn{k}"/>'
                 f'<text x="{x0 + w + 4:.1f}" y="{y + 14}" class="lab">{c}</text>'
             )
-    legend = "".join(
-        f'<rect x="{10 + k * 128}" y="186" width="10" height="10" class="fn{k}"/>'
-        f'<text x="{24 + k * 128}" y="195">{s}</text>'
-        for k, s in enumerate(FUNNEL_STAGES)
-    )
-    return svg(670, 206, "".join(rows) + legend, "DAgger funnels for rounds 1 to 3")
+    return svg(670, 206, "".join(rows) + legend(FUNNEL_STAGES, 10, 186, 128, "fn"), "DAgger funnels for rounds 1 to 3")
 
 
 def lines(
@@ -183,8 +152,13 @@ def lines(
     yfmt: str = "{:.0f}",
 ) -> str:
     x0, y0, w, h = 50, 180, 560, 160
-    px = lambda v: x0 + w * v / xmax
-    py = lambda v: y0 - h * v / ymax
+
+    def px(v: float) -> float:
+        return x0 + w * v / xmax
+
+    def py(v: float) -> float:
+        return y0 - h * v / ymax
+
     body = [f'<line x1="{x0}" y1="{y0}" x2="{x0 + w}" y2="{y0}" class="axis"/>']
     for t in (0, ymax / 2, ymax):
         body.append(
@@ -218,19 +192,18 @@ def openloop_chart() -> str:
 
 
 def rl_chart() -> str:
-    pct = lambda pts: [(a, 100 * b) for a, b in pts]
     return lines(
-        {"residual on expert": pct(RL_RESIDUAL), "shaped PPO (grasp)": pct(RL_GRASP)},
-        900,
+        {"residual PPO on the scripted expert": RL_RECOVERY},
+        2600,
         100,
         "thousand env steps",
-        "training success %",
-        (100 * EXPERT_MIX, "scripted expert, same mix: 73%"),
-        "RL expert training success",
+        "held-out recovery %",
+        (EXPERT_RECOVERY, f"scripted expert alone: {EXPERT_RECOVERY}%"),
+        "RL expert held-out recovery",
     )
 
 
-def build(template: Path, out: Path) -> None:
+def main(template: Path = Path("docs/artifact.template.html"), out: Path = Path("docs/artifact.html")) -> None:
     html = template.read_text()
     for key, chart in {
         "POOLED": pooled_bars,
@@ -242,10 +215,6 @@ def build(template: Path, out: Path) -> None:
     }.items():
         html = html.replace(f"<!--{key}-->", chart())
     out.write_text(html)
-
-
-def main(template: Path = Path("docs/artifact.template.html"), out: Path = Path("docs/artifact.html")) -> None:
-    build(template, out)
     typer.echo(f"wrote {out}")
 
 
