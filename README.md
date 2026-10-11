@@ -75,3 +75,7 @@ This repository's code is [Apache-2.0](LICENSE). The model weights are not cover
   terms of its base model.
 - **Cosmos 3** and **Nemotron** are used under their own NVIDIA model licences; Nemotron is called through Nebius Token
   Factory.
+
+## Closed-loop learning architecture
+
+The next architecture step is a closed-loop SO-101 learner: a world-model layer predicts candidate outcomes, FLUX 3 Action or GR00T executes short action chunks behind a safety controller, and failures feed an asynchronous DAgger/recovery loop. The current evidence and open work are summarised in [`docs/closed-loop-architecture.md`](docs/closed-loop-architecture.md), with the Mermaid source in [`docs/specs/2026-10-09-closed-loop-world-model-architecture.mmd`](docs/specs/2026-10-09-closed-loop-world-model-architecture.mmd).
