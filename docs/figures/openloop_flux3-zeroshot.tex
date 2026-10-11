@@ -1,0 +1,23 @@
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{llrrrrrrr}
+\toprule
+Horizon & Policy & pan & lift & elbow & wrist flex & wrist roll & gripper & Mean \\
+\midrule
+1 & FLUX LoRA & 0.22 & 0.13 & 0.24 & 0.28 & 0.16 & 1.17 & 0.37 \\
+ & Hold pose & 0.18 & 0.15 & 0.26 & 0.31 & 0.14 & 2.12 & 0.53 \\
+\midrule
+8 & FLUX LoRA & 1.72 & 1.42 & 1.86 & 2.33 & 1.30 & 4.96 & 2.26 \\
+ & Hold pose & 1.50 & 1.09 & 2.10 & 2.67 & 1.03 & 6.44 & 2.47 \\
+\midrule
+16 & FLUX LoRA & 3.61 & 3.17 & 3.88 & 4.51 & 2.70 & 8.15 & 4.34 \\
+ & Hold pose & 3.01 & 2.15 & 4.23 & 5.39 & 2.05 & 11.14 & 4.66 \\
+\midrule
+32 & FLUX LoRA & 7.27 & 6.30 & 8.44 & 7.49 & 5.28 & 14.34 & 8.19 \\
+ & Hold pose & 6.03 & 3.89 & 9.00 & 10.25 & 4.10 & 16.16 & 8.24 \\
+\bottomrule
+\end{tabular}
+\caption{Open-loop action error of flux3-zeroshot on 60 held-out demo frames: mean absolute error per joint (LeRobot units) of the action $h$ steps ahead in one predicted chunk, against holding the current pose.}
+\label{tab:flux-openloop}
+\end{table}
