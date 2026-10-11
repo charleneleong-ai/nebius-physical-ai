@@ -28,7 +28,7 @@ Ranges are two runs of the same checkpoint. Re-runs move a cell by up to ±9, so
 | 4 | DAgger on the policy's own failure states | [#15](https://github.com/charleneleong-ai/nebius-physical-ai/pull/15) | **Round 1: KEEP, within noise** (−2 pooled). no_contact 57 → 45 and knocked_place 11 → 0, but dropped 24 → 33 and holding 4 → 13. Its 85 recoveries were only 3.5% of training. |
 | 5 | Upweight the recoveries (round 2: 157 recoveries ×8 against 2,400 base, about 34% of training) | [#15](https://github.com/charleneleong-ai/nebius-physical-ai/pull/15) | **PROMOTE: pooled +26, no suite worse.** clean_many 81 → 86, real_1_pomade_tin_many 74 → 86 (p=0.004), in_path 73 → 81. no_contact 57 → 33, knocked_place 11 → 0–1. held_out_objects unchanged (52 → 50), and dropped/holding stay high. |
 | 6 | Visual DR closes the external gap (v7: procedural floors, wrist mount randomised) | [#17](https://github.com/charleneleong-ai/nebius-physical-ai/pull/17) | **Mostly the wrist mount.** The Seeed mount alone drops v5 from 81 to 15 on clean_many's scenes; v7 lifts that to 53 (+42/−4). But v7 regresses internally (clean_many 81 → 58) and reaches only 1/50 externally. |
-| 7 | A camera-robust world action model transfers (FLUX 3 Action) | [#18](https://github.com/charleneleong-ai/nebius-physical-ai/pull/18) | **No, not even fairly trained.** On v5's own 800 demos at v5's volume, the FLUX LoRA scores 50/576 against v5's 438 (worse on all six suites, p < 0.001) and 0/7 on so101-benchmark; mostly `no_contact`. Open-loop it predicts the right chunk (2.71 vs 8.24 for holding the pose, 32 steps ahead; zero-shot 8.19), so the failure is closed-loop execution, not the bridge or the mapping. 16-step replanning test running. |
+| 7 | A camera-robust world action model transfers (FLUX 3 Action) | [#18](https://github.com/charleneleong-ai/nebius-physical-ai/pull/18) | **No, not even fairly trained.** On v5's own 800 demos at v5's volume, the FLUX LoRA scores 50/576 against v5's 438 (worse on all six suites, p < 0.001) and 0/7 on so101-benchmark; mostly `no_contact`. Open-loop it predicts the right chunk (2.71 vs 8.24 for holding the pose, 32 steps ahead; zero-shot 8.19), so the failure is closed-loop execution, not the bridge or the mapping. 16-step replanning does not help (held_out 4/96, clean_many 2/96, worse at p=0.039). |
 
 ## What the evidence says so far
 
@@ -47,7 +47,8 @@ Ranges are two runs of the same checkpoint. Re-runs move a cell by up to ±9, so
 ## Next moves
 
 1. **Round 3 of DAgger from the promoted round-2 checkpoint** (#15). Upweighting is what made it work: the same loop at 3.5% recoveries was flat. Drops need a recovery the expert can record from a lifted state.
-2. **Drop FLUX for the policy** (#18) unless the 16-step replanning test closes a large part of the closed-loop gap. GR00T is the base going forward.
-3. **Train with the wrist mount randomised from the start, from the hqfang base**, instead of continuing v5. That should keep v7's +38 on the Seeed mount without its internal regression.
-4. **The rest of the external gap**: with the wrist mount handled internally, v7 still scores 1/50. Compare so101-benchmark's front-camera framing, start pose and episode length next.
-5. **Grasp quality is now the main internal failure** (pushed and dropped). The scripted expert always grasps top-down at the centre; varied grasp offsets in its demos would show the policy corrected grasps.
+2. **FLUX is dropped** (#18): GR00T is the base going forward.
+3. **Test-time and data levers now queued:** best-of-8 action-chunk consensus on round 2; co-training with 400 real ArmnetBench demos of new objects (#21), aimed at held_out_objects; an RL expert (potential-shaped and residual PPO) to recover the dropped and held blocks the scripted expert cannot.
+4. **Train with the wrist mount randomised from the start, from the hqfang base**, instead of continuing v5. That should keep v7's +38 on the Seeed mount without its internal regression.
+5. **The rest of the external gap**: with the wrist mount handled internally, v7 still scores 1/50. Compare so101-benchmark's front-camera framing, start pose and episode length next.
+6. **Grasp quality is now the main internal failure** (pushed and dropped). The scripted expert always grasps top-down at the centre; varied grasp offsets in its demos would show the policy corrected grasps.

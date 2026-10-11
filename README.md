@@ -18,7 +18,7 @@ verdict that a Nemotron agent explains.
 |---|---|---|---|
 | Verdict explanation | **Nemotron 3 Ultra** (Super / 3.5 Lightning selectable) | **Nebius Token Factory**, called on every verdict | [`NemotronAgent`](src/nebius_physical_ai/pipeline.py) |
 | Scene perception | **Cosmos 3** Reasoner, with a Token Factory VLM as an alternative | our GPU (vLLM) or **Nebius Token Factory** | [`CosmosClient`, `TokenFactoryVLClient`](src/nebius_physical_ai/pipeline.py), [`scripts/cosmos_local.sh`](scripts/cosmos_local.sh) |
-| Policy | **GR00T N1.7** (v5, fine-tuned from [hqfang/groot-so100_101](https://huggingface.co/hqfang/groot-so100_101)); GR00T N1.6 for v1–v4c | our A100 | [`scripts/lerobot_policy_server.py`](scripts/lerobot_policy_server.py), [`scripts/finetune.py`](scripts/finetune.py) |
+| Policy | **GR00T N1.7**: DAgger round 2 (v5 plus on-policy expert recoveries), fine-tuned from [hqfang/groot-so100_101](https://huggingface.co/hqfang/groot-so100_101); GR00T N1.6 for v1–v4c | our A100 | [`scripts/lerobot_policy_server.py`](scripts/lerobot_policy_server.py), [`scripts/finetune.py`](scripts/finetune.py) |
 | Rehearsal, benchmark, trust score | — | our A100 (MuJoCo, headless) | [`twin/`](src/nebius_physical_ai/twin), [`benchmark.py`](src/nebius_physical_ai/benchmark.py), [`trust/`](src/nebius_physical_ai/trust) |
 
 Every verdict makes a runtime call to Token Factory; without a `NEBIUS_API_KEY` the explanation step fails rather than
@@ -40,20 +40,21 @@ Hackathon rules digest: [`docs/hackathon-rules.md`](docs/hackathon-rules.md). De
 
 ## Policy
 
-The served policy is **v5**: [hqfang/groot-so100_101](https://huggingface.co/hqfang/groot-so100_101) (GR00T N1.7,
-fine-tuned on 1,209 SO-100/101 datasets) fine-tuned again with LeRobot on 800 scripted demos recorded in the SO-101 twin.
-On the paired benchmark ([`scripts/benchmark.py`](scripts/benchmark.py), 96 rehearsals per suite, the same scenes for
-every checkpoint) it beats the earlier Isaac-GR00T fine-tunes on every suite, including objects never seen in training
-(57% against 25% for v4c). All results so far are in simulation; the arm is not built yet.
+The served policy is **DAgger round 2**: [hqfang/groot-so100_101](https://huggingface.co/hqfang/groot-so100_101)
+(GR00T N1.7, pretrained on 1,209 SO-100/101 datasets) fine-tuned with LeRobot on 800 scripted twin demos (**v5**), then
+on the expert's recoveries from v5's own failure states ([`scripts/dagger_round.sh`](scripts/dagger_round.sh)). It beat
+v5 on the paired benchmark and passed the promotion gate; see [Generalisation results](#generalisation-results).
+All results are in simulation: **the physical arm has not been delivered yet, and the repo will be updated with
+live-arm results when it arrives.**
 
-v5 is a LeRobot checkpoint, so it is served by [`scripts/lerobot_policy_server.py`](scripts/lerobot_policy_server.py),
+Both are LeRobot checkpoints, served by [`scripts/lerobot_policy_server.py`](scripts/lerobot_policy_server.py),
 which speaks the Isaac-GR00T ZeroMQ protocol: the rehearsal, benchmark and verdict code talk to it exactly as to an
 Isaac-GR00T server. It runs in its own LeRobot environment on a GPU host:
 
 ```bash
 uv venv ~/lerobot-n17/.venv --python 3.12
 uv pip install --python ~/lerobot-n17/.venv/bin/python "lerobot[groot,training]==0.6.1"   # keeps wandb below 0.28
-CKPT=~/checkpoints/gr00t-preflight-v5/checkpoints/012000/pretrained_model
+CKPT=~/checkpoints/gr00t-preflight-dagger-r2/checkpoints/004000/pretrained_model   # or gr00t-preflight-v5/checkpoints/012000
 ln -sfn ~/checkpoints/hqfang-groot-so100_101/vlm_processor "$CKPT/vlm_processor"   # saved checkpoints omit it
 ~/lerobot-n17/.venv/bin/python scripts/lerobot_policy_server.py "$CKPT" --port 5558
 ```
@@ -62,7 +63,42 @@ Reproducing v5 from the base checkpoint: convert the demos to LeRobot v3.0 ([`sc
 then `lerobot.scripts.convert_dataset_v21_to_v30`), recompute the checkpoint's joint normalisation from them
 ([`scripts/restat_checkpoint.py`](scripts/restat_checkpoint.py): the base pools its statistics in degrees, the twin
 records LeRobot units), then `lerobot-train --policy.path=<re-statted checkpoint>` with the front and wrist cameras
-renamed to `camera_0` and `camera_1`. Isaac-GR00T fine-tunes (v1 to v4c) are served with `scripts/finetune.py serve`.
+renamed to `camera_0` and `camera_1`. A DAgger round then harvests the policy's failures, records expert recoveries,
+fine-tunes and gates the candidate: `bash scripts/dagger_round.sh` (state in `logs/dagger/state.env`, resumable with
+`STAGE=harvest|aggregate|train`). Isaac-GR00T fine-tunes (v1 to v4c) are served with `scripts/finetune.py serve`.
+
+## Generalisation results
+
+Every candidate is scored on six paired suites of 96 rehearsals (the same scenes for every checkpoint) and compared
+scene by scene with McNemar tests; a candidate is promoted only with a pooled gain and no suite worse.
+
+| Policy | Pooled (of 576) | held_out_objects (of 96) | so101-benchmark | Verdict |
+|---|---|---|---|---|
+| v5 | 438 | 52 | 0/50 | baseline |
+| DAgger round 1 (recoveries 3.5% of training) | 436 | 47 | — | kept, within noise |
+| **DAgger round 2** (recoveries ~34%) | **464** | 50 | — | **promoted** (+26; real_1_pomade_tin 74 → 86, p=0.004) |
+| FLUX 3 Action LoRA, fair (v5's data and volume) | 50 | 3 | 0/7 | worse on every suite; dropped |
+
+```mermaid
+flowchart LR
+  P[policy] -->|800 rollouts on fresh scenes| H{harvest}
+  H -->|574 succeed| S[done]
+  H -->|197 recoverable failures| B[uncertainty band + budget]
+  B -->|146 kept| E[scripted expert recovers]
+  E -->|59 recovered, 87 not| D[recovery set ×8 + 2,400 base demos]
+  D -->|4k steps, lr 1e-5| C[candidate]
+  C -->|6 paired suites, 576 rehearsals| G{promotion gate}
+  G -->|pooled gain, no suite worse| P
+```
+
+The funnel above is round 3 (harvested with round 2). New objects have not improved in any experiment, and the external
+benchmark is still 0–1/50. Full method, every denominator and what is not yet established: [`docs/report.pdf`](docs/report.pdf)
+([source](docs/report.tex)), [`docs/experiment-card.md`](docs/experiment-card.md) and
+[`docs/generalisation-diagnosis.md`](docs/generalisation-diagnosis.md); runs and videos in the
+[W&B report](https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==). A one-page summary: [Preflight Generalisation Ledger](https://claude.ai/artifact/JUihdgT9xtqYc8a4ieJPQU) ([HTML](docs/artifact.html)).
+
+Long runs report progress per case: a rich bar at a terminal, a timestamped line with successes and ETA in nohup logs,
+and running counts in W&B, so a suite that takes hours on a shared GPU is visible throughout.
 
 ## Licences
 
@@ -75,7 +111,11 @@ This repository's code is [Apache-2.0](LICENSE). The model weights are not cover
   terms of its base model.
 - **Cosmos 3** and **Nemotron** are used under their own NVIDIA model licences; Nemotron is called through Nebius Token
   Factory.
+- **FLUX 3 Action** was evaluated only ([#18](https://github.com/charleneleong-ai/nebius-physical-ai/pull/18)) under
+  the FLUX Kommunity (non-commercial) licence; no FLUX weights or outputs are part of the submission.
+- **ArmnetBench** ([armnet/armnetbench_v01_lerobot_so101](https://huggingface.co/datasets/armnet/armnetbench_v01_lerobot_so101))
+  is Apache-2.0; used for co-training experiments, not redistributed.
 
 ## Closed-loop learning architecture
 
-The next architecture step is a closed-loop SO-101 learner: a world-model layer predicts candidate outcomes, FLUX 3 Action or GR00T executes short action chunks behind a safety controller, and failures feed an asynchronous DAgger/recovery loop. The current evidence and open work are summarised in [`docs/closed-loop-architecture.md`](docs/closed-loop-architecture.md), with the Mermaid source in [`docs/specs/2026-10-09-closed-loop-world-model-architecture.mmd`](docs/specs/2026-10-09-closed-loop-world-model-architecture.mmd).
+The next architecture step is a closed-loop SO-101 learner: a world-model layer predicts candidate outcomes, GR00T executes short action chunks behind a safety controller (FLUX 3 Action was evaluated for this role and dropped: it fails closed-loop), and failures feed an asynchronous DAgger/recovery loop. The current evidence and open work are summarised in [`docs/closed-loop-architecture.md`](docs/closed-loop-architecture.md), with the Mermaid source in [`docs/specs/2026-10-09-closed-loop-world-model-architecture.mmd`](docs/specs/2026-10-09-closed-loop-world-model-architecture.mmd).

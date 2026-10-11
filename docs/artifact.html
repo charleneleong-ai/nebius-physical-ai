@@ -1,0 +1,178 @@
+<title>Preflight Generalisation Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;700&family=Public+Sans:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a lab ledger. One thesis line, then the funnel, the paired table, and a verdict per experiment. */
+:root {
+  --bg: #f3f5f4; --surface: #ffffff; --fg: #1a2124; --muted: #5b6669; --line: #d5dcdb;
+  --accent: #2753b8; --good: #1d7a4c; --bad: #b3362b; --warn: #9a6a12;
+  --display: "Archivo Narrow", "Arial Narrow", system-ui, sans-serif;
+  --body: "Public Sans", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12171a; --surface: #1a2125; --fg: #e3e9ea; --muted: #94a1a4; --line: #2c373b;
+    --accent: #7ea2f2; --good: #5cc28f; --bad: #f07a6c; --warn: #e0b154; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12171a; --surface: #1a2125; --fg: #e3e9ea; --muted: #94a1a4; --line: #2c373b;
+  --accent: #7ea2f2; --good: #5cc28f; --bad: #f07a6c; --warn: #e0b154; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--body); padding-inline: 16px; }
+main { max-width: 920px; margin: 0 auto; padding-block: 40px 64px; display: grid; gap: 48px; }
+h1, h2 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: 0.01em; }
+h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.05; }
+h2 { font-size: 1.5rem; margin-bottom: 12px; }
+p { margin: 0 0 12px; max-width: 65ch; }
+.eyebrow { font: 600 12px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
+.lede { font-size: 1.1rem; color: var(--muted); }
+.headline { display: flex; flex-wrap: wrap; gap: 12px 32px; margin-top: 20px; font-family: var(--mono); }
+.headline div { display: grid; gap: 2px; }
+.headline b { font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+.headline span { font-size: 12px; color: var(--muted); }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font: 600 12px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+td.mono { font-family: var(--mono); font-size: 13px; }
+tr.total td { font-weight: 600; border-bottom: 2px solid var(--fg); }
+.sig { color: var(--good); font-weight: 600; }
+.mermaid { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px; }
+.ledger { display: grid; gap: 0; border-top: 1px solid var(--line); }
+.row { display: grid; grid-template-columns: 7.5rem 1fr; gap: 4px 20px; padding-block: 14px; border-bottom: 1px solid var(--line); }
+.row > div { min-width: 0; }
+.row strong { display: block; }
+.pill { font: 600 11px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; padding: 5px 8px; border-radius: 3px; border: 1px solid currentColor; justify-self: start; align-self: start; }
+.promoted { color: var(--good); } .rejected { color: var(--bad); } .running { color: var(--warn); } .flat { color: var(--muted); }
+@media (max-width: 560px) { .row { grid-template-columns: 1fr; } }
+svg text { fill: var(--muted); font: 11px var(--mono); }
+svg .lab { fill: var(--fg); }
+ul.plain { margin: 0; padding-left: 1.1rem; max-width: 65ch; }
+ul.plain li { margin-bottom: 6px; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+footer { font-size: 13px; color: var(--muted); }
+</style>
+
+<main>
+<header>
+  <div class="eyebrow">Preflight · SO-101 · MuJoCo twin · 11 Oct 2026</div>
+  <h1>Seven attempts to make a GR00T arm policy generalise. One passed the gate.</h1>
+  <p class="lede">Every candidate is scored on the same six paired suites (12 scenes × 8 perturbed rehearsals, seed 42) against the v5 baseline, scene by scene with McNemar tests. A candidate is promoted only with a pooled gain and no suite significantly worse. All results are simulation; the physical arm has not arrived.</p>
+  <div class="headline">
+    <div><b>464 / 576</b><span>DAgger round 2, promoted</span></div>
+    <div><b>438 / 576</b><span>v5 baseline</span></div>
+    <div><b>50 / 576</b><span>FLUX 3 Action LoRA, fair</span></div>
+    <div><b>47–52 / 96</b><span>held-out objects, every candidate</span></div>
+  </div>
+</header>
+
+<section>
+  <h2>How DAgger turns failures into training data</h2>
+  <p>Each round rolls the current policy out on 800 rehearsals, snapshots every failure, keeps the most uncertain within a balanced budget, and lets the scripted expert record a recovery from each kept state. Round 3 below harvests with the promoted round-2 policy.</p>
+  <pre class="mermaid">
+flowchart LR
+  A["800 rollouts<br/>(round-2 policy)"] --> B["574 succeeded"]
+  A --> C["226 failed"]
+  C --> D["29 holding<br/>(not recoverable)"]
+  C --> E["197 recoverable"]
+  E --> F["51 over budget"]
+  E --> G["146 kept"]
+  G --> H["87 expert failed"]
+  G --> I["59 recovered"]
+  I --> J["216 recoveries ×8<br/>in 4,128 episodes"]
+  </pre>
+</section>
+
+<section>
+  <h2>Paired results against v5</h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Suite (of 96)</th><th>v5</th><th>Round 1</th><th>Round 2</th><th>R2 vs v5 (+/−)</th><th>p</th></tr></thead>
+    <tbody>
+      <tr><td>held_out_objects</td><td>52</td><td>47</td><td>50</td><td class="mono">+12 / −14</td><td>0.85</td></tr>
+      <tr><td>seen_vocabulary</td><td>75</td><td>76</td><td>76</td><td class="mono">+8 / −7</td><td>1.0</td></tr>
+      <tr><td>clean_many</td><td>81</td><td>82</td><td>86</td><td class="mono">+7 / −2</td><td>0.18</td></tr>
+      <tr><td>clean_top_down_many</td><td>83</td><td>77</td><td>85</td><td class="mono">+6 / −4</td><td>0.75</td></tr>
+      <tr><td>real_1_pomade_tin_many</td><td>74</td><td>78</td><td class="sig">86</td><td class="mono sig">+14 / −2</td><td class="sig">0.004</td></tr>
+      <tr><td>in_path_pomade_tin_many</td><td>73</td><td>76</td><td>81</td><td class="mono">+13 / −5</td><td>0.10</td></tr>
+      <tr class="total"><td>pooled (of 576)</td><td>438</td><td>436</td><td>464</td><td class="mono">+26</td><td>promoted</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="margin-top:12px">Round 1 put recoveries at 3.5% of training and stayed flat. Round 2 upweighted them ×8 to about a third. Failures fell from 138 to 112, almost all in <em>no_contact</em> (57 → 33).</p>
+</section>
+
+<section>
+  <h2>FLUX predicts the right actions and still fails closed-loop</h2>
+  <p>Open-loop mean action error on 60 held-out demo frames, by horizon. The LoRA beats holding the pose three to one at 32 steps; zero-shot FLUX is no better than standing still. In closed loop the same LoRA scores 50 of 576, with 358 of 526 failures never touching the block.</p>
+  <div class="scroll">
+  <svg viewBox="0 0 640 230" width="100%" style="min-width:480px" role="img" aria-label="Open-loop action error by horizon for fair LoRA, zero-shot FLUX and holding the pose">
+    <g transform="translate(48,12)">
+      <line x1="0" y1="180" x2="570" y2="180" stroke="var(--line)"/>
+      <line x1="0" y1="90" x2="570" y2="90" stroke="var(--line)" stroke-dasharray="2 4"/>
+      <text x="-8" y="184" text-anchor="end">0</text>
+      <text x="-8" y="94" text-anchor="end">4.5</text>
+      <text x="-8" y="4" text-anchor="end">9</text>
+      <!-- scale: 20 px per unit; groups at 1/8/16/32 steps -->
+      <g transform="translate(20,0)">
+        <rect x="0" y="175.4" width="30" height="4.6" fill="var(--accent)"/><rect x="34" y="172.6" width="30" height="7.4" fill="var(--warn)"/><rect x="68" y="169.4" width="30" height="10.6" fill="var(--muted)"/>
+        <text x="49" y="198" text-anchor="middle" class="lab">1 step</text>
+      </g>
+      <g transform="translate(160,0)">
+        <rect x="0" y="158.4" width="30" height="21.6" fill="var(--accent)"/><rect x="34" y="134.8" width="30" height="45.2" fill="var(--warn)"/><rect x="68" y="130.6" width="30" height="49.4" fill="var(--muted)"/>
+        <text x="49" y="198" text-anchor="middle" class="lab">8 steps</text>
+      </g>
+      <g transform="translate(300,0)">
+        <rect x="0" y="145" width="30" height="35" fill="var(--accent)"/><rect x="34" y="93.2" width="30" height="86.8" fill="var(--warn)"/><rect x="68" y="86.8" width="30" height="93.2" fill="var(--muted)"/>
+        <text x="49" y="198" text-anchor="middle" class="lab">16 steps</text>
+      </g>
+      <g transform="translate(440,0)">
+        <rect x="0" y="125.8" width="30" height="54.2" fill="var(--accent)"/><rect x="34" y="16.2" width="30" height="163.8" fill="var(--warn)"/><rect x="68" y="15.2" width="30" height="164.8" fill="var(--muted)"/>
+        <text x="15" y="120" text-anchor="middle" class="lab">2.71</text>
+        <text x="49" y="198" text-anchor="middle" class="lab">32 steps</text>
+      </g>
+      <g transform="translate(20,214)">
+        <rect width="10" height="10" fill="var(--accent)"/><text x="16" y="9">fair LoRA</text>
+        <rect x="110" width="10" height="10" fill="var(--warn)"/><text x="126" y="9">zero-shot FLUX</text>
+        <rect x="250" width="10" height="10" fill="var(--muted)"/><text x="266" y="9">hold pose</text>
+      </g>
+    </g>
+  </svg>
+  </div>
+</section>
+
+<section>
+  <h2>Every experiment, with its verdict</h2>
+  <div class="ledger">
+    <div class="row"><span class="pill promoted">Promoted</span><div><strong>DAgger round 2, recoveries ×8</strong>Pooled 464 vs 438, no suite worse. Now the served policy.</div></div>
+    <div class="row"><span class="pill flat">Kept</span><div><strong>DAgger round 1</strong>436 vs 438. Recoveries too diluted at 3.5% of training.</div></div>
+    <div class="row"><span class="pill running">Queued</span><div><strong>DAgger round 3</strong>Harvested 574/800 with round 2; 59 recoveries added. Training waits on a shared GPU.</div></div>
+    <div class="row"><span class="pill rejected">Rejected</span><div><strong>FLUX 3 Action LoRA (fair)</strong>Same 800 demos, same sample volume. Worse on every suite (p &lt; 0.001), 0/7 externally. Executing 16 instead of 32 actions per chunk did not help.</div></div>
+    <div class="row"><span class="pill flat">Flat</span><div><strong>Targeted demos (v6)</strong>Staged-mistake recoveries plus lookalike decoys. Within noise on every suite.</div></div>
+    <div class="row"><span class="pill rejected">Rejected</span><div><strong>Visual domain randomisation (v7)</strong>Lifts the Seeed wrist-mount scenes 15 → 53 but drops clean_many 81 → 58; 1/50 on so101-benchmark.</div></div>
+    <div class="row"><span class="pill running">Running</span><div><strong>RL expert (PPO, shaped and residual)</strong>Plain PPO hit 1% recovery vs the scripted expert's 40% and was stopped; its reward paid hovering. Potential-based shaping and a residual-on-expert policy are training; the bar is the expert's 46% recovery.</div></div>
+    <div class="row"><span class="pill running">Queued</span><div><strong>Best-of-8 chunk consensus</strong>Medoid of 8 flow-matching samples at test time, on held_out_objects and clean_many.</div></div>
+    <div class="row"><span class="pill running">Queued</span><div><strong>Real-data co-training (v9, v9b)</strong>400 ArmnetBench SO-101 teleop demos of new objects at 23% of samples; v9b adds 515 successful real rollouts.</div></div>
+  </div>
+</section>
+
+<section>
+  <h2>What is not established</h2>
+  <ul class="plain">
+    <li>Nothing has run on the physical arm. The repo will be updated with live results when it arrives.</li>
+    <li>New-object generalisation has not moved: held_out_objects stays at 47–52 of 96 for every candidate.</li>
+    <li>Round 2's gain is significant on one suite alone; the pooled gain passed a gate fixed in advance.</li>
+    <li>FLUX's failure mechanism (8-frame self-history and integrated deltas) is a hypothesis, not tested by retraining.</li>
+    <li>so101-benchmark stays at 0–1 of 50 for every policy.</li>
+    <li>One benchmark seed and one training seed per checkpoint.</li>
+  </ul>
+</section>
+
+<footer>
+  Sources: <a href="https://github.com/charleneleong-ai/nebius-physical-ai">charleneleong-ai/nebius-physical-ai</a> — <code>docs/report.pdf</code>, <code>docs/experiment-card.md</code>, <code>docs/generalisation-diagnosis.md</code>. Runs: W&amp;B project <code>chaleong/preflight</code>.
+</footer>
+</main>

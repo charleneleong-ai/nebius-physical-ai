@@ -1,0 +1,133 @@
+\documentclass[10pt]{article}
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{booktabs,graphicx,hyperref,xcolor,amsmath}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\newcommand{\repo}{https://github.com/charleneleong-ai/nebius-physical-ai}
+
+\title{Preflight: making an SO-101 policy generalise to new scenes, objects and tasks\\
+\large Experiments, funnels and verdicts (simulation only)}
+\author{Preflight, Nebius $\times$ NVIDIA Physical AI hackathon}
+\date{11 October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We fine-tune GR00T~N1.7 for pick-and-place on a MuJoCo twin of the SO-101 arm and try seven ways to make it
+generalise. Every candidate is scored on the same six paired suites (96 rehearsals each) against the v5 baseline, with
+scene-by-scene McNemar tests and a promotion gate. One change beats v5: a DAgger round whose expert recoveries make up
+about a third of the training data (pooled $+26$ of 576 rehearsals, no suite worse). A fairly trained FLUX~3~Action LoRA
+loses on every suite despite predicting the right actions open-loop. Performance on new objects has not moved in any
+experiment. All results are in simulation; the physical arm has not been delivered.
+\end{abstract}
+
+\section{Setup}
+\textbf{Policy.} \texttt{hqfang/groot-so100\_101} (GR00T~N1.7, pretrained on 1,209 SO-100/101 datasets), fine-tuned with
+LeRobot~0.6.1. \textbf{v5} adds 800 scripted twin demos (12k steps, batch 8, lr $2.5\times10^{-5}$) and is the
+baseline for every comparison.
+
+\textbf{Benchmark.} Six suites, each 12 scenes $\times$ 8 perturbed rehearsals $=96$, seed 42:
+\texttt{held\_out\_objects} (objects never in training), \texttt{seen\_vocabulary}, \texttt{clean\_many},
+\texttt{clean\_top\_down\_many}, \texttt{real\_1\_pomade\_tin\_many}, \texttt{in\_path\_pomade\_tin\_many}. Re-running one
+checkpoint moves a suite by up to $\pm9$, so differences are judged only by paired McNemar tests on the scenes where two
+checkpoints disagree. A candidate is \emph{promoted} only with a pooled paired gain and no suite significantly worse; the
+gate was fixed before any round was scored. External check: so101-benchmark \texttt{stack\_blue\_on\_red}, 50 episodes.
+
+\textbf{Failure labels.} Each failed rehearsal is labelled by \texttt{FailureWatch}: \emph{no\_contact} (pick block never
+moved), \emph{pushed}, \emph{dropped}, \emph{fell\_off}, \emph{holding} (still lifted at timeout), \emph{knocked\_place}.
+
+\section{Experiments}
+
+\subsection{DAgger with upweighted recoveries (the one that works)}
+Each round rolls the current policy out on 200 fresh training scenes $\times$ 4 variants, snapshots every failure
+(simulator state plus scene), keeps the most uncertain within a recording budget balanced across failure types, and lets
+the scripted expert record a recovery from each kept state. Table~\ref{tab:funnel} gives the funnel with every
+denominator; failed recoveries (the expert could not stack from the state) are counted, not dropped.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{lrrrrr}\toprule
+Round (policy) & Rollouts & Succeeded & Failures kept & Recovered & Recoveries in training\\\midrule
+1 (v5) & 800 & 456 (57\%) & 207 of 330 recoverable & 85 (41\%) & 85 of 2,485 (3.5\%)\\
+2 (v5) & 800 & 494 (62\%) & 189 of 296 recoverable & 72 (38\%) & 157 $\times8$ of 3,656 ($\approx34\%$)\\
+3 (round 2) & 800 & 574 (72\%) & 146 of 197 recoverable & 59 (40\%) & 216 $\times8$ of 4,128 (queued)\\\bottomrule
+\end{tabular}
+\caption{DAgger funnels. ``Recoverable'' excludes \emph{holding}, which the open-loop expert cannot recover from a lifted
+state. Round 3 harvests with the promoted round-2 policy.}\label{tab:funnel}
+\end{table}
+
+\begin{table}[h]\centering\small
+\begin{tabular}{lrrrl}\toprule
+Suite (of 96) & v5 & Round 1 & Round 2 & Round 2 vs v5\\\midrule
+held\_out\_objects & 52 & 47 & 50 & $+12/-14$, $p=0.85$\\
+seen\_vocabulary & 75 & 76 & 76 & $+8/-7$, $p=1.0$\\
+clean\_many & 81 & 82 & 86 & $+7/-2$, $p=0.18$\\
+clean\_top\_down\_many & 83 & 77 & 85 & $+6/-4$, $p=0.75$\\
+real\_1\_pomade\_tin\_many & 74 & 78 & \textbf{86} & $\mathbf{+14/-2}$, $\mathbf{p=0.004}$\\
+in\_path\_pomade\_tin\_many & 73 & 76 & 81 & $+13/-5$, $p=0.10$\\\midrule
+pooled (of 576) & 438 & 436 & \textbf{464} & $+26$: \textbf{promoted}\\\bottomrule
+\end{tabular}
+\caption{Paired results. Round 1 (recoveries 3.5\% of training) was kept, not promoted. Round 2 upweighted them to about a
+third and was promoted. Round-2 failures fell from 138 to 112 (\emph{no\_contact} $57\to33$) while \emph{dropped} and
+\emph{holding} did not fall.}\label{tab:dagger}
+\end{table}
+
+\subsection{FLUX 3 Action, trained fairly}
+A LoRA (rank 32) on \texttt{black-forest-labs/flux-3-action-so101}, trained on exactly v5's 800 demos (bridged into
+FLUX's joint units by a per-joint quantile map) for exactly v5's volume (96k samples in 12k updates of 8), never
+initialised from v5. It scores 50 of 576 against v5's 438, worse on every suite ($p<0.001$ each), and 0 of 7 on
+so101-benchmark (stopped early: all timeouts). 358 of its 526 failures are \emph{no\_contact}. Executing 16 actions per
+chunk instead of 32 does not help (held\_out 4 vs 3, clean\_many 2 vs 9, $p=0.039$ worse).
+
+To separate the model from the data bridge we score its predicted chunk open-loop on 60 held-out demo frames, each fed
+the 7 frames before it (FLUX conditions on 8). Table~\ref{tab:openloop} and Figure~\ref{fig:openloop}: the LoRA predicts
+the demo's actions three times better than holding the pose at 32 steps ahead; zero-shot FLUX is no better than standing
+still. The bridge sits inside this loop both ways. The closed-loop failure is therefore execution, not the mapping.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{rrrr}\toprule
+Steps ahead & Fair LoRA & Zero-shot FLUX & Hold pose\\\midrule
+1 & 0.23 & 0.37 & 0.53\\ 8 & 1.08 & 2.26 & 2.47\\ 16 & 1.75 & 4.34 & 4.66\\ 32 & \textbf{2.71} & 8.19 & 8.24\\\bottomrule
+\end{tabular}
+\caption{Open-loop mean $|$action error$|$ (LeRobot joint units) on held-out demo frames.}\label{tab:openloop}
+\end{table}
+
+\begin{figure}[h]\centering
+\includegraphics[width=0.48\linewidth]{figures/openloop_horizons_flux3-lora-v4c.pdf}\hfill
+\includegraphics[width=0.48\linewidth]{figures/openloop_horizons_flux3-zeroshot.pdf}
+\caption{Open-loop error against horizon: fair LoRA (left) and zero-shot FLUX (right), each beside holding the pose.}
+\label{fig:openloop}
+\end{figure}
+
+\subsection{Other experiments}
+\begin{itemize}\itemsep0pt
+\item \textbf{Failure labels} (576 v5 rehearsals): no\_contact 41\%, pushed 25\%, dropped 17\% of failures.
+\item \textbf{Targeted demos (v6)}: recoveries after staged mistakes plus lookalike decoys; within noise of v5 on every
+suite.
+\item \textbf{External benchmark gap}: v5 scores 0/50 on so101-benchmark; the joint mapping and front camera match, the
+wrist-camera mount and table texture do not.
+\item \textbf{Visual domain randomisation (v7)}: the Seeed wrist mount alone drops v5 from 81 to 15 on clean\_many's scenes;
+v7 lifts that to 53 but regresses clean\_many itself to 58, and scores 1/50 externally. Not promoted.
+\item \textbf{RL expert} (to replace the scripted expert): plain PPO on privileged state reached 1\% held-out recovery
+against the scripted expert's 40\% by 4.4M steps and was stopped; the reward paid hovering more than stacking.
+Potential-based shaping and a residual policy on the expert are running.
+\end{itemize}
+
+\section{What is not established}
+\begin{itemize}\itemsep0pt
+\item \textbf{Nothing has run on the physical arm.} Every number is from the MuJoCo twin.
+\item \textbf{Generalisation to new objects is not improved.} held\_out\_objects stays at 47--52 across all promoted and
+unpromoted candidates.
+\item \textbf{Round 2's gain is mostly one suite.} Only real\_1\_pomade\_tin is significant on its own; the other five are
+better but within noise. The pooled gain passed a gate fixed in advance.
+\item \textbf{The FLUX failure mechanism is a hypothesis.} Conditioning on its own 8-frame history and integrating deltas
+fits the slow-start, no-contact pattern, but has not been tested by retraining.
+\item \textbf{so101-benchmark remains 0--1 of 50} for every policy; the external gap is open.
+\item \textbf{Single seed} for every benchmark (seed 42); no checkpoint was trained twice.
+\end{itemize}
+
+\section{Next}
+DAgger round~3 from the promoted policy; best-of-8 action-chunk consensus at test time; co-training with 400 real
+ArmnetBench SO-101 demos of new objects (23\% of samples), plus 515 successful real rollouts as an ablation; and an RL
+expert that can recover dropped and held blocks. Code, PRs and runs: \url{\repo}, W\&B project \texttt{chaleong/preflight}.
+
+\end{document}
