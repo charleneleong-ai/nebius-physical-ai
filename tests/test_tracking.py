@@ -164,6 +164,47 @@ class TestLogPreflight:
             raise RuntimeError("GR00T did not answer")
         assert tracker_run(run.created).exit_code == 1
 
+    def test_a_run_can_be_put_in_a_group(self, run: Any) -> None:
+        with tracking.Tracker("benchmark", name="v4a", group="v4a"):
+            pass
+        assert tracker_run(run.created).init["group"] == "v4a"
+
+    def test_a_benchmark_cell_logs_its_score_and_its_rollout_videos(self, run: Any) -> None:
+        from nebius_physical_ai.benchmark import Cell
+
+        frames = [np.full((24, 32, 3), 40 * i, np.uint8) for i in range(3)]
+        cell = Cell("clean", "legacy", 29, 96, 1, 5.0, [29], examples={"failure": ("clean | failure", frames)})
+        with tracking.Tracker("benchmark") as tracker:
+            tracker.log_cell(cell, step=1)
+        fake = tracker_run(run.created)
+        assert fake.find("p/clean") == pytest.approx(29 / 96) and fake.find("successes/clean") == 29
+        assert fake.find("ci_lo/clean") < fake.find("p/clean") < fake.find("ci_hi/clean")
+        assert fake.find("video/clean_failure").data.shape == (3, 3, 24, 32)  # (T, C, H, W)
+        assert fake.find("video/clean_failure").caption == "clean | failure"
+        assert fake.find("media/clean_start").caption == "clean | failure"  # the first frame, as a still
+
+    def test_a_cell_without_rollouts_logs_scores_only(self, run: Any) -> None:
+        from nebius_physical_ai.benchmark import Cell
+
+        with tracking.Tracker("benchmark") as tracker:
+            tracker.log_cell(Cell("clean", "legacy", 29, 96, 1, 5.0), step=2)
+        assert tracker_run(run.created).keys() == {
+            "suite_index",
+            "p/clean",
+            "ci_lo/clean",
+            "ci_hi/clean",
+            "successes/clean",
+        }
+
+    def test_rollouts_of_a_job_without_per_scene_logs_become_named_videos(self, run: Any) -> None:
+        frames = [np.zeros((24, 32, 3), np.uint8)] * 2
+        with tracking.Tracker("eval") as tracker:
+            tracker.log_rollouts({"success": frames, "failure": frames}, "v4a")
+        fake = tracker_run(run.created)
+        assert (
+            fake.keys() == {"video/success", "video/failure"} and fake.find("video/failure").caption == "v4a | failure"
+        )
+
     def test_disabled_tracking_asks_wandb_for_a_disabled_run(self, run: Any) -> None:
         with tracking.Tracker("preflight", enabled=False):
             pass

@@ -119,7 +119,7 @@ class TestPoseCameras:
 
 class TestParseCameraMix:
     def test_three_shares_summing_to_one(self) -> None:
-        assert parse_camera_mix("0.6,0.3,0.1") == (0.6, 0.3, 0.1) == DEFAULT_CAMERA_MIX
+        assert parse_camera_mix("0.3,0.6,0.1") == (0.3, 0.6, 0.1) == DEFAULT_CAMERA_MIX
         assert parse_camera_mix(" 1, 0, 0 ") == (1.0, 0.0, 0.0)
 
     @pytest.mark.parametrize("text", ["0.5,0.5", "0.6,0.3,0.2", "0.5,0.4,0.05", "a,b,c", "-0.1,0.6,0.5", ""])

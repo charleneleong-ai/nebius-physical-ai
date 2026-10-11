@@ -1,10 +1,12 @@
-"""Fine-tune GR00T on twin demos recorded around the real camera.
+"""Fine-tune GR00T on role-agnostic twin demos recorded around the real camera.
 
-The default recipe is v4: 800 episodes, cameras drawn 60% around the calibrated pose, 30% from a wide arc over the
-mat and 10% straight down, starting from the latest checkpoint.
+The default recipe is v4: 800 episodes, 4,000 steps, starting from the latest checkpoint. Cameras are drawn 30% around
+the calibrated pose, 60% from a wide arc over the mat and 10% straight down (a hedge until the mount is re-recorded).
+Each episode is told what to pick and where to put it in its own words (`Pick green can and place on red box`); a quarter
+keep the original blue and red cubes and prompt. The held-out colours and real objects never appear (see twin/roles.py).
 
-    uv run python scripts/finetune.py run v4              # record demos, build stats, fine-tune
-    uv run python scripts/finetune.py run v4 --dry-run    # print the steps without running them
+    uv run python scripts/finetune.py run v4a             # record demos, build stats, fine-tune
+    uv run python scripts/finetune.py run v4a --dry-run   # print the steps without running them
     uv run python scripts/finetune.py preview             # sample frames of what the policy will see
     uv run python scripts/finetune.py serve CHECKPOINT --port 5558   # serve a checkpoint to the rehearsal
 
@@ -12,6 +14,7 @@ Runs on the A100 from the repo root. Needs ~/Isaac-GR00T on branch n1d6 (>= 9b37
 saved every --save-steps and the last --save-total-limit are kept; each is about 22 GB.
 """
 
+import json
 import os
 import shlex
 import shutil
@@ -23,21 +26,29 @@ from typing import Annotated
 import typer
 
 from nebius_physical_ai.capture.camera import DEFAULT_CAMERA_MIX, parse_camera_mix
+from nebius_physical_ai.policy.gr00t import LAYOUTS
+from nebius_physical_ai.twin.dataset import modality
 
 REPO = Path(__file__).resolve().parent.parent
 HOME = Path.home()
-LATEST = HOME / "checkpoints/gr00t-preflight-v3-restart3/checkpoint-2000"  # the latest fine-tune
+LATEST = HOME / "checkpoints/gr00t-preflight-v4c/checkpoint-4000"  # newest Isaac-GR00T fine-tune: the base for `run`
+# The served default since 2026-10-07: hqfang/groot-so100_101 fine-tuned with LeRobot (beats v4c on every suite,
+# held-out 57% vs 25%). Serve it with scripts/lerobot_policy_server.py; `serve` here runs Isaac-GR00T checkpoints.
+SERVED = HOME / "checkpoints/gr00t-preflight-v5/checkpoints/012000/pretrained_model"
 BASE_MULTITASK = HOME / "checkpoints/gr00t-n1.6-so101-multitask"  # the community SO-101 checkpoint v1 to v3 began from
 MIX_TEXT = ",".join(str(share) for share in DEFAULT_CAMERA_MIX)
 # Run in GR00T's own environment: relative-action statistics need the SO-100 modality config registered first.
 REL_STATS = """
+import importlib.util
 import sys
-sys.path.insert(0, "examples/SO100")
-import so100_config  # noqa: F401 - registers the NEW_EMBODIMENT modality config
+spec = importlib.util.spec_from_file_location("modality_config", sys.argv[2])
+spec.loader.exec_module(importlib.util.module_from_spec(spec))  # registers the NEW_EMBODIMENT modality config
 from gr00t.data.embodiment_tags import EmbodimentTag
 from gr00t.data.stats import generate_rel_stats
 generate_rel_stats(sys.argv[1], EmbodimentTag.NEW_EMBODIMENT)
 """
+STOCK_MODALITY_CONFIG = "examples/SO100/so100_config.py"  # relative to the GR00T checkout
+SPLIT_MODALITY_CONFIG = REPO / "scripts/modality_configs/so101_split.py"
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -61,14 +72,18 @@ class Step:
 class Recipe:
     name: str
     episodes: int = 800
-    max_steps: int = 8000
+    max_steps: int = 4000
     base: Path = LATEST
     camera: Path = REPO / "configs/front_camera.json"
     camera_mix: tuple[float, float, float] = DEFAULT_CAMERA_MIX
     real_objects: Path = REPO / "data/capture/real_objects.json"
-    seed: int = 1
+    role_agnostic: bool = True
+    original_share: float = 0.25  # share of role-agnostic episodes that keep the blue and red cubes and their prompt
+    layout: str = "stock"  # joint layout: stock (5 arm joints + gripper) or split (wrist roll in its own block)
+    seed: int = 42
     save_steps: int = 2000
     save_total_limit: int = 2
+    save_only_model: bool = False  # checkpoints without optimizer state: about a third the size, not resumable
     batch_size: int = 32
     learning_rate: float = 1e-4
     gr00t_dir: Path = HOME / "Isaac-GR00T"
@@ -89,13 +104,35 @@ class Recipe:
         return str(self.gr00t_dir / ".venv/bin/python")
 
     @property
+    def modality_config(self) -> str:
+        """The GR00T modality config for this layout (the stock one is relative to the GR00T checkout)."""
+        return str(SPLIT_MODALITY_CONFIG) if self.layout == "split" else STOCK_MODALITY_CONFIG
+
+    @property
     def uses_pose(self) -> bool:
         """Whether any episode takes its camera from the calibrated pose (the first share of the mix)."""
         return self.camera_mix[0] > 0
 
+    def layout_problems(self, record: bool) -> list[str]:
+        """An unknown layout, or a reused dataset whose modality.json groups the joints another way."""
+        if self.layout not in LAYOUTS:
+            return [f"--layout must be one of {sorted(LAYOUTS)}, got {self.layout!r}"]
+        declared = self.data_dir / "meta/modality.json"
+        if record or not declared.exists():
+            return []
+        blocks = tuple(json.loads(declared.read_text()).get("action", {}))
+        if blocks == LAYOUTS[self.layout].keys:
+            return []
+        wanted = list(LAYOUTS[self.layout].keys)
+        message = (
+            f"{declared} splits the joints as {list(blocks)} but --layout {self.layout} trains on {wanted}: "
+            f"relink the dataset with --layout {self.layout}"
+        )
+        return [message]
+
     def problems(self, record: bool = True, force: bool = False) -> list[str]:
         """Everything that would stop the run, so it fails before recording for an hour, not after."""
-        found = []
+        found = self.layout_problems(record)
         if record and self.episodes < 1:
             found.append(f"--episodes must be at least 1, got {self.episodes}")
         if self.max_steps < 1 or self.save_steps < 1 or self.save_steps > self.max_steps:
@@ -118,9 +155,16 @@ class Recipe:
         argv = (
             ("uv", "run", "npai", "demos", str(self.data_dir), "--episodes", str(self.episodes))
             + ("--seed", str(self.seed), "--randomize", "--real-objects", str(self.real_objects))
+            + (("--role-agnostic", "--original-share", str(self.original_share)) if self.role_agnostic else ())
+            + (("--layout", self.layout) if self.layout != "stock" else ())
             + (camera if self.uses_pose else ())
         )
         return Step("record demos", argv, REPO, {"MUJOCO_GL": "egl"})
+
+    def log_demos_step(self) -> Step:
+        """Sample demo videos and prompts to W&B, in this run's group. A W&B hiccup must never stop the training."""
+        argv = ("uv", "run", "python", "scripts/log_demos.py", str(self.data_dir), "--name", self.name)
+        return Step("log demos", argv, REPO, allow_failure=True)
 
     def stats_steps(self) -> list[Step]:
         data = str(self.data_dir)
@@ -128,23 +172,33 @@ class Recipe:
         # The first call can fail until the modality config is registered; the relative stats step fixes that.
         return [
             Step("dataset stats", stats, self.gr00t_dir, allow_failure=True),
-            Step("relative stats", (self.python, "-c", REL_STATS, data), self.gr00t_dir),
+            Step("relative stats", (self.python, "-c", REL_STATS, data, self.modality_config), self.gr00t_dir),
         ]
 
     def train_step(self) -> Step:
         argv = (
             (self.python, "gr00t/experiment/launch_finetune.py")
             + ("--base-model-path", str(self.base), "--dataset-path", str(self.data_dir))
-            + ("--modality-config-path", "examples/SO100/so100_config.py", "--embodiment-tag", "NEW_EMBODIMENT")
+            + ("--modality-config-path", self.modality_config, "--embodiment-tag", "NEW_EMBODIMENT")
             + ("--num-gpus", "1", "--output-dir", str(self.out_dir), "--max-steps", str(self.max_steps))
             + ("--save-steps", str(self.save_steps), "--save-total-limit", str(self.save_total_limit))
+            + (("--save-only-model",) if self.save_only_model else ())
             + ("--global-batch-size", str(self.batch_size), "--dataloader-num-workers", "8")
             + ("--learning-rate", str(self.learning_rate), "--use-wandb", "--wandb-project", self.wandb_project)
         )
         return Step("fine-tune", argv, self.gr00t_dir, {"WANDB_RUN_GROUP": self.name})
 
     def steps(self, record: bool = True) -> list[Step]:
-        return [*([self.record_step()] if record else []), *self.stats_steps(), self.train_step()]
+        """Record (unless the dataset exists), log the demos to W&B in this run's group, statistics, train.
+
+        The demos are logged for a reused dataset too: the trainer itself only writes scalars, so without this the
+        run's group would have no videos."""
+        return [
+            *([self.record_step()] if record else []),
+            self.log_demos_step(),
+            *self.stats_steps(),
+            self.train_step(),
+        ]
 
 
 def camera_mix_option(text: str) -> tuple[float, float, float]:
@@ -161,17 +215,33 @@ RealObjectsOpt = Annotated[Path, typer.Option(help="Real objects placed as distr
 
 @app.command()
 def run(
-    name: Annotated[str, typer.Argument(help="Run name, e.g. v4: names the dataset and the checkpoint folder")],
+    name: Annotated[str, typer.Argument(help="Run name, e.g. v4a: names the dataset and the checkpoint folder")],
     episodes: int = 800,
-    max_steps: int = 8000,
+    max_steps: int = 4000,
     base: Annotated[Path, typer.Option(help="Checkpoint to start from (default: the latest fine-tune)")] = LATEST,
     camera: CameraOpt = REPO / "configs/front_camera.json",
     camera_mix: MixOpt = MIX_TEXT,
     real_objects: RealObjectsOpt = REPO / "data/capture/real_objects.json",
-    seed: int = 1,
+    role_agnostic: Annotated[
+        bool, typer.Option(help="Name the objects by their looks, one prompt per episode (off: blue and red only)")
+    ] = True,
+    original_share: Annotated[
+        float, typer.Option(min=0.0, max=1.0, help="Share of episodes that keep the blue and red cubes and prompt")
+    ] = 0.25,
+    learning_rate: Annotated[
+        float, typer.Option(help="Peak learning rate; lower it to forget less of the base")
+    ] = 1e-4,
+    layout: Annotated[
+        str, typer.Option(help="Joint layout: stock (5 arm joints + gripper) or split (wrist roll in its own block)")
+    ] = "stock",
+    seed: int = 42,
     save_steps: int = 2000,
     save_total_limit: int = 2,
-    gr00t_dir: Annotated[Path, typer.Option(help="Isaac-GR00T checkout (branch n1d6)")] = HOME / "Isaac-GR00T",
+    save_only_model: Annotated[
+        bool, typer.Option(help="Save weights without optimizer state: about a third the size, not resumable")
+    ] = False,
+    gr00t_dir: Annotated[Path, typer.Option(help="Isaac-GR00T checkout (n1d6 for N1.6, main for N1.7)")] = HOME
+    / "Isaac-GR00T",
     data_root: Path = HOME / "data",
     checkpoint_root: Path = HOME / "checkpoints",
     skip_demos: Annotated[bool, typer.Option(help="Reuse the dataset already recorded under this name")] = False,
@@ -187,9 +257,14 @@ def run(
         camera=camera,
         camera_mix=camera_mix_option(camera_mix),
         real_objects=real_objects,
+        role_agnostic=role_agnostic,
+        original_share=original_share,
+        learning_rate=learning_rate,
+        layout=layout,
         seed=seed,
         save_steps=save_steps,
         save_total_limit=save_total_limit,
+        save_only_model=save_only_model,
         gr00t_dir=gr00t_dir,
         data_root=data_root,
         checkpoint_root=checkpoint_root,
@@ -216,6 +291,42 @@ def run(
         print(f"FINETUNE_DONE {recipe.out_dir}/checkpoint-{recipe.max_steps}")
 
 
+@app.command("link-dataset")
+def link_dataset(
+    source: Annotated[Path, typer.Argument(help="A dataset recorded by `npai demos`")],
+    dest: Annotated[Path, typer.Argument(help="Where the linked copy goes")],
+    force: Annotated[bool, typer.Option(help="Replace an existing linked copy (never touches the source)")] = False,
+    layout: Annotated[
+        str | None, typer.Option(help="Rewrite the copy's modality.json for this joint layout (stock or split)")
+    ] = None,
+) -> None:
+    """A second view of a recorded dataset for another GR00T version: its episodes and videos are linked, not copied,
+    and its meta/ is copied, so that version can rewrite the statistics (and, with --layout, regroup the joints)
+    without touching the original."""
+    if layout is not None and layout not in LAYOUTS:
+        raise typer.BadParameter(f"--layout must be one of {sorted(LAYOUTS)}, got {layout!r}")
+    if not (source / "meta/episodes.jsonl").exists():
+        raise typer.BadParameter(f"{source} is not a recorded dataset (no meta/episodes.jsonl)")
+    if dest.exists() or dest.is_symlink():
+        if not force:
+            raise typer.BadParameter(f"{dest} already exists: choose another name or pass --force")
+        src, old = source.resolve(), dest.resolve()
+        if old == src or old.is_relative_to(src) or src.is_relative_to(old):
+            raise typer.BadParameter(f"{dest} is, holds or sits inside the source dataset itself")
+        if dest.is_symlink():
+            dest.unlink()  # replace the link, never the directory it points at
+        else:
+            shutil.rmtree(dest)  # a previous linked copy: removes its links, not what they point at
+    dest.mkdir(parents=True)
+    for name in ("data", "videos"):
+        (dest / name).symlink_to((source / name).resolve(), target_is_directory=True)
+    shutil.copytree(source / "meta", dest / "meta")
+    if layout is not None:
+        (dest / "meta/modality.json").write_text(json.dumps(modality(layout), indent=4))
+    regrouped = f", joints grouped as {list(LAYOUTS[layout].keys)}" if layout else ""
+    print(f"{dest}: data and videos linked to {source}, meta copied{regrouped}")
+
+
 @app.command()
 def preview(
     n: Annotated[int, typer.Option(min=1, help="Frames to render")] = 12,
@@ -223,10 +334,11 @@ def preview(
     camera: CameraOpt = REPO / "configs/front_camera.json",
     camera_mix: MixOpt = MIX_TEXT,
     real_objects: RealObjectsOpt = REPO / "data/capture/real_objects.json",
+    role_agnostic: Annotated[bool, typer.Option(help="Draw role-agnostic episodes, as the recipe does")] = True,
     out: Path = Path("/tmp/finetune_preview.jpg"),
 ) -> None:
     """Render what the policy will see (twin frames from the camera mix) to check, say, that the arm does not hide
-    the blocks from the calibrated view. Each tile is labelled with its camera source."""
+    the blocks from the calibrated view. Each tile is labelled with its camera source and the episode's prompt."""
     import cv2
     import numpy as np
 
@@ -235,13 +347,14 @@ def preview(
     from nebius_physical_ai.twin.scene import Twin, TwinLayout
 
     sampler = SceneSampler(TwinLayout(), seed=seed)
-    randomizer = build_randomizer(sampler, seed, real_objects, camera, camera_mix)
+    randomizer = build_randomizer(sampler, seed, real_objects, camera, camera_mix, role_agnostic)
     tiles = []
     for _ in range(n):
-        objects, look = randomizer.objects(sampler), randomizer.look()
-        with Twin.from_objects(objects, sampler.layout, start_pose=sampler.start_pose(), look=look) as twin:
+        episode, look = randomizer.episode(sampler), randomizer.look()
+        with Twin.from_objects(episode.objects, sampler.layout, start_pose=sampler.start_pose(), look=look) as twin:
             tile = np.ascontiguousarray(twin.render("front_cam", (240, 320)))
         cv2.putText(tile, randomizer.last_camera_source, (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 40, 40), 2)
+        cv2.putText(tile, episode.prompt[:44], (8, 228), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 40, 40), 1)
         tiles.append(tile)
     columns = min(4, n)
     tiles += [np.zeros_like(tiles[0])] * (-len(tiles) % columns)

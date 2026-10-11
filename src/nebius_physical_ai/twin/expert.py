@@ -126,7 +126,7 @@ class SceneSampler:
     def __init__(
         self,
         layout: TwinLayout,
-        seed: int = 0,
+        seed: int | list[int] = 0,
         min_gap_mm: float = 60.0,
         reach_mm: tuple[float, float] = (160.0, 220.0),
         half_width_mm: float = 90.0,

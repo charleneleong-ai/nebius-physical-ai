@@ -18,13 +18,13 @@ from nebius_physical_ai.capture.markers import DPI, render_marker_sheet
 from nebius_physical_ai.capture.mat import ARUCO_DICT, DetectedObject, MatSpec, ScenePerceiver
 from nebius_physical_ai.capture.server import create_app
 from nebius_physical_ai.pipeline import add_pipeline_cli
-from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, Gr00tClient
+from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, LAYOUTS, Gr00tClient
 from nebius_physical_ai.tracking import Tracker
 from nebius_physical_ai.trust.plots import StressPlots
 from nebius_physical_ai.trust.stress import StressCase, StressReport
 from nebius_physical_ai.twin.dataset import LeRobotWriter
 from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler, UnreachableTarget
-from nebius_physical_ai.twin.randomize import SceneRandomizer
+from nebius_physical_ai.twin.randomize import Episode, Randomization, SceneRandomizer
 from nebius_physical_ai.twin.rehearsal import Rehearsal, SceneRun
 from nebius_physical_ai.twin.rollout import STACK_TASK, BatchRollout, RolloutResult, StackCheck
 from nebius_physical_ai.twin.scene import A3_MAT, RENDER_ASPECT, Twin, TwinLayout
@@ -76,16 +76,33 @@ def serve(
 
 
 def build_randomizer(
-    sampler: SceneSampler, seed: int, real_objects: Path | None, camera: Path | None, camera_mix: str
+    sampler: SceneSampler,
+    seed: int,
+    real_objects: Path | None,
+    camera: Path | None,
+    camera_mix: str,
+    role_agnostic: bool = False,
+    original_share: float | None = None,
 ) -> SceneRandomizer:
-    """The demo randomiser: real objects as distractors, and cameras centred on a calibrated pose when one is given."""
+    """The demo randomiser: real objects as distractors, and cameras centred on a calibrated pose when one is given.
+
+    Role-agnostic episodes name the objects by their looks and never use the held-out colours or real objects."""
     real = [DetectedObject(**o) for o in json.loads(real_objects.read_text())] if real_objects else None
     try:
         mix = parse_camera_mix(camera_mix)
     except ValueError as err:
         raise typer.BadParameter(str(err)) from err
     pose = CameraPose.load(camera) if camera else None
-    return SceneRandomizer(sampler.layout, seed=seed, real_objects=real, camera_pose=pose, camera_mix=mix)
+    ranges = None if original_share is None else Randomization(original_share=original_share)
+    return SceneRandomizer(
+        sampler.layout,
+        seed=seed,
+        ranges=ranges,
+        real_objects=real,
+        camera_pose=pose,
+        camera_mix=mix,
+        role_agnostic=role_agnostic,
+    )
 
 
 @app.command()
@@ -108,35 +125,64 @@ def demos(
         str,
         typer.Option(help="With --camera, shares of pose-centred, wide-arc and straight-down cameras (sum 1)"),
     ] = ",".join(str(share) for share in DEFAULT_CAMERA_MIX),
+    role_agnostic: Annotated[
+        bool,
+        typer.Option(
+            help="Name the pick and place objects by their looks, with a prompt per episode (needs --randomize)"
+        ),
+    ] = False,
+    original_share: Annotated[
+        float,
+        typer.Option(
+            min=0.0, max=1.0, help="With --role-agnostic, the share of episodes keeping the blue and red prompt"
+        ),
+    ] = 0.25,
+    layout: Annotated[
+        str,
+        typer.Option(help="Joint layout in modality.json: stock (5 arm joints + gripper) or split (wrist roll apart)"),
+    ] = "stock",
     width_mm: WidthOpt = A3_MAT.width_mm,
     height_mm: HeightOpt = A3_MAT.height_mm,
 ) -> None:
-    """Record scripted pick-and-place demos in the twin as a LeRobot v2.1 dataset (successes only)."""
-    if camera and not randomize:
-        raise typer.BadParameter("--camera needs --randomize: only randomized episodes vary their camera")
+    """Record scripted pick-and-place demos in the twin as a LeRobot v2.1 dataset (successes only).
+
+    With --role-agnostic each episode is told what to pick and where to put it in its own words (`Pick green can and
+    place on red box`), and a quarter keep the original blue and red cubes and prompt."""
+    if (camera or role_agnostic) and not randomize:
+        raise typer.BadParameter("--camera and --role-agnostic need --randomize: only randomized episodes vary")
     sampler = SceneSampler(TwinLayout(MatSpec(width_mm, height_mm)), seed=seed)
-    randomizer = build_randomizer(sampler, seed, real_objects, camera, camera_mix) if randomize else None
-    writer, attempts = LeRobotWriter(out), 0
+    randomizer = (
+        build_randomizer(sampler, seed, real_objects, camera, camera_mix, role_agnostic, original_share)
+        if randomize
+        else None
+    )
+    if layout not in LAYOUTS:
+        raise typer.BadParameter(f"--layout must be one of {sorted(LAYOUTS)}, got {layout!r}")
+    writer, attempts = LeRobotWriter(out, layout=layout), 0
     for _ in track(range(episodes), description="recording demos"):
         while True:
             attempts += 1
             if attempts > MAX_ATTEMPTS_PER_EPISODE * episodes:
                 raise RuntimeError(f"expert solved only {len(writer.episodes)} of {attempts} scenes; check the ranges")
-            objects = randomizer.objects(sampler) if randomizer else sampler.sample()
+            episode = (
+                randomizer.episode(sampler, task) if randomizer else Episode(sampler.sample(), "blue", "red", task)
+            )
             look = randomizer.look() if randomizer else None
             start = sampler.start_pose()
-            with Twin.from_objects(objects, sampler.layout, start_pose=start, look=look) as twin:
+            with Twin.from_objects(episode.objects, sampler.layout, start_pose=start, look=look) as twin:
                 try:
-                    frames = list(PickPlaceExpert(twin, task).run())
+                    frames = list(PickPlaceExpert(twin, episode.prompt, episode.pick, episode.place).run())
                 except UnreachableTarget:  # draw another scene
                     continue
                 twin.settle(0.5)
-                stacked = StackCheck()(twin)
+                stacked = StackCheck(episode.pick, episode.place)(twin)
             if stacked:
-                writer.add_episode(frames, task)
+                writer.add_episode(frames, episode.prompt)
                 break
     writer.finalize()
     print(f"wrote {episodes} episodes ({writer.total_frames} frames) to {out}; expert success {episodes}/{attempts}")
+    if role_agnostic:
+        print(f"{len(writer.tasks)} distinct prompts, e.g. {writer.tasks[:3]}")
     if randomizer and randomizer.camera_pose:
         print(f"cameras (pose, arc, top_down) over every attempt: {dict(randomizer.camera_counts)}")
 
@@ -206,13 +252,16 @@ def stress(
     port: int = DEFAULT_PORT,
     task: str = STACK_TASK,
     wandb_log: Annotated[bool, typer.Option("--wandb/--no-wandb")] = True,
+    name: Annotated[str | None, typer.Option(help="W&B run name, e.g. the checkpoint (stress-v5)")] = None,
+    group: Annotated[str | None, typer.Option(help="W&B group: the checkpoint's runs together")] = None,
 ) -> None:
     """Sim-to-sim calibration test: rehearse the perceived scene, then score it on k attempts in a hidden world."""
     layout = TwinLayout()
     samplers = [SceneSampler(layout, seed=3024), SceneSampler.hard(layout, seed=3025)]
     cases: list[StressCase] = []
     config = {"scenes": scenes, "n": n, "k": k, "batch_size": batch_size, "task": task}
-    with Tracker("stress", config=config, enabled=wandb_log) as tracker, Gr00tClient(port=port) as client:
+    tracking = {"config": config, "enabled": wandb_log, "name": name, "group": group}
+    with Tracker("stress", **tracking) as tracker, Gr00tClient(port=port) as client:
         rehearsal = Rehearsal(client, task, StackCheck(), layout, batch_size=batch_size)
         for i in range(scenes):
             case = StressCase.run(rehearsal, i, samplers[i % 2].sample(), n, k, seed=i, hard=bool(i % 2))
@@ -279,6 +328,7 @@ def evaluate(
     sampler = SceneSampler(layout, seed=seed)
     episodes = [(sampler.sample(), sampler.start_pose()) for _ in range(scenes)]
     results: list[RolloutResult] = []
+    examples: dict[str, list[np.ndarray]] = {}  # the first success and first failure, as rollout frames
     successes = 0
     config = {"scenes": scenes, "seed": seed, "max_steps": max_steps, "port": port, "task": task, "camera": str(camera)}
     with Tracker("eval", name=name, config=config, enabled=wandb_log) as tracker, Gr00tClient(port=port) as client:
@@ -286,7 +336,11 @@ def evaluate(
             with ExitStack() as stack:
                 batch = episodes[start : start + batch_size]
                 twins = [stack.enter_context(Twin.from_objects(o, layout, start_pose=p)) for o, p in batch]
-                results += BatchRollout(twins, client, task).run(StackCheck(), max_steps)
+                batch_results = BatchRollout(twins, client, task, record=wandb_log).run(StackCheck(), max_steps)
+            for r in batch_results:  # keep two rollouts, not one per episode
+                examples.setdefault("success" if r.success else "failure", r.frames)
+                r.frames = []
+            results += batch_results
             successes = sum(r.success for r in results)
             print(f"{len(results)}/{scenes}: {successes} successes")
         rows = [[i, r.success, r.steps] for i, r in enumerate(results)]
@@ -294,6 +348,8 @@ def evaluate(
             {"success_rate": successes / scenes, "successes": successes, "n": scenes},
             {"episodes": (["scene", "success", "steps"], rows)},
         )
+        if wandb_log and (shown := {k: f for k, f in examples.items() if f}):
+            tracker.log_rollouts(shown, name)
     print(f"{name}: {successes}/{scenes} successes")
 
 
