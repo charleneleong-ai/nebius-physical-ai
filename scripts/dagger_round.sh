@@ -21,7 +21,7 @@ STATE=logs/dagger/state.env
 . "$STATE" || { echo "write $STATE first (POLICY, DATA, REF_BENCH, ROUND=0)"; exit 1; }
 LR=~/lerobot-n17/.venv/bin
 VLM=$HOME/checkpoints/hqfang-groot-so100_101/vlm_processor
-STAGE=${STAGE:-harvest}  # harvest | aggregate | train: resume a failed round from that stage
+STAGE=${STAGE:-harvest}  # harvest | aggregate | train | bench: resume a failed round from that stage
 SCENES=${SCENES:-200} VARIANTS=${VARIANTS:-4} BUDGET=${BUDGET:-300} BAND=${BAND:-0.05,0.8}
 PARTS=${PARTS:-8} STEPS=${STEPS:-4000} LEARNING_RATE=${LEARNING_RATE:-1e-5}
 # With BASE set, training sees the base demos plus UPWEIGHT copies of all recoveries, so a few dozen recoveries are not
@@ -66,7 +66,7 @@ if [ "$STAGE" = harvest ]; then
 
 fi  # STAGE=harvest
 
-if [ "$STAGE" != train ]; then
+if [ "$STAGE" = harvest ] || [ "$STAGE" = aggregate ]; then
 say "aggregating into $NEXT_DATA"
 for k in $(seq 0 $((PARTS - 1))); do
   grep -q '"codebase_version": "v3.0"' "$RAW/part_$k/meta/info.json" && continue  # converted by an earlier attempt
@@ -109,8 +109,9 @@ else:  # recoveries kept apart and upweighted against the base demos
 print(f"aggregate: {merged.meta.total_episodes} episodes, {merged.meta.total_frames} frames")
 PY
 rm -rf "$RAW"
-fi  # STAGE!=train
+fi  # STAGE=harvest|aggregate
 
+if [ "$STAGE" != bench ]; then
 until eval "$TRAIN_WHEN"; do sleep 120; done
 # The final save writes about 12 GB of weights plus up to 36 GB of optimizer state before it is pruned.
 free_gb=$(df --output=avail -BG "$HOME" | tail -1 | tr -dc 0-9)
@@ -129,6 +130,7 @@ ln -sfn "$VLM" "$POLICY/vlm_processor"
   --wandb.notes="DAgger round $R: $POLICY fine-tuned $STEPS steps (lr $LEARNING_RATE, cosine) on the aggregate plus the expert's recoveries from its own failure states on $SCENES fresh training scenes. Promoted only past benchmark.py gate against $REF_BENCH." \
   > "$DIR/train.log" 2>&1) || { say "training failed; see $DIR/train.log"; exit 1; }
 find "$CAND" -name training_state -type d -exec rm -rf {} + 2>/dev/null
+fi  # STAGE!=bench
 NEW=$CAND/checkpoints/$(printf %06d "$STEPS")/pretrained_model
 
 say "benchmarking the candidate"
