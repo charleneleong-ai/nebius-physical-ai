@@ -1,0 +1,81 @@
+flowchart LR
+    %% Closed-loop online-learning architecture for the SO-101.
+
+    subgraph ROBOT[Physical SO-101]
+        CAM[Scene + wrist cameras]
+        STATE[Joint state, gripper state, force/current signals]
+        ACT[Short action chunk]
+        OUT[Observed outcome]
+        CAM --> OBS
+        STATE --> OBS
+        ACT --> OUT
+        OUT --> CAM
+        OUT --> STATE
+    end
+
+    OBS[Perception and state estimation\nArUco + object geometry + task state]
+    UNC[Uncertainty and trust\nperception confidence + prediction disagreement]
+
+    subgraph WM[World-model layer]
+        COSMOS[Cosmos 3 Nano\nvisual futures + scenario imagination]
+        DYNAMICS[Isaac Sim / MuJoCo\nphysics, contacts, counterfactual rollouts]
+        PRED[Predicted outcomes\nsuccess, collision, slip, reachability]
+        OBS --> COSMOS
+        OBS --> DYNAMICS
+        COSMOS --> PRED
+        DYNAMICS --> PRED
+        PRED --> UNC
+    end
+
+    subgraph CONTROL[Closed-loop control]
+        PLAN[Planner / candidate action selector]
+        POLICY[Action policy\nFLUX 3 Action or GR00T]
+        SAFE[Safety controller\nlimits, collision checks, emergency stop]
+        UNC --> PLAN
+        PRED --> PLAN
+        PLAN --> POLICY
+        POLICY --> SAFE
+    end
+
+    SAFE --> ACT
+    OBS --> POLICY
+    OUT --> OBS
+
+    subgraph LEARN[Continual-learning loop\nslow asynchronous path]
+        BUFFER[Episode and failure buffer]
+        RECOVER[Expert / teleoperation recovery]
+        DAGGER[Targeted DAgger harvesting\nuncertainty- and failure-balanced]
+        TRAIN[Candidate policy training\nreal + Isaac + validated synthetic data]
+        EVAL[Fixed internal + external benchmarks]
+        PROMOTE[Shadow deployment, promotion, rollback]
+
+        OUT --> BUFFER
+        UNC --> BUFFER
+        BUFFER --> DAGGER
+        DAGGER --> RECOVER
+        RECOVER --> TRAIN
+        TRAIN --> EVAL
+        EVAL --> PROMOTE
+        PROMOTE -. candidate policy .-> POLICY
+    end
+
+    subgraph OFFLINE[Offline data and validation]
+        REAL[Real demonstrations]
+        SIM[Isaac Sim demonstrations\nexact states and action labels]
+        SYNTH[Validated Cosmos variations\nappearance and scenario diversity]
+        REAL --> TRAIN
+        SIM --> TRAIN
+        SYNTH --> TRAIN
+        DYNAMICS -. validates .-> SYNTH
+    end
+
+    HUMAN[Human intervention\nASK_HUMAN / teleoperation]
+    UNC -->|low trust| HUMAN
+    HUMAN --> RECOVER
+
+    classDef model fill:#e8f0fe,stroke:#356ae6,color:#111
+    classDef safety fill:#fde8e8,stroke:#c0392b,color:#111
+    classDef learning fill:#e9f7ef,stroke:#248a52,color:#111
+    class COSMOS,DYNAMICS,POLICY model
+    class SAFE,UNC safety
+    class BUFFER,RECOVER,DAGGER,TRAIN,EVAL,PROMOTE learning
