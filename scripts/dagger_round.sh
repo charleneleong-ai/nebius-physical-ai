@@ -151,8 +151,8 @@ printf 'POLICY=%s\nDATA=%s\nREF_BENCH=%s\nROUND=%s\nBASE=%s\nRECOVERIES=%s\n' \
   "$POLICY" "${BASE:-$NEXT_DATA}" "$REF_BENCH" "$R" "$BASE" "${NEXT_RECOVERIES:-}" > "$STATE"
 if [ "$POLICY" = "$NEW" ]; then
   case "$OLD_POLICY" in *gr00t-preflight-dagger-r*) rm -rf "${OLD_POLICY%/checkpoints/*}" ;; esac  # superseded round
-else
-  rm -rf "$CAND"
+elif ! grep -q KEEP "$DIR/gate.txt"; then
+  rm -rf "$CAND"  # a KEEP is kept: it can win a suite without passing the pooled gate
 fi
 [[ "$OLD_DATA" == *dagger_agg_r* ]] && rm -rf "$OLD_DATA"  # the new aggregate contains it
 [[ -n "$BASE" && "$RECOVERIES" == *dagger_recoveries_r* ]] && rm -rf "$RECOVERIES"  # superseded by NEXT_RECOVERIES
