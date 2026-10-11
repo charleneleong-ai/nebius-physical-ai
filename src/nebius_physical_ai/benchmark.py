@@ -324,11 +324,17 @@ def build_suites(
 
 
 def run_suite(
-    suite: Suite, policy: Policy, layout: TwinLayout, batch_size: int = 32, record_videos: bool = False
+    suite: Suite,
+    policy: Policy,
+    layout: TwinLayout,
+    batch_size: int = 32,
+    record_videos: bool = False,
+    on_case: Callable[[str, int, int], None] | None = None,
 ) -> Cell:
     """Rehearse every case of the suite `variants` times and pool the successes.
 
-    With `record_videos` the cell also keeps the first success and the first failure as rollout frames."""
+    With `record_videos` the cell also keeps the first success and the first failure as rollout frames. `on_case` is
+    called after each case with its name, the suite's successes so far and the rehearsals so far."""
     import time
 
     start, per_case, outcomes, failures = time.time(), [], [], Counter()
@@ -345,6 +351,8 @@ def run_suite(
         result = rehearsal.run(case.objects, suite.variants, SEED)
         per_case.append(result.successes)
         outcomes += [bool(v["success"]) for v in result.variants]
+        if on_case:
+            on_case(case.name, sum(per_case), len(outcomes))
         failures.update(v["failure"] for v in result.variants if not v["success"])
         for kind, (index, frames) in result.examples.items():
             caption = f"{suite.name} | {case.name} | {kind} | variant {index} | {case.prompt}"

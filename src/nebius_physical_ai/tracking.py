@@ -73,6 +73,10 @@ class Tracker:
             logged.setdefault(f"media/{cell.suite}_start", wandb.Image(frames[0], caption=caption))
         self.run.log(logged)  # no explicit step: W&B only flushes a step's row once a higher one arrives
 
+    def log_progress(self, suite: str, successes: int, rehearsals: int) -> None:
+        """Running counts while a suite is still being scored (committed at once, so they show up mid-suite)."""
+        self.run.log({f"progress/{suite}_successes": successes, f"progress/{suite}_rehearsals": rehearsals})
+
     @staticmethod
     def video(frames: list[np.ndarray], caption: str, fps: int = 4) -> Any:
         """RGB (H, W, 3) frames as a W&B video."""
