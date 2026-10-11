@@ -85,6 +85,8 @@ def build_randomizer(
     role_agnostic: bool = False,
     original_share: float | None = None,
     lookalikes: int = 0,
+    texture_share: float = 0.0,
+    wrist_randomize: bool = False,
 ) -> SceneRandomizer:
     """The demo randomiser: real objects as distractors, and cameras centred on a calibrated pose when one is given.
 
@@ -100,6 +102,8 @@ def build_randomizer(
         defaults,
         original_share=defaults.original_share if original_share is None else original_share,
         lookalikes=(min(1, lookalikes), lookalikes),
+        texture_share=texture_share,
+        wrist_randomize=wrist_randomize,
     )
     return SceneRandomizer(
         sampler.layout,
@@ -181,6 +185,12 @@ def demos(
     lookalikes: Annotated[
         int, typer.Option(min=0, help="With --randomize, up to this many pick-sized decoys of the pick's shape")
     ] = 0,
+    texture_share: Annotated[
+        float, typer.Option(min=0.0, max=1.0, help="With --randomize, share of floors given a procedural texture")
+    ] = 0.0,
+    wrist_randomize: Annotated[
+        bool, typer.Option(help="With --randomize, draw the wrist camera between the menagerie and Seeed mounts")
+    ] = False,
     width_mm: WidthOpt = A3_MAT.width_mm,
     height_mm: HeightOpt = A3_MAT.height_mm,
 ) -> None:
@@ -188,11 +198,22 @@ def demos(
 
     With --role-agnostic each episode is told what to pick and where to put it in its own words (`Pick green can and
     place on red box`), and a quarter keep the original blue and red cubes and prompt."""
-    if (camera or role_agnostic or lookalikes) and not randomize:
-        raise typer.BadParameter("--camera, --role-agnostic and --lookalikes need --randomize")
+    if (camera or role_agnostic or lookalikes or texture_share or wrist_randomize) and not randomize:
+        raise typer.BadParameter("--camera, --role-agnostic, --lookalikes and the visual options need --randomize")
     sampler = SceneSampler(TwinLayout(MatSpec(width_mm, height_mm)), seed=seed)
     randomizer = (
-        build_randomizer(sampler, seed, real_objects, camera, camera_mix, role_agnostic, original_share, lookalikes)
+        build_randomizer(
+            sampler,
+            seed,
+            real_objects,
+            camera,
+            camera_mix,
+            role_agnostic,
+            original_share,
+            lookalikes=lookalikes,
+            texture_share=texture_share,
+            wrist_randomize=wrist_randomize,
+        )
         if randomize
         else None
     )

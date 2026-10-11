@@ -27,11 +27,12 @@ from nebius_physical_ai.capture.camera import CameraPose
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import Policy
 from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler, UnreachableTarget, start_pose
-from nebius_physical_ai.twin.randomize import Randomization, SceneRandomizer
+from nebius_physical_ai.twin.randomize import SEEED_WRIST, Randomization, SceneRandomizer
 from nebius_physical_ai.twin.rehearsal import Rehearsal, RehearsalResult
 from nebius_physical_ai.twin.roles import HELD_OUT_COLOURS, HELD_OUT_REAL, TRAIN_COLOURS
 from nebius_physical_ai.twin.rollout import STACK_TASK, StackCheck
 from nebius_physical_ai.twin.scene import SceneLook, Twin, TwinLayout
+from nebius_physical_ai.twin.textures import HELD_OUT_SEED, KINDS
 
 SEED = 42
 HEADLINE_N = 96  # rehearsals per cell: the same scene moves by about 8 of 48 between runs, so smaller cells mislead
@@ -73,6 +74,7 @@ class Case:
     place: str
     prompt: str
     camera: dict[str, Any] | None = None  # None = straight down
+    look: SceneLook | None = None  # floor texture and wrist camera; None = the plain twin
 
     def layout(self, base: TwinLayout) -> FixedCameraLayout:
         return FixedCameraLayout(base.mat, base.base_offset_mm, base.front_camera, self.camera)
@@ -304,6 +306,28 @@ def diagnostic_suites(layout: TwinLayout, real: list[DetectedObject] | None = No
     return suites
 
 
+def appearance_suites(layout: TwinLayout) -> list[Suite]:
+    """`clean_many`'s scenes seen differently, so a checkpoint's score on them against `clean_many` (paired, scene by
+    scene) isolates what appearance alone costs: on floors textured from held-out seeds (wood, fabric and checker in
+    turn), and through the Seeed wrist mount so101-benchmark uses instead of the menagerie one."""
+    clean = next(s for s in diagnostic_suites(layout) if s.name == "clean_many")
+
+    def seen(name: str, look: Callable[[int], SceneLook], note: str) -> Suite:
+        cases = [replace(c, name=f"{name}_{i}", look=look(i)) for i, c in enumerate(clean.cases)]
+        return Suite(name, "appearance", cases, note, clean.rejected)
+
+    def textured(i: int) -> SceneLook:
+        return SceneLook(floor_texture=f"{KINDS[i % len(KINDS)]}:{HELD_OUT_SEED + i}")
+
+    def seeed(_: int) -> SceneLook:
+        return SceneLook(wrist_camera=SEEED_WRIST)
+
+    return [
+        seen("clean_many_textured", textured, "clean_many on held-out procedural floors"),
+        seen("clean_many_seeed_wrist", seeed, "clean_many through the Seeed wrist mount"),
+    ]
+
+
 def build_suites(
     real: list[DetectedObject],
     layout: TwinLayout,
@@ -319,6 +343,8 @@ def build_suites(
         suites += held_out_suites(real, layout)
     if group in ("diagnostic", "all"):
         suites += diagnostic_suites(layout, real)
+    if group in ("appearance", "all"):
+        suites += appearance_suites(layout)
     patterns = list(only)
     return [s for s in suites if not patterns or any(fnmatch.fnmatch(s.name, p) for p in patterns)]
 
@@ -346,6 +372,7 @@ def run_suite(
             StackCheck(case.pick, case.place),
             case.layout(layout),
             batch_size=batch_size,
+            look=case.look,
             record_examples=record_videos,
         )
         result = rehearsal.run(case.objects, suite.variants, SEED)

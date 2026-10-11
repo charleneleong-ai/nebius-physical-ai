@@ -3,7 +3,7 @@ import os
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 import mujoco
 import numpy as np
@@ -11,6 +11,7 @@ import numpy as np
 from nebius_physical_ai.capture.camera import CameraPose
 from nebius_physical_ai.capture.mat import DetectedObject, MatSpec
 from nebius_physical_ai.policy.gr00t import CAMERA_KEYS, Observation
+from nebius_physical_ai.twin.textures import SIZE, texture
 
 SO101_XML = Path(
     os.environ.get(
@@ -95,6 +96,9 @@ class SceneLook:
     light_diffuse: float = 0.7
     ambient: float = 0.1
     floor_grey: float = FLOOR_RGBA[0]
+    floor_texture: str = ""  # a `twin.textures` name such as "wood:3"; empty = flat grey
+    # Wrist camera in the gripper's camera-mount frame ({"pos", "quat", "fovy"}); None = the menagerie mount.
+    wrist_camera: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -212,7 +216,11 @@ class Twin:
             diffuse=[look.light_diffuse] * 3,
             type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
         )
-        world.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[0, 0, 0.05], rgba=[*[look.floor_grey] * 3, 1.0])
+        floor = world.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[0, 0, 0.05], rgba=[*[look.floor_grey] * 3, 1.0])
+        if look.floor_texture:
+            cls.texture_floor(spec, floor, look.floor_texture)
+        if look.wrist_camera:
+            cls.move_wrist_camera(spec, look.wrist_camera)
         blocks = dict(zip(cls.block_names(objects), objects))
         for name, obj in blocks.items():
             cls.add_block(world, name, obj, layout, physics or BlockPhysics())
@@ -224,6 +232,25 @@ class Twin:
             twin.reset_arm(start_pose)
             twin.settle(0.3)
         return twin
+
+    @staticmethod
+    def move_wrist_camera(spec: mujoco.MjSpec, pose: dict[str, Any]) -> None:
+        """Put the wrist camera at `pose`. Off the menagerie mount its bracket would fill the view, so the bracket is
+        hidden (visual only: its collision boxes are untouched)."""
+        camera = spec.camera("wrist_cam")
+        camera.pos, camera.quat, camera.fovy = pose["pos"], pose["quat"], pose["fovy"]
+        if pose.get("mount") != "menagerie":
+            for geom in spec.body("camera_mount").geoms:
+                geom.rgba = [*geom.rgba[:3], 0.0]
+
+    @staticmethod
+    def texture_floor(spec: mujoco.MjSpec, floor: mujoco.MjsGeom, name: str) -> None:
+        """Paint the floor with a procedural texture, tiled every 20 cm whatever the camera."""
+        tex = spec.add_texture(name="floor", type=mujoco.mjtTexture.mjTEXTURE_2D, width=SIZE, height=SIZE, nchannel=3)
+        tex.data = texture(name)
+        material = spec.add_material(name="floor", texrepeat=[5, 5], texuniform=True)
+        material.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = "floor"
+        floor.material, floor.rgba = "floor", [1.0, 1.0, 1.0, 1.0]
 
     @staticmethod
     def block_names(objects: list[DetectedObject]) -> list[str]:
