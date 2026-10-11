@@ -26,3 +26,7 @@ uv run pytest
 ```
 
 Hackathon rules digest: [`docs/hackathon-rules.md`](docs/hackathon-rules.md). Design spec: [`docs/specs/2026-09-30-preflight-design.md`](docs/specs/2026-09-30-preflight-design.md).
+
+## Closed-loop learning architecture
+
+The next architecture step is a closed-loop SO-101 learner: a world-model layer predicts candidate outcomes, FLUX 3 Action or GR00T executes short action chunks behind a safety controller, and failures feed an asynchronous DAgger/recovery loop. The current evidence and open work are summarised in [`docs/closed-loop-architecture.md`](docs/closed-loop-architecture.md), with the Mermaid source in [`docs/specs/2026-10-09-closed-loop-world-model-architecture.mmd`](docs/specs/2026-10-09-closed-loop-world-model-architecture.mmd).
