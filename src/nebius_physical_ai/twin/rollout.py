@@ -78,19 +78,21 @@ class BatchRollout:
     """Steps several twins in lockstep: one batched policy call per action chunk, each target at CONTROL_HZ.
 
     A twin stops at success or after `max_steps`. With `record`, each result keeps the top-camera frame the policy
-    saw at every chunk plus the final state, at no extra rendering cost.
+    saw at every chunk plus the final state, at no extra rendering cost. `task` and `run`'s `success` are shared by
+    every twin, or given one per twin when each runs its own scene.
     """
 
     def __init__(
         self,
         twins: list[Twin],
         policy: Policy,
-        task: str,
+        task: str | list[str],
         image_size: tuple[int, int] = (480, 640),
         renderer: TwinRenderer | None = None,
         record: bool = False,
     ) -> None:
-        self.twins, self.policy, self.task, self.image_size, self.renderer = twins, policy, task, image_size, renderer
+        self.twins, self.policy, self.image_size, self.renderer = twins, policy, image_size, renderer
+        self.tasks = [task] * len(twins) if isinstance(task, str) else task
         self.record = record
 
     def execute(
@@ -103,14 +105,15 @@ class BatchRollout:
             watch.update(twin)
         return False, min(len(chunk), steps_left)
 
-    def run(self, success: StackCheck, max_steps: int = 480) -> list[RolloutResult]:
+    def run(self, success: StackCheck | list[StackCheck], max_steps: int = 480) -> list[RolloutResult]:
+        checks = [success] * len(self.twins) if isinstance(success, StackCheck) else success
         results = [RolloutResult(False, 0) for _ in self.twins]
-        watches = [FailureWatch(twin, success) for twin in self.twins]
+        watches = [FailureWatch(twin, check) for twin, check in zip(self.twins, checks)]
         active = list(range(len(self.twins)))
         while active:
-            observations = [self.twins[i].observe(self.task, self.image_size, self.renderer) for i in active]
+            observations = [self.twins[i].observe(self.tasks[i], self.image_size, self.renderer) for i in active]
             for i, obs, chunk in zip(active, observations, self.policy.act_batch(observations)):
-                done, steps = self.execute(self.twins[i], chunk, success, max_steps - results[i].steps, watches[i])
+                done, steps = self.execute(self.twins[i], chunk, checks[i], max_steps - results[i].steps, watches[i])
                 results[i].success, results[i].steps = done, results[i].steps + steps
                 if self.record:
                     results[i].frames.append(obs.front)

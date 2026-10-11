@@ -11,14 +11,17 @@ files without per-scene outcomes fall back to non-overlapping 95% intervals.
 """
 
 import json
+import sys
+import time
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Self
 
 import typer
 from rich.console import Console
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.table import Table
 
-from nebius_physical_ai.benchmark import Cell, Suite, build_suites, mcnemar, run_suite, verdict
+from nebius_physical_ai.benchmark import Cell, Suite, build_suites, mcnemar, promotion, run_suite, verdict
 from nebius_physical_ai.capture.camera import CameraPose
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, Gr00tClient
@@ -104,7 +107,8 @@ def run(
         Gr00tClient(port=port) as policy,
     ):
         for suite in (s for s in suites if s.cases):
-            cell = run_suite(suite, policy, layout, batch_size, record_videos)
+            with CaseProgress(label, suite, tracker) as progress:
+                cell = run_suite(suite, policy, layout, batch_size, record_videos, on_case=progress)
             cells.append(cell)
             tracker.log_cell(cell, step=len(cells))
             lo, hi = cell.wilson()
@@ -119,6 +123,41 @@ def run(
             {"cells": (["suite", "group", "successes", "n", "p", "ci_lo", "ci_hi"], rows)},
         )
     show_cells(label, cells)
+
+
+class CaseProgress:
+    """Progress through a suite's cases: a rich bar at a terminal, else one timestamped line per case (readable in a
+    nohup log), and the running counts to W&B so a slow suite is visible long before its cell is scored."""
+
+    def __init__(self, label: str, suite: Suite, tracker: Tracker) -> None:
+        self.label, self.suite, self.tracker, self.start = label, suite, tracker, time.time()
+        self.bar = sys.stdout.isatty() and Progress(
+            TextColumn(f"{label} | {suite.name}"), BarColumn(), MofNCompleteColumn(),
+            TextColumn("{task.fields[successes]} successes"), TimeElapsedColumn(), TimeRemainingColumn(),
+            console=console,
+        )  # fmt: skip
+        if self.bar:
+            self.task = self.bar.add_task("", total=suite.n, successes=0)
+
+    def __enter__(self) -> Self:
+        if self.bar:
+            self.bar.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self.bar:
+            self.bar.stop()
+
+    def __call__(self, case: str, successes: int, done: int) -> None:
+        elapsed = time.time() - self.start
+        if self.bar:
+            self.bar.update(self.task, completed=done, successes=successes)
+        else:
+            eta = elapsed / done * (self.suite.n - done)
+            stamp = time.strftime("%H:%M:%S", time.gmtime())
+            print(f"[{stamp}] {self.label} | {case}: {successes}/{done} of {self.suite.n} "
+                  f"({elapsed / 60:.0f} min, ~{eta / 60:.0f} min left)", flush=True)  # fmt: skip
+        self.tracker.log_progress(self.suite.name, successes, done)
 
 
 def load_cells(path: Path) -> tuple[str, dict[str, Cell]]:
@@ -177,6 +216,18 @@ def compare(
             row.append("-" if cell is None else describe(cell, base))
         table.add_row(*row)
     console.print(table)
+
+
+@app.command()
+def gate(
+    reference: Annotated[Path, typer.Argument(help="The served policy's result file")],
+    candidate: Annotated[Path, typer.Argument(help="The new checkpoint's result file, on the same suites")],
+) -> None:
+    """Exit 0 when the candidate should be promoted (`promotion`), 1 when not."""
+    (ref_label, ref), (new_label, new) = load_cells(reference), load_cells(candidate)
+    promote, why = promotion(new, ref)
+    print(f"{new_label} vs {ref_label}: {'PROMOTE' if promote else 'KEEP'} ({why})")
+    raise typer.Exit(0 if promote else 1)
 
 
 @app.command()

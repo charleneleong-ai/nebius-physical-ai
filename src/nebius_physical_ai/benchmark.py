@@ -350,11 +350,17 @@ def build_suites(
 
 
 def run_suite(
-    suite: Suite, policy: Policy, layout: TwinLayout, batch_size: int = 32, record_videos: bool = False
+    suite: Suite,
+    policy: Policy,
+    layout: TwinLayout,
+    batch_size: int = 32,
+    record_videos: bool = False,
+    on_case: Callable[[str, int, int], None] | None = None,
 ) -> Cell:
     """Rehearse every case of the suite `variants` times and pool the successes.
 
-    With `record_videos` the cell also keeps the first success and the first failure as rollout frames."""
+    With `record_videos` the cell also keeps the first success and the first failure as rollout frames. `on_case` is
+    called after each case with its name, the suite's successes so far and the rehearsals so far."""
     import time
 
     start, per_case, outcomes, failures = time.time(), [], [], Counter()
@@ -372,6 +378,8 @@ def run_suite(
         result = rehearsal.run(case.objects, suite.variants, SEED)
         per_case.append(result.successes)
         outcomes += [bool(v["success"]) for v in result.variants]
+        if on_case:
+            on_case(case.name, sum(per_case), len(outcomes))
         failures.update(v["failure"] for v in result.variants if not v["success"])
         for kind, (index, frames) in result.examples.items():
             caption = f"{suite.name} | {case.name} | {kind} | variant {index} | {case.prompt}"
@@ -403,6 +411,24 @@ def mcnemar(a: Cell, b: Cell) -> tuple[int, int, float] | None:
     k, n = min(wins, losses), wins + losses
     p = min(1.0, 2 * sum(math.comb(n, i) for i in range(k + 1)) / 2**n) if n else 1.0
     return wins, losses, p
+
+
+def promotion(new: dict[str, Cell], ref: dict[str, Cell]) -> tuple[bool, str]:
+    """Whether `new` should replace `ref`: better on every rehearsal pooled across their shared suites (paired), and
+    worse on none of them. A round that only moves within noise is not promoted, so the served policy never drifts."""
+    shared = [suite for suite in ref if suite in new]
+    if not shared:
+        return False, "no suites in common"
+    if worse := [suite for suite in shared if verdict(new[suite], ref[suite]) == "worse"]:
+        return False, f"worse on {', '.join(worse)}"
+    pool = [
+        Cell("pooled", "pooled", sum(c.successes for c in cells), sum(c.n for c in cells), 0, 0.0,
+             outcomes=[o for c in cells for o in c.outcomes])
+        for cells in ([new[s] for s in shared], [ref[s] for s in shared])
+    ]  # fmt: skip
+    pooled = verdict(*pool)
+    gained = f"{pool[0].successes - pool[1].successes:+d} rehearsals over {len(shared)} suites, pooled {pooled}"
+    return pooled == "better", gained
 
 
 def verdict(a: Cell, b: Cell, alpha: float = 0.05) -> str:

@@ -1,9 +1,10 @@
 import importlib.util
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
-from typing import Self
+from typing import ClassVar, Self
 
 import numpy as np
 import pytest
@@ -39,6 +40,41 @@ def by_name(suites: list[benchmark.Suite]) -> dict[str, benchmark.Suite]:
 
 def cell(successes: int, n: int = 96) -> Cell:
     return Cell("x", "legacy", successes, n, 1, 0.0)
+
+
+class FakeTracker:
+    """Records what the benchmark script sends to W&B into `logged`, a list the test sets."""
+
+    logged: ClassVar[list[dict]] = []
+
+    def __init__(self, *_a: object, **kw: object) -> None:
+        self.logged.append(dict(kw))
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_a: object) -> None:
+        pass
+
+    def log_cell(self, cell: Cell, step: int) -> None:
+        self.logged.append({"cell": cell.suite, "step": step})
+
+    def log_progress(self, suite: str, successes: int, rehearsals: int) -> None:
+        self.logged.append({"progress": suite, "successes": successes, "rehearsals": rehearsals})
+
+    def log_summary(self, *_a: object) -> None:
+        pass
+
+
+class FakePolicy:
+    def __init__(self, **_k: object) -> None:
+        pass
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_a: object) -> None:
+        pass
 
 
 class TestLegacySuites:
@@ -303,6 +339,33 @@ def test_run_suite_keeps_one_rollout_per_outcome_when_videos_are_asked_for() -> 
     assert len(frames) >= 2 and frames[0].shape[2] == 3 and frames[0].dtype == np.uint8
 
 
+class TestPromotion:
+    """The gate a DAgger round must pass before its checkpoint replaces the served one."""
+
+    @staticmethod
+    def cell(suite: str, wins: int, n: int = 96) -> Cell:
+        return Cell(suite, "g", wins, n, 1, 1.0, outcomes=[True] * wins + [False] * (n - wins))
+
+    @pytest.mark.parametrize(
+        ("new", "promote", "why"),
+        [
+            ({"a": 90, "b": 80}, True, "+30 rehearsals over 2 suites, pooled better"),
+            ({"a": 71, "b": 71}, False, "pooled within noise"),  # +2 on paired scenes
+            ({"a": 96, "b": 50}, False, "worse on b"),  # better pooled, but one suite regressed
+        ],
+    )
+    def test_promotes_only_a_pooled_gain_with_no_suite_worse(self, new: dict, promote: bool, why: str) -> None:
+        ref = {"a": self.cell("a", 70), "b": self.cell("b", 70)}
+        ok, reason = benchmark.promotion({k: self.cell(k, v) for k, v in new.items()}, ref)
+        assert ok is promote and why in reason
+
+    def test_nothing_shared_is_not_promoted(self) -> None:
+        assert benchmark.promotion({"x": self.cell("x", 96)}, {"a": self.cell("a", 10)}) == (
+            False,
+            "no suites in common",
+        )
+
+
 @pytest.fixture
 def script() -> ModuleType:
     spec = importlib.util.spec_from_file_location("benchmark_script", ROOT / "scripts/benchmark.py")
@@ -356,36 +419,14 @@ class TestScript:
         asked: list[bool] = []
         logged: list[dict] = []
 
-        class FakeTracker:
-            def __init__(self, *_a: object, **kw: object) -> None:
-                logged.append(dict(kw))
-
-            def __enter__(self) -> Self:
-                return self
-
-            def __exit__(self, *_a: object) -> None:
-                pass
-
-            def log_cell(self, cell: Cell, step: int) -> None:
-                logged.append({"cell": cell.suite, "step": step})
-
-            def log_summary(self, *_a: object) -> None:
-                pass
-
-        class FakePolicy:
-            def __init__(self, **_k: object) -> None:
-                pass
-
-            def __enter__(self) -> Self:
-                return self
-
-            def __exit__(self, *_a: object) -> None:
-                pass
-
-        def fake_run_suite(suite: benchmark.Suite, policy: object, layout: object, batch: int, videos: bool) -> Cell:
+        def fake_run_suite(
+            suite: benchmark.Suite, policy: object, layout: object, batch: int, videos: bool, on_case: Callable
+        ) -> Cell:
             asked.append(videos)
+            on_case("clean_0", 5, suite.n)
             return Cell(suite.name, suite.group, 5, suite.n, 1, 0.1)
 
+        FakeTracker.logged = logged
         monkeypatch.setattr(script, "Tracker", FakeTracker)
         monkeypatch.setattr(script, "Gr00tClient", FakePolicy)
         monkeypatch.setattr(script, "run_suite", fake_run_suite)
@@ -395,6 +436,7 @@ class TestScript:
         assert asked == [expected]
         assert logged[0].get("group") == "v4a"  # every run of a checkpoint shares its W&B group
         assert {"cell": "clean", "step": 1} in logged  # each suite is logged as soon as it is scored
+        assert any(e.get("progress") == "clean" and e["successes"] == 5 for e in logged)  # and its cases while it runs
 
     def test_a_bad_group_is_a_usage_error(self, script: ModuleType) -> None:
         result = CliRunner().invoke(script.app, ["run", "x", "--group", "nope", "--dry-run"])
