@@ -71,7 +71,7 @@ class Tracker:
         for kind, (caption, frames) in cell.examples.items():
             logged[f"video/{cell.suite}_{kind}"] = self.video(frames, caption, fps)
             logged.setdefault(f"media/{cell.suite}_start", wandb.Image(frames[0], caption=caption))
-        self.run.log(logged, step=step)
+        self.run.log(logged)  # no explicit step: W&B only flushes a step's row once a higher one arrives
 
     @staticmethod
     def video(frames: list[np.ndarray], caption: str, fps: int = 4) -> Any:
