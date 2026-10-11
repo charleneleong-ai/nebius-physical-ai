@@ -21,6 +21,7 @@ SCORES = {  # successes of 96 per suite, seed 42
     "v6 targeted demos": [54, 68, 76, 78, 73, 72],
     "DAgger r1": [47, 76, 82, 77, 78, 76],
     "DAgger r2": [50, 76, 86, 85, 86, 81],
+    "DAgger r3": [61, 80, 86, 88, 85, 81],
     "FLUX LoRA (fair)": [3, 11, 9, 17, 6, 4],
 }
 PAIRED_R2 = [(12, 14, 0.85), (8, 7, 1.0), (7, 2, 0.18), (6, 4, 0.75), (14, 2, 0.004), (13, 5, 0.10)]  # (+, -, p) vs v5
@@ -29,6 +30,7 @@ FAILURES = {
     "v5": [57, 34, 24, 4, 8, 11],
     "DAgger r1": [45, 40, 33, 13, 9, 0],
     "DAgger r2": [33, 31, 26, 18, 3, 1],
+    "DAgger r3": [24, 32, 17, 13, 9, 0],
     "FLUX LoRA": [358, 115, 22, 24, 0, 7],
 }
 FUNNELS = {  # rollouts, succeeded, recoverable failures, kept, recovered

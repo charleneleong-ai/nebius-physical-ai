@@ -64,20 +64,20 @@ footer { font-size: 13px; color: var(--muted); }
 
 <main>
 <header>
-  <div class="eyebrow">Preflight · SO-101 · MuJoCo twin · updated 11 Oct 2026, 03:15 UTC</div>
-  <h1>Seven attempts to make a GR00T arm policy generalise. One passed the gate.</h1>
+  <div class="eyebrow">Preflight · SO-101 · MuJoCo twin · updated 11 Oct 2026, 06:30 UTC</div>
+  <h1>Nine attempts to make a GR00T arm policy generalise. One passed the gate; one moved new objects.</h1>
   <p class="lede">Every candidate runs the same six suites (12 scenes × 8 perturbed rehearsals, seed 42) and is compared with v5 scene by scene (paired McNemar). It is promoted only with a pooled gain and no suite significantly worse, a gate fixed before the first round was scored. Everything is simulation; the physical arm has not arrived.</p>
   <div class="headline">
     <div><b>464 / 576</b><span>DAgger round 2, promoted</span></div>
     <div><b>438 / 576</b><span>v5 baseline</span></div>
-    <div><b>47–52 / 96</b><span>held-out objects, every candidate</span></div>
+    <div><b>61 / 96</b><span>held-out objects, DAgger r3 (was 47–54)</span></div>
     <div><b>0–1 / 50</b><span>so101-benchmark, every policy</span></div>
   </div>
 </header>
 
 <section>
   <h2>Scoreboard</h2>
-  <p class="takeaway">Only DAgger round 2 clears v5. FLUX, trained on the same demos for the same volume, collapses.</p>
+  <p class="takeaway">DAgger round 2 cleared the gate; round 3 scores higher still (481) but its pooled gain over round 2 is within noise. FLUX, trained on the same demos for the same volume, collapses.</p>
   <div class="chart"><!--POOLED--></div>
 </section>
 
@@ -90,7 +90,7 @@ footer { font-size: 13px; color: var(--muted); }
 
 <section>
   <h2>How it fails</h2>
-  <p class="takeaway">DAgger cut <em>no_contact</em> from 57 to 33. <em>Holding</em> rose from 4 to 18, so the policy now grasps but does not let go on target.</p>
+  <p class="takeaway">Two DAgger rounds cut <em>no_contact</em> from 57 to 24. <em>Holding</em> rose from 4 to 18 in round 2 and eased to 13 in round 3: the policy grasps but does not always let go on target.</p>
   <p>Each bar is one checkpoint's failures, split by the label <code>FailureWatch</code> assigns. FLUX fails four times as often, mostly without touching the block.</p>
   <div class="chart"><!--FAILURES--></div>
 </section>
@@ -130,13 +130,13 @@ flowchart LR
   <div class="ledger">
     <div class="row"><span class="pill promoted">Promoted</span><div><strong>DAgger round 2, recoveries ×8</strong>Pooled 464 vs 438, no suite worse. Now the served policy.</div></div>
     <div class="row"><span class="pill flat">Kept</span><div><strong>DAgger round 1</strong>436 vs 438. Recoveries were 3.5% of training, too diluted to matter.</div></div>
-    <div class="row"><span class="pill running">Training</span><div><strong>DAgger round 3</strong>Harvested 574/800 with round 2; 59 recoveries added. Fine-tuning, about 2 h left.</div></div>
+    <div class="row"><span class="pill flat">Kept</span><div><strong>DAgger round 3</strong>481 vs round 2's 464, no suite worse; held_out_objects 61 vs 50 (+18/−7, p=0.043), the first significant gain on new objects. Pooled gain within noise, so not promoted. The round script deleted the checkpoint; it can be retrained from the kept recoveries.</div></div>
     <div class="row"><span class="pill rejected">Rejected</span><div><strong>FLUX 3 Action LoRA (fair)</strong>Same 800 demos, same sample volume: 50 vs 438, worse on every suite (p &lt; 0.001), 0/7 externally. Executing 16 instead of 32 actions per chunk did not help.</div></div>
     <div class="row"><span class="pill flat">Flat</span><div><strong>Targeted demos (v6)</strong>Staged-mistake recoveries plus lookalike decoys: 421 vs 438, within noise.</div></div>
     <div class="row"><span class="pill rejected">Rejected</span><div><strong>Visual domain randomisation (v7)</strong>Lifts the Seeed wrist-mount scenes 15 → 53 but drops clean_many 81 → 58; 1/50 on so101-benchmark.</div></div>
     <div class="row"><span class="pill running">Training</span><div><strong>RL expert (residual and shaped PPO)</strong>Residual ahead of the expert in training; plain PPO stopped at 1% recovery after its reward paid hovering.</div></div>
-    <div class="row"><span class="pill running">Queued</span><div><strong>Best-of-8 chunk consensus</strong>Medoid of 8 flow-matching samples at test time, on held_out_objects and clean_many.</div></div>
-    <div class="row"><span class="pill running">Queued</span><div><strong>Real-data co-training (v9, v9b)</strong>400 ArmnetBench SO-101 teleop demos of new objects at 23% of samples; v9b adds 515 successful real rollouts.</div></div>
+    <div class="row"><span class="pill flat">Flat</span><div><strong>Best-of-8 chunk consensus</strong>Medoid of 8 flow-matching samples on round 2: held_out_objects 55 vs 50 (p=0.41), clean_many 87 vs 86. Within noise at 8× inference cost.</div></div>
+    <div class="row"><span class="pill running">Training</span><div><strong>Real-data co-training (v9, v9b)</strong>400 ArmnetBench SO-101 teleop demos of new objects at 23% of samples; v9b adds 515 successful real rollouts.</div></div>
   </div>
 </section>
 
@@ -144,7 +144,7 @@ flowchart LR
   <h2>What is not established</h2>
   <ul class="plain">
     <li>Nothing has run on the physical arm. The repo will be updated with live results when it arrives.</li>
-    <li>New-object generalisation has not moved: held_out_objects stays at 47–54 of 96 for every candidate.</li>
+    <li>Round 3's new-object gain (p=0.043) is one suite of six, uncorrected for multiple comparisons, from one seed.</li>
     <li>Round 2's gain is significant on one suite alone; the pooled gain passed a gate fixed in advance.</li>
     <li>FLUX's failure mechanism (8-frame self-history and integrated deltas) is a hypothesis, not tested by retraining.</li>
     <li>The RL numbers are training success, not held-out recovery.</li>
