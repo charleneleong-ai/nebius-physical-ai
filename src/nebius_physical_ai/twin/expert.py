@@ -13,6 +13,11 @@ GRIP_OPEN, GRIP_CLOSED = 1.2, 0.1  # radians; closed < 0.2 holds a 30 mm cube
 # Fingertip heights; top-down reach tops out near 7.5 cm, so hover low rather than above the cubes' height.
 PICK_HOVER_Z, PLACE_HOVER_Z = 0.06, 0.075
 REST_POSE = np.array([0.0, -0.5, 0.5, 1.0, 0.0])  # arm folded above the base
+# Staged mistakes for recovery demos, matching v5's commonest failures (no contact or a push, and a drop).
+MISTAKES = ("miss", "drop")
+MISS_OFFSET_MM = (8.0, 25.0)  # under ~15 mm the jaws land on the object and push it
+DROP_FRACTION = (0.2, 0.8)  # of the way from pick to place where the object is let go
+Segment = tuple[np.ndarray, float, float]  # arm joint target, gripper target, seconds
 
 
 class UnreachableTarget(ValueError):
@@ -82,8 +87,7 @@ class PickPlaceExpert:
         self.twin, self.task, self.pick, self.place, self.image_size = twin, task, pick, place, image_size
         self.ik = TopDownIK(twin.model)
 
-    def waypoints(self) -> list[tuple[np.ndarray, float, float]]:
-        """(arm target, gripper target, seconds) segments."""
+    def waypoints(self) -> list[Segment]:
         pick = self.twin.block_pos(self.pick)
         place = self.twin.block_pos(self.place)
         stack_z = place[2] + self.twin.geometry(self.place).half[2] + self.twin.geometry(self.pick).half[2]
@@ -95,29 +99,61 @@ class PickPlaceExpert:
         }
         q, joints = REST_POSE, {}
         for name, target in targets.items():
-            q, err = self.ik.solve(target, q)
-            if err > 0.005:
-                raise UnreachableTarget(f"{name} unreachable ({err * 1000:.1f} mm)")
-            joints[name] = q
+            joints[name] = q = self.solve(target, name, q)
         return [
-            (joints["pick_hover"], GRIP_OPEN, 1.5),
-            (joints["pick"], GRIP_OPEN, 1.0),
-            (joints["pick"], GRIP_CLOSED, 0.8),
-            (joints["pick_hover"], GRIP_CLOSED, 1.0),
+            *self.grasp(joints["pick_hover"], joints["pick"]),
             (joints["place_hover"], GRIP_CLOSED, 1.5),
             (joints["place"], GRIP_CLOSED, 1.0),
             (joints["place"], GRIP_OPEN, 0.8),
             (joints["place_hover"], GRIP_OPEN, 1.0),
         ]
 
-    def run(self) -> Iterator[Frame]:
+    def solve(self, target: np.ndarray, name: str, seed: np.ndarray = REST_POSE) -> np.ndarray:
+        q, err = self.ik.solve(target, seed)
+        if err > 0.005:
+            raise UnreachableTarget(f"{name} unreachable ({err * 1000:.1f} mm)")
+        return q
+
+    @staticmethod
+    def grasp(hover: np.ndarray, low: np.ndarray) -> list[Segment]:
+        """Hover, descend open, close, lift."""
+        return [(hover, GRIP_OPEN, 1.5), (low, GRIP_OPEN, 1.0), (low, GRIP_CLOSED, 0.8), (hover, GRIP_CLOSED, 1.0)]
+
+    def mistake(self, kind: str, rng: np.random.Generator) -> list[Segment]:
+        """Segments that fail the way rehearsals do: `miss` closes the jaws 8-25 mm off the pick object (often
+        nudging it), `drop` lifts it and lets go part of the way to the place object."""
+        pick, place = self.twin.block_pos(self.pick), self.twin.block_pos(self.place)
+        if kind == "miss":
+            angle, off = rng.uniform(0, 2 * np.pi), rng.uniform(*MISS_OFFSET_MM) / 1000
+            at = pick + off * np.array([np.cos(angle), np.sin(angle), 0.0])
+            return self.grasp(self.solve(np.array([at[0], at[1], PICK_HOVER_Z]), "miss_hover"), self.solve(at, "miss"))
+        if kind == "drop":
+            hover, low = self.solve(np.array([pick[0], pick[1], PICK_HOVER_Z]), "pick_hover"), self.solve(pick, "pick")
+            way = pick[:2] + rng.uniform(*DROP_FRACTION) * (place[:2] - pick[:2])
+            carry = self.solve(np.array([way[0], way[1], PICK_HOVER_Z]), "drop")
+            return [*self.grasp(hover, low), (carry, GRIP_CLOSED, 1.0), (carry, GRIP_OPEN, 0.5)]
+        raise ValueError(f"unknown mistake {kind!r}; expected one of {MISTAKES}")
+
+    def stage(self, kind: str, rng: np.random.Generator) -> None:
+        """Play a `mistake` without recording it, so the demo that follows starts from a failed rehearsal's state
+        and shows only the recovery (the policy never learns the mistake itself)."""
+        for _ in self.follow(self.mistake(kind, rng)):
+            pass
+        self.twin.settle(0.5)
+
+    def follow(self, segments: list[Segment]) -> Iterator[np.ndarray]:
+        """Drive through `segments` from wherever the arm is, yielding each commanded target before stepping to it."""
         start = self.twin.arm_qpos()
-        for arm, grip, seconds in self.waypoints():
+        for arm, grip, seconds in segments:
             goal = np.append(arm, grip)
             for target in np.linspace(start, goal, max(1, round(seconds * CONTROL_HZ)) + 1)[1:]:
-                yield Frame(self.twin.observe(self.task, self.image_size), self.twin.to_lerobot(target))
+                yield target
                 self.twin.step_towards(target, 1 / CONTROL_HZ)
             start = goal
+
+    def run(self) -> Iterator[Frame]:
+        for target in self.follow(self.waypoints()):
+            yield Frame(self.twin.observe(self.task, self.image_size), self.twin.to_lerobot(target))
 
 
 class SceneSampler:

@@ -9,7 +9,7 @@ import pytest
 
 from nebius_physical_ai.policy.gr00t import Observation
 from nebius_physical_ai.twin.dataset import LeRobotWriter
-from nebius_physical_ai.twin.expert import REST_POSE, Frame, PickPlaceExpert, SceneSampler, TopDownIK
+from nebius_physical_ai.twin.expert import GRIP_OPEN, REST_POSE, Frame, PickPlaceExpert, SceneSampler, TopDownIK
 from nebius_physical_ai.twin.rollout import STACK_TASK, StackCheck
 from nebius_physical_ai.twin.scene import SO101_XML, Twin, TwinLayout
 
@@ -49,6 +49,28 @@ class TestExpert:
                 wins += StackCheck()(twin)
         assert frames[0].obs.front.shape == (24, 32, 3) and frames[0].obs.task == STACK_TASK
         assert wins >= 7
+
+    @pytest.mark.parametrize(("kind", "seed"), [("miss", 0), ("drop", 1)])
+    def test_a_staged_mistake_is_left_out_and_the_demo_recovers_from_it(self, kind: str, seed: int) -> None:
+        sampler = SceneSampler(A3, seed=seed)
+        with Twin.from_objects(sampler.sample(), A3, start_pose=sampler.start_pose()) as twin:
+            expert = PickPlaceExpert(twin, STACK_TASK, image_size=(24, 32))
+            start = twin.block_pos("blue").copy()
+            expert.stage(kind, sampler.rng)
+            staged, moved_mm = twin.arm_qpos(), 1000 * np.linalg.norm(twin.block_pos("blue")[:2] - start[:2])
+            frames = list(expert.run())
+            twin.settle(0.5)
+            assert StackCheck()(twin)
+            # The recording opens where the mistake left the arm, not at rest: only the recovery is recorded.
+            np.testing.assert_allclose(frames[0].obs.joints, twin.to_lerobot(staged), atol=1e-4)
+        if kind == "miss":
+            assert staged[5] < GRIP_OPEN / 2  # jaws closed on nothing
+        else:
+            assert moved_mm > 10  # let go on the way, away from where it started
+
+    def test_an_unknown_mistake_is_rejected(self, sampler: SceneSampler) -> None:
+        with Twin.from_objects(sampler.sample(), A3) as twin, pytest.raises(ValueError, match="unknown mistake"):
+            PickPlaceExpert(twin, STACK_TASK).mistake("wave", np.random.default_rng(0))
 
 
 def test_writer_produces_readable_lerobot_v21(tmp_path: Path) -> None:

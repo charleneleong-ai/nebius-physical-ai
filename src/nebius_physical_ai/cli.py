@@ -1,7 +1,8 @@
 import json
+from collections import Counter
 from collections.abc import Iterable
 from contextlib import ExitStack
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -23,7 +24,7 @@ from nebius_physical_ai.tracking import Tracker
 from nebius_physical_ai.trust.plots import StressPlots
 from nebius_physical_ai.trust.stress import StressCase, StressReport
 from nebius_physical_ai.twin.dataset import LeRobotWriter
-from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler, UnreachableTarget
+from nebius_physical_ai.twin.expert import MISTAKES, Frame, PickPlaceExpert, SceneSampler, UnreachableTarget
 from nebius_physical_ai.twin.randomize import Episode, Randomization, SceneRandomizer
 from nebius_physical_ai.twin.rehearsal import Rehearsal, SceneRun
 from nebius_physical_ai.twin.rollout import STACK_TASK, BatchRollout, RolloutResult, StackCheck
@@ -83,6 +84,7 @@ def build_randomizer(
     camera_mix: str,
     role_agnostic: bool = False,
     original_share: float | None = None,
+    lookalikes: int = 0,
 ) -> SceneRandomizer:
     """The demo randomiser: real objects as distractors, and cameras centred on a calibrated pose when one is given.
 
@@ -93,7 +95,12 @@ def build_randomizer(
     except ValueError as err:
         raise typer.BadParameter(str(err)) from err
     pose = CameraPose.load(camera) if camera else None
-    ranges = None if original_share is None else Randomization(original_share=original_share)
+    defaults = Randomization()
+    ranges = replace(
+        defaults,
+        original_share=defaults.original_share if original_share is None else original_share,
+        lookalikes=(min(1, lookalikes), lookalikes),
+    )
     return SceneRandomizer(
         sampler.layout,
         seed=seed,
@@ -103,6 +110,30 @@ def build_randomizer(
         camera_mix=mix,
         role_agnostic=role_agnostic,
     )
+
+
+def record_episode(
+    sampler: SceneSampler, randomizer: SceneRandomizer | None, task: str, recovery_share: float
+) -> tuple[list[Frame], str, str] | None:
+    """One scripted demo (frames, prompt, staged mistake or ""), or None when the expert can't reach or stack it.
+
+    A `recovery_share` of episodes first play a missed grasp or a drop unrecorded, so the demo is the recovery."""
+    episode = randomizer.episode(sampler, task) if randomizer else Episode(sampler.sample(), "blue", "red", task)
+    look = randomizer.look() if randomizer else None
+    start = sampler.start_pose()
+    # Only drawn when asked for, so recordings without recovery keep their old scenes for a seed.
+    mistake = str(sampler.rng.choice(MISTAKES)) if recovery_share and sampler.rng.random() < recovery_share else ""
+    with Twin.from_objects(episode.objects, sampler.layout, start_pose=start, look=look) as twin:
+        expert = PickPlaceExpert(twin, episode.prompt, episode.pick, episode.place)
+        try:
+            if mistake:
+                expert.stage(mistake, sampler.rng)
+            frames = list(expert.run())
+        except UnreachableTarget:
+            return None
+        twin.settle(0.5)
+        stacked = StackCheck(episode.pick, episode.place)(twin)
+    return (frames, episode.prompt, mistake) if stacked else None
 
 
 @app.command()
@@ -141,6 +172,15 @@ def demos(
         str,
         typer.Option(help="Joint layout in modality.json: stock (5 arm joints + gripper) or split (wrist roll apart)"),
     ] = "stock",
+    recovery_share: Annotated[
+        float,
+        typer.Option(
+            min=0.0, max=1.0, help="Share of episodes recorded after an unrecorded missed grasp or drop (recovery)"
+        ),
+    ] = 0.0,
+    lookalikes: Annotated[
+        int, typer.Option(min=0, help="With --randomize, up to this many pick-sized decoys of the pick's shape")
+    ] = 0,
     width_mm: WidthOpt = A3_MAT.width_mm,
     height_mm: HeightOpt = A3_MAT.height_mm,
 ) -> None:
@@ -148,39 +188,31 @@ def demos(
 
     With --role-agnostic each episode is told what to pick and where to put it in its own words (`Pick green can and
     place on red box`), and a quarter keep the original blue and red cubes and prompt."""
-    if (camera or role_agnostic) and not randomize:
-        raise typer.BadParameter("--camera and --role-agnostic need --randomize: only randomized episodes vary")
+    if (camera or role_agnostic or lookalikes) and not randomize:
+        raise typer.BadParameter("--camera, --role-agnostic and --lookalikes need --randomize")
     sampler = SceneSampler(TwinLayout(MatSpec(width_mm, height_mm)), seed=seed)
     randomizer = (
-        build_randomizer(sampler, seed, real_objects, camera, camera_mix, role_agnostic, original_share)
+        build_randomizer(sampler, seed, real_objects, camera, camera_mix, role_agnostic, original_share, lookalikes)
         if randomize
         else None
     )
     if layout not in LAYOUTS:
         raise typer.BadParameter(f"--layout must be one of {sorted(LAYOUTS)}, got {layout!r}")
-    writer, attempts = LeRobotWriter(out, layout=layout), 0
+    writer, attempts, recoveries = LeRobotWriter(out, layout=layout), 0, Counter()
     for _ in track(range(episodes), description="recording demos"):
         while True:
             attempts += 1
             if attempts > MAX_ATTEMPTS_PER_EPISODE * episodes:
                 raise RuntimeError(f"expert solved only {len(writer.episodes)} of {attempts} scenes; check the ranges")
-            episode = (
-                randomizer.episode(sampler, task) if randomizer else Episode(sampler.sample(), "blue", "red", task)
-            )
-            look = randomizer.look() if randomizer else None
-            start = sampler.start_pose()
-            with Twin.from_objects(episode.objects, sampler.layout, start_pose=start, look=look) as twin:
-                try:
-                    frames = list(PickPlaceExpert(twin, episode.prompt, episode.pick, episode.place).run())
-                except UnreachableTarget:  # draw another scene
-                    continue
-                twin.settle(0.5)
-                stacked = StackCheck(episode.pick, episode.place)(twin)
-            if stacked:
-                writer.add_episode(frames, episode.prompt)
+            if (demo := record_episode(sampler, randomizer, task, recovery_share)) is not None:
+                frames, prompt, mistake = demo
+                writer.add_episode(frames, prompt)
+                recoveries[mistake or "none"] += 1
                 break
     writer.finalize()
     print(f"wrote {episodes} episodes ({writer.total_frames} frames) to {out}; expert success {episodes}/{attempts}")
+    if recovery_share:
+        print(f"episodes by staged mistake: {dict(recoveries)}")
     if role_agnostic:
         print(f"{len(writer.tasks)} distinct prompts, e.g. {writer.tasks[:3]}")
     if randomizer and randomizer.camera_pose:
