@@ -84,7 +84,7 @@ experiments:
     gate: S1
     result: held-out snapshot recovery 71.9% vs the expert's 45.9% at 2.5M steps (61.6% at 500k), fresh scenes 100%. Clears its bar; next step is recording its recoveries as DAgger data.
     verdict: KEEP
-    pr: ""
+    pr: 25
   - label: RL expert, shaped PPO from scratch (grasp reward)
     family: rl-expert
     runs: {r7to1qnr: train}
@@ -92,7 +92,7 @@ experiments:
     gate: S1
     result: held-out recovery 6% at 6.2M steps (training success 41%, fresh scenes 73%). Stopped 11 Oct for missing the bar.
     verdict: DISCARD
-    pr: ""
+    pr: 25
   - label: Real-data co-training v9 (400 ArmnetBench teleop demos, 23% of samples)
     family: cotrain
     runs: {aryg9mnj: train}
