@@ -95,11 +95,11 @@ experiments:
     pr: 25
   - label: Real-data co-training v9 (400 ArmnetBench teleop demos, 23% of samples)
     family: cotrain
-    runs: {aryg9mnj: train}
+    runs: {aryg9mnj: train, poja6iyz: bench}
     baseline: v5 438
     gate: G1
-    result: training (12k steps).
-    verdict: RUNNING
+    result: 373/576 vs v5 438; held_out_objects 48 vs 52 (p=0.59); worse on clean_many (62 vs 81, p=0.001), clean_top_down_many (69 vs 83, p=0.001), real_1_pomade_tin (62 vs 74, p=0.043); so101-benchmark 0/50. Failures mostly pushed (84 of 203) and knocked_place (21).
+    verdict: DISCARD
     pr: 21
 superseded:  # killed, crashed on launch, or relaunched; tagged `superseded`
   [te8xslg6, uf547kdi, 5vzuj6cz, 9mq1zp6u, 7wdlq67i, cl3ltozz, z0etzlli, 15i8w2eg, rhicuin5, 9p93rb37, 30r7i00q, ap8n1409,

@@ -1,6 +1,6 @@
 ## Highlights
 
-**Status, 11 Oct 2026 06:45 UTC.** DAgger round 2 is the served policy. Round 3 retrain and v9 real-data co-training are running. Everything is simulation; the physical SO-101 has not arrived.
+**Status, 11 Oct 2026 15:30 UTC.** DAgger round 2 is the served policy. The round 3 retrain is running; v9 real-data co-training was discarded. Everything is simulation; the physical SO-101 has not arrived.
 
 | | Pooled (of 576) | held_out_objects (of 96) | so101-benchmark (of 50) |
 |---|---|---|---|
@@ -49,9 +49,10 @@ The served policy is GR00T N1.7 (`hqfang/groot-so100_101`) fine-tuned with LeRob
 - Targeted demos (v6): staged mistakes and decoys did not move any suite.
 - Visual domain randomisation (v7): fixes the wrist-mount scenes but costs clean_many 23 successes.
 - Plain PPO from scratch on privileged state: reward paid hovering; 1% recovery.
+- Real-data co-training (v9, 400 ArmnetBench demos at 23%): 373 vs 438, no gain on new objects, worse on three suites.
 
 ## Next
 
-- Running: DAgger round 3 retrain (after v9), to check whether held_out_objects 61 replicates; v9 real-data co-training (400 ArmnetBench teleop demos at 23% of samples), then v9b with 515 real rollouts added.
+- Running: DAgger round 3 retrain, to check whether held_out_objects 61 replicates. v9b (v9 plus 515 real rollouts) is queued pending a decision, since v9 regressed.
 - Queued: DAgger round 4 with the residual RL expert recording recoveries; the scripted expert recovers 40% of kept states, the RL expert about 72%.
 - Deadline: hackathon submission 30 Oct 2026 17:00 UTC. The physical arm has not arrived; the repo will be updated with live results when it does.

@@ -17,6 +17,7 @@ SCORES = {  # successes of 96 per suite, seed 42
     "DAgger r1": [47, 76, 82, 77, 78, 76],
     "DAgger r2": [50, 76, 86, 85, 86, 81],
     "DAgger r3": [61, 80, 86, 88, 85, 81],
+    "v9 real co-training": [48, 66, 62, 69, 62, 66],
     "FLUX LoRA (fair)": [3, 11, 9, 17, 6, 4],
 }
 # McNemar (+, -, p) of round 2 vs v5 per suite, from `scripts/benchmark.py compare` on the two bench JSONs

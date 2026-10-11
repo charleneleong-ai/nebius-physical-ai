@@ -50,7 +50,7 @@ Ranges are two runs of the same checkpoint. Re-runs move a cell by up to ±9, so
 
 1. **Retrain round 3** (queued after v9) to see whether held_out_objects 61 replicates, then **round 4 with the residual RL expert recording recoveries**, which roughly doubles the recoverable states. Failure-state synthesis (CARE, arXiv 2609.24118; Recova, arXiv 2610.01178) is the other way to grow the yield; see [`reports/so101-generalisation-sota-2026-10-11.md`](../reports/so101-generalisation-sota-2026-10-11.md).
 2. **FLUX is dropped** (#18): GR00T is the base going forward.
-3. **Data lever running:** co-training with 400 real ArmnetBench demos of new objects (#21), aimed at held_out_objects. Best-of-8 is closed (#24); an outcome-trained verifier (DiVeR) is the version of test-time sampling worth trying.
+3. **Real-data co-training is closed** (#21): v9 (400 ArmnetBench demos at 23%) scores 373 vs 438, held_out_objects 48 vs 52, significantly worse on three suites, 0/50 externally; failures shift to pushed and knocked_place. Best-of-8 is closed too (#24); an outcome-trained verifier (DiVeR) is the version of test-time sampling worth trying.
 4. **Train with the wrist mount randomised from the start, from the hqfang base**, instead of continuing v5. That should keep v7's +38 on the Seeed mount without its internal regression.
 5. **The rest of the external gap**: with the wrist mount handled internally, v7 still scores 1/50. Compare so101-benchmark's front-camera framing, start pose and episode length next.
 6. **Grasp quality is now the main internal failure** (pushed and dropped). The scripted expert always grasps top-down at the centre; varied grasp offsets in its demos would show the policy corrected grasps.

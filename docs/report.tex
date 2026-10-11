@@ -108,6 +108,8 @@ suite.
 wrist-camera mount and table texture do not.
 \item \textbf{Visual domain randomisation (v7)}: the Seeed wrist mount alone drops v5 from 81 to 15 on clean\_many's scenes;
 v7 lifts that to 53 but regresses clean\_many itself to 58, and scores 1/50 externally. Not promoted.
+\item \textbf{Real-data co-training (v9)}: 400 ArmnetBench SO-101 teleop demos of new objects at 23\% of samples score 373 vs 438;
+held\_out\_objects 48 vs 52 ($p=0.59$), worse on clean\_many, clean\_top\_down\_many and real\_1\_pomade\_tin ($p\le0.043$), 0/50 externally.
 \item \textbf{Best-of-8 consensus} (medoid of 8 sampled chunks, round 2): held\_out\_objects 55 vs 50 ($p=0.41$),
 clean\_many 87 vs 86; within noise at $8\times$ inference.
 \item \textbf{RL expert} (to replace the scripted expert): plain PPO on privileged state reached 1\% held-out recovery
@@ -129,8 +131,7 @@ fits the slow-start, no-contact pattern, but has not been tested by retraining.
 \end{itemize}
 
 \section{Next}
-A round~3 retrain to test replication; round~4 with the residual RL expert recording recoveries; co-training with 400 real
-ArmnetBench SO-101 demos of new objects (23\% of samples), plus 515 successful real rollouts as an ablation; and an RL
+A round~3 retrain to test replication; round~4 with the residual RL expert recording recoveries; and an RL
 expert that can recover dropped and held blocks. Code, PRs and runs: \url{\repo}, W\&B project \texttt{chaleong/preflight}.
 
 \end{document}

@@ -64,7 +64,7 @@ footer { font-size: 13px; color: var(--muted); }
 
 <main>
 <header>
-  <div class="eyebrow">Preflight · SO-101 · MuJoCo twin · updated 11 Oct 2026, 07:30 UTC</div>
+  <div class="eyebrow">Preflight · SO-101 · MuJoCo twin · updated 11 Oct 2026, 15:30 UTC</div>
   <h1>Nine attempts to make a GR00T arm policy generalise. One passed the gate; one moved new objects.</h1>
   <p class="lede">Every candidate runs the same six suites (12 scenes × 8 perturbed rehearsals, seed 42) and is compared with v5 scene by scene (paired McNemar). It is promoted only with a pooled gain and no suite significantly worse, a gate fixed before the first round was scored. Everything is simulation; the physical arm has not arrived.</p>
   <div class="headline">
@@ -77,7 +77,7 @@ footer { font-size: 13px; color: var(--muted); }
 
 <section>
   <h2>Scoreboard</h2>
-  <p class="takeaway">DAgger round 2 cleared the gate; round 3 scores higher still (481) but its pooled gain over round 2 is within noise. FLUX, trained on the same demos for the same volume, collapses.</p>
+  <p class="takeaway">DAgger round 2 cleared the gate; round 3 scores higher still (481) but its pooled gain over round 2 is within noise. Real co-training (v9) loses 65; FLUX, trained on the same demos for the same volume, collapses.</p>
   <div class="chart"><!--POOLED--></div>
 </section>
 
@@ -136,7 +136,7 @@ flowchart LR
     <div class="row"><span class="pill rejected">Rejected</span><div><strong>Visual domain randomisation (v7)</strong>Lifts the Seeed wrist-mount scenes 15 → 53 but drops clean_many 81 → 58; 1/50 on so101-benchmark.</div></div>
     <div class="row"><span class="pill flat">Kept</span><div><strong>RL expert (residual PPO)</strong>74.0% held-out snapshot recovery vs the scripted expert's 45.9%. Plain PPO stopped at 1% after its reward paid hovering; shaped PPO from scratch stays near 6%.</div></div>
     <div class="row"><span class="pill flat">Flat</span><div><strong>Best-of-8 chunk consensus</strong>Medoid of 8 flow-matching samples on round 2: held_out_objects 55 vs 50 (p=0.41), clean_many 87 vs 86. Within noise at 8× inference cost.</div></div>
-    <div class="row"><span class="pill running">Training</span><div><strong>Real-data co-training (v9, v9b)</strong>400 ArmnetBench SO-101 teleop demos of new objects at 23% of samples; v9b adds 515 successful real rollouts.</div></div>
+    <div class="row"><span class="pill rejected">Rejected</span><div><strong>Real-data co-training (v9)</strong>400 ArmnetBench SO-101 teleop demos of new objects at 23% of samples: 373 vs 438, held_out_objects 48 vs 52 (no gain), significantly worse on three suites, 0/50 externally. v9b (plus 515 real rollouts) is queued pending a decision.</div></div>
   </div>
 </section>
 

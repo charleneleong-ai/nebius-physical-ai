@@ -79,6 +79,7 @@ scene by scene with McNemar tests; a candidate is promoted only with a pooled ga
 | **DAgger round 2** (recoveries ~34%) | **464** | 50 | — | **promoted** (+26; real_1_pomade_tin 74 → 86, p=0.004) |
 | DAgger round 3 (harvested with round 2) | 481 | **61** | — | kept: pooled +17 over round 2 within noise; held_out_objects 50 → 61 (p=0.043); retrain queued |
 | Best-of-8 chunk consensus on round 2 (2 suites) | — | 55 | — | within noise (p=0.41); not adopted |
+| v9: + 400 real ArmnetBench demos (23% of samples) | 373 | 48 | 0/50 | worse on 3 suites (p≤0.043); dropped |
 | FLUX 3 Action LoRA, fair (v5's data and volume) | 50 | 3 | 0/7 | worse on every suite; dropped |
 
 ```mermaid

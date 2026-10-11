@@ -4,3 +4,4 @@
 {"experiment": 3, "name": "DAgger r2", "status": "KEEP", "pooled": 464, "held_out_objects": 50}
 {"experiment": 4, "name": "FLUX LoRA (fair)", "status": "DISCARD", "pooled": 50, "held_out_objects": 3}
 {"experiment": 5, "name": "DAgger r3", "status": "NOT_PROMOTED", "pooled": 481, "held_out_objects": 61}
+{"experiment": 6, "name": "v9 real co-training", "status": "DISCARD", "pooled": 373, "held_out_objects": 48}
