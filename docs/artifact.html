@@ -1,0 +1,159 @@
+<title>Preflight Generalisation Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;700&family=Public+Sans:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a lab ledger. Thesis and scoreboard first, then one chart per question, then every verdict. */
+:root {
+  --bg: #f3f5f4; --surface: #ffffff; --fg: #1a2124; --muted: #5b6669; --line: #d5dcdb;
+  --accent: #2753b8; --good: #1d7a4c; --bad: #b3362b; --warn: #9a6a12; --base: #8a9699; --on: #ffffff;
+  --c0: #b3362b; --c1: #d0812a; --c2: #a8901c; --c3: #3f8fa8; --c4: #6b5fb5; --c5: #8a9699;
+  --display: "Archivo Narrow", "Arial Narrow", system-ui, sans-serif;
+  --body: "Public Sans", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12171a; --surface: #1a2125; --fg: #e3e9ea; --muted: #94a1a4; --line: #2c373b;
+    --accent: #7ea2f2; --good: #5cc28f; --bad: #f07a6c; --warn: #e0b154; --base: #7d898c; --on: #12171a;
+    --c0: #f07a6c; --c1: #f0a65a; --c2: #e6cf62; --c3: #6cc0d8; --c4: #a497ec; --c5: #7d898c; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12171a; --surface: #1a2125; --fg: #e3e9ea; --muted: #94a1a4; --line: #2c373b;
+  --accent: #7ea2f2; --good: #5cc28f; --bad: #f07a6c; --warn: #e0b154; --base: #7d898c; --on: #12171a;
+  --c0: #f07a6c; --c1: #f0a65a; --c2: #e6cf62; --c3: #6cc0d8; --c4: #a497ec; --c5: #7d898c; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--body); padding-inline: 16px; }
+main { max-width: 940px; margin: 0 auto; padding-block: 40px 64px; display: grid; gap: 52px; }
+h1, h2 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: 0.01em; }
+h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.05; }
+h2 { font-size: 1.5rem; margin-bottom: 10px; }
+p { margin: 0 0 12px; max-width: 68ch; }
+.eyebrow { font: 600 12px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin-bottom: 12px; }
+.lede { font-size: 1.08rem; color: var(--muted); }
+.takeaway { font-weight: 600; }
+.headline { display: flex; flex-wrap: wrap; gap: 12px 36px; margin-top: 20px; font-family: var(--mono); }
+.headline div { display: grid; gap: 2px; }
+.headline b { font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+.headline span { font-size: 12px; color: var(--muted); }
+.scroll { overflow-x: auto; }
+.chart { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px; }
+.mermaid { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px; }
+svg text { fill: var(--muted); font: 11px var(--mono); }
+svg .lab { fill: var(--fg); } svg .strong { font-weight: 600; } svg .on { fill: var(--on); font-weight: 600; }
+svg .grid { stroke: var(--line); stroke-dasharray: 2 4; } svg .axis { stroke: var(--line); }
+svg .ref { stroke: var(--fg); stroke-dasharray: 4 3; opacity: 0.6; }
+.b-good { fill: var(--good); } .b-bad { fill: var(--bad); } .b-base { fill: var(--base); }
+.d-sig { stroke: var(--good); } .d-up { stroke: var(--accent); } .d-down { stroke: var(--bad); }
+.d-sig-dot { fill: var(--good); } .d-up-dot { fill: var(--accent); } .d-down-dot { fill: var(--bad); } .dot-base { fill: var(--base); }
+.f0 { fill: var(--c0); } .f1 { fill: var(--c1); } .f2 { fill: var(--c2); } .f3 { fill: var(--c3); } .f4 { fill: var(--c4); } .f5 { fill: var(--c5); }
+.fn0 { fill: var(--base); } .fn1 { fill: var(--good); } .fn2 { fill: var(--c1); } .fn3 { fill: var(--c3); } .fn4 { fill: var(--accent); }
+.l0 { stroke: var(--accent); } .l1 { stroke: var(--c1); } .l2 { stroke: var(--base); }
+.l0-dot { fill: var(--accent); } .l1-dot { fill: var(--c1); } .l2-dot { fill: var(--base); }
+.ledger { display: grid; border-top: 1px solid var(--line); }
+.row { display: grid; grid-template-columns: 7.5rem 1fr; gap: 4px 20px; padding-block: 14px; border-bottom: 1px solid var(--line); }
+.row > div { min-width: 0; }
+.row strong { display: block; }
+.pill { font: 600 11px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; padding: 5px 8px; border-radius: 3px; border: 1px solid currentColor; justify-self: start; align-self: start; }
+.promoted { color: var(--good); } .rejected { color: var(--bad); } .running { color: var(--warn); } .flat { color: var(--muted); }
+@media (max-width: 560px) { .row { grid-template-columns: 1fr; } }
+ul.plain { margin: 0; padding-left: 1.1rem; max-width: 68ch; } ul.plain li { margin-bottom: 6px; }
+a { color: var(--accent); } a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+footer { font-size: 13px; color: var(--muted); }
+</style>
+
+<main>
+<header>
+  <div class="eyebrow">Preflight · SO-101 · MuJoCo twin · updated 12 Oct 2026, 08:45 UTC</div>
+  <h1>Nine attempts to make a GR00T arm policy generalise. One passed the gate; one moved new objects.</h1>
+  <p class="lede">Every candidate runs the same six suites (12 scenes × 8 perturbed rehearsals, seed 42) and is compared with v5 scene by scene (paired McNemar). It is promoted only with a pooled gain and no suite significantly worse, a gate fixed before the first round was scored. Everything is simulation; the physical arm has not arrived.</p>
+  <div class="headline">
+    <div><b>483 / 576</b><span>DAgger round 3, promoted (served)</span></div>
+    <div><b>438 / 576</b><span>v5 baseline</span></div>
+    <div><b>61 / 96</b><span>held-out objects, DAgger r3 (was 47–54)</span></div>
+    <div><b>0–1 / 50</b><span>so101-benchmark, every policy</span></div>
+  </div>
+</header>
+
+<section>
+  <h2>Scoreboard</h2>
+  <p class="takeaway">DAgger rounds 2 and 3 each cleared the gate: 464, then 483 on the retrain (the first round-3 run scored 481). Round 4, with RL-expert recoveries, dropped back to 471. Real co-training (v9) loses 65; FLUX, trained on the same demos for the same volume, collapses.</p>
+  <div class="chart"><div class="scroll"><svg viewBox="0 0 640 310" width="100%" style="min-width:520px" role="img" aria-label="Pooled successes of 576 per candidate"><text x="162" y="24" text-anchor="end" class="lab">v5</text><rect x="170" y="10" width="328.5" height="20" class="b-base"/><text x="504.5" y="24" class="lab">438</text><text x="162" y="54" text-anchor="end" class="lab">v6 targeted demos</text><rect x="170" y="40" width="315.8" height="20" class="b-base"/><text x="491.8" y="54" class="lab">421</text><text x="162" y="84" text-anchor="end" class="lab">DAgger r1</text><rect x="170" y="70" width="327.0" height="20" class="b-base"/><text x="503.0" y="84" class="lab">436</text><text x="162" y="114" text-anchor="end" class="lab">DAgger r2</text><rect x="170" y="100" width="348.0" height="20" class="b-good"/><text x="524.0" y="114" class="lab">464</text><text x="162" y="144" text-anchor="end" class="lab">DAgger r3</text><rect x="170" y="130" width="360.8" height="20" class="b-good"/><text x="536.8" y="144" class="lab">481</text><text x="162" y="174" text-anchor="end" class="lab">v9 real co-training</text><rect x="170" y="160" width="279.8" height="20" class="b-bad"/><text x="455.8" y="174" class="lab">373</text><text x="162" y="204" text-anchor="end" class="lab">DAgger r3 retrain</text><rect x="170" y="190" width="362.2" height="20" class="b-good"/><text x="538.2" y="204" class="lab">483</text><text x="162" y="234" text-anchor="end" class="lab">DAgger r4 (RL recoveries)</text><rect x="170" y="220" width="353.2" height="20" class="b-good"/><text x="529.2" y="234" class="lab">471</text><text x="162" y="264" text-anchor="end" class="lab">FLUX LoRA (fair)</text><rect x="170" y="250" width="37.5" height="20" class="b-bad"/><text x="213.5" y="264" class="lab">50</text><line x1="498.5" y1="4" x2="498.5" y2="284" class="ref"/><text x="502.5" y="296">v5 = 438</text><text x="602.0" y="296" text-anchor="end">of 576</text></svg></div></div>
+</section>
+
+<section>
+  <h2>Where round 2 gained</h2>
+  <p class="takeaway">Better on five of six suites, significant on one; held-out objects did not move.</p>
+  <p>Grey dot is v5, coloured dot is round 2. The labels count scenes where only one checkpoint succeeded.</p>
+  <div class="chart"><div class="scroll"><svg viewBox="0 0 720 254" width="100%" style="min-width:520px" role="img" aria-label="Per-suite successes, v5 to DAgger round 2"><text x="200.0" y="12" text-anchor="middle">40</text><line x1="200.0" y1="18" x2="200.0" y2="228" class="grid"/><text x="330.0" y="12" text-anchor="middle">60</text><line x1="330.0" y1="18" x2="330.0" y2="228" class="grid"/><text x="460.0" y="12" text-anchor="middle">80</text><line x1="460.0" y1="18" x2="460.0" y2="228" class="grid"/><text x="564.0" y="12" text-anchor="middle">96</text><line x1="564.0" y1="18" x2="564.0" y2="228" class="grid"/><text x="190" y="44" text-anchor="end" class="lab">held_out_objects</text><line x1="278.0" y1="40" x2="265.0" y2="40" class="d-down" stroke-width="3"/><circle cx="278.0" cy="40" r="5" class="dot-base"/><circle cx="265.0" cy="40" r="5" class="d-down-dot"/><text x="292.0" y="44">+12/−14  p=0.85</text><text x="190" y="78" text-anchor="end" class="lab">seen_vocabulary</text><line x1="427.5" y1="74" x2="434.0" y2="74" class="d-up" stroke-width="3"/><circle cx="427.5" cy="74" r="5" class="dot-base"/><circle cx="434.0" cy="74" r="5" class="d-up-dot"/><text x="448.0" y="78">+8/−7  p=1.0</text><text x="190" y="112" text-anchor="end" class="lab">clean_many</text><line x1="466.5" y1="108" x2="499.0" y2="108" class="d-up" stroke-width="3"/><circle cx="466.5" cy="108" r="5" class="dot-base"/><circle cx="499.0" cy="108" r="5" class="d-up-dot"/><text x="513.0" y="112">+7/−2  p=0.18</text><text x="190" y="146" text-anchor="end" class="lab">clean_top_down_many</text><line x1="479.5" y1="142" x2="492.5" y2="142" class="d-up" stroke-width="3"/><circle cx="479.5" cy="142" r="5" class="dot-base"/><circle cx="492.5" cy="142" r="5" class="d-up-dot"/><text x="506.5" y="146">+6/−4  p=0.75</text><text x="190" y="180" text-anchor="end" class="lab">real_1_pomade_tin_many</text><line x1="421.0" y1="176" x2="499.0" y2="176" class="d-sig" stroke-width="3"/><circle cx="421.0" cy="176" r="5" class="dot-base"/><circle cx="499.0" cy="176" r="5" class="d-sig-dot"/><text x="513.0" y="180">+14/−2  p=0.004</text><text x="190" y="214" text-anchor="end" class="lab">in_path_pomade_tin_many</text><line x1="414.5" y1="210" x2="466.5" y2="210" class="d-up" stroke-width="3"/><circle cx="414.5" cy="210" r="5" class="dot-base"/><circle cx="466.5" cy="210" r="5" class="d-up-dot"/><text x="480.5" y="214">+13/−5  p=0.1</text></svg></div></div>
+</section>
+
+<section>
+  <h2>How it fails</h2>
+  <p class="takeaway">Two DAgger rounds cut <em>no_contact</em> from 57 to 24. <em>Holding</em> rose from 4 to 18 in round 2 and eased to 13 in round 3: the policy grasps but does not always let go on target.</p>
+  <p>Each bar is one checkpoint's failures, split by the label <code>FailureWatch</code> assigns. FLUX fails four times as often, mostly without touching the block.</p>
+  <div class="chart"><div class="scroll"><svg viewBox="0 0 680 282" width="100%" style="min-width:520px" role="img" aria-label="Failure labels as a share of each checkpoint's failures"><text x="112" y="25" text-anchor="end" class="lab">v5</text><rect x="120.0" y="10" width="181.7" height="22" class="f0"/><text x="210.9" y="25" text-anchor="middle" class="on">57</text><rect x="301.7" y="10" width="108.4" height="22" class="f1"/><text x="355.9" y="25" text-anchor="middle" class="on">34</text><rect x="410.1" y="10" width="76.5" height="22" class="f2"/><text x="448.4" y="25" text-anchor="middle" class="on">24</text><rect x="486.7" y="10" width="12.8" height="22" class="f3"/><rect x="499.4" y="10" width="25.5" height="22" class="f4"/><rect x="524.9" y="10" width="35.1" height="22" class="f5"/><text x="542.5" y="25" text-anchor="middle" class="on">11</text><text x="568" y="25" class="lab">138 failed</text><text x="112" y="59" text-anchor="end" class="lab">DAgger r1</text><rect x="120.0" y="44" width="141.4" height="22" class="f0"/><text x="190.7" y="59" text-anchor="middle" class="on">45</text><rect x="261.4" y="44" width="125.7" height="22" class="f1"/><text x="324.3" y="59" text-anchor="middle" class="on">40</text><rect x="387.1" y="44" width="103.7" height="22" class="f2"/><text x="439.0" y="59" text-anchor="middle" class="on">33</text><rect x="490.9" y="44" width="40.9" height="22" class="f3"/><text x="511.3" y="59" text-anchor="middle" class="on">13</text><rect x="531.7" y="44" width="28.3" height="22" class="f4"/><text x="545.9" y="59" text-anchor="middle" class="on">9</text><text x="568" y="59" class="lab">140 failed</text><text x="112" y="93" text-anchor="end" class="lab">DAgger r2</text><rect x="120.0" y="78" width="129.6" height="22" class="f0"/><text x="184.8" y="93" text-anchor="middle" class="on">33</text><rect x="249.6" y="78" width="121.8" height="22" class="f1"/><text x="310.5" y="93" text-anchor="middle" class="on">31</text><rect x="371.4" y="78" width="102.1" height="22" class="f2"/><text x="422.5" y="93" text-anchor="middle" class="on">26</text><rect x="473.6" y="78" width="70.7" height="22" class="f3"/><text x="508.9" y="93" text-anchor="middle" class="on">18</text><rect x="544.3" y="78" width="11.8" height="22" class="f4"/><rect x="556.1" y="78" width="3.9" height="22" class="f5"/><text x="568" y="93" class="lab">112 failed</text><text x="112" y="127" text-anchor="end" class="lab">DAgger r3</text><rect x="120.0" y="112" width="111.2" height="22" class="f0"/><text x="175.6" y="127" text-anchor="middle" class="on">24</text><rect x="231.2" y="112" width="148.2" height="22" class="f1"/><text x="305.3" y="127" text-anchor="middle" class="on">32</text><rect x="379.4" y="112" width="78.7" height="22" class="f2"/><text x="418.7" y="127" text-anchor="middle" class="on">17</text><rect x="458.1" y="112" width="60.2" height="22" class="f3"/><text x="488.2" y="127" text-anchor="middle" class="on">13</text><rect x="518.3" y="112" width="41.7" height="22" class="f4"/><text x="539.2" y="127" text-anchor="middle" class="on">9</text><text x="568" y="127" class="lab">95 failed</text><text x="112" y="161" text-anchor="end" class="lab">DAgger r3 retrain</text><rect x="120.0" y="146" width="85.2" height="22" class="f0"/><text x="162.6" y="161" text-anchor="middle" class="on">18</text><rect x="205.2" y="146" width="165.6" height="22" class="f1"/><text x="288.0" y="161" text-anchor="middle" class="on">35</text><rect x="370.8" y="146" width="104.1" height="22" class="f2"/><text x="422.8" y="161" text-anchor="middle" class="on">22</text><rect x="474.8" y="146" width="61.5" height="22" class="f3"/><text x="505.6" y="161" text-anchor="middle" class="on">13</text><rect x="536.3" y="146" width="23.7" height="22" class="f4"/><text x="568" y="161" class="lab">93 failed</text><text x="112" y="195" text-anchor="end" class="lab">DAgger r4</text><rect x="120.0" y="180" width="163.4" height="22" class="f0"/><text x="201.7" y="195" text-anchor="middle" class="on">39</text><rect x="283.4" y="180" width="79.6" height="22" class="f1"/><text x="323.2" y="195" text-anchor="middle" class="on">19</text><rect x="363.0" y="180" width="104.8" height="22" class="f2"/><text x="415.4" y="195" text-anchor="middle" class="on">25</text><rect x="467.8" y="180" width="71.2" height="22" class="f3"/><text x="503.4" y="195" text-anchor="middle" class="on">17</text><rect x="539.0" y="180" width="21.0" height="22" class="f4"/><text x="568" y="195" class="lab">105 failed</text><text x="112" y="229" text-anchor="end" class="lab">FLUX LoRA</text><rect x="120.0" y="214" width="299.5" height="22" class="f0"/><text x="269.7" y="229" text-anchor="middle" class="on">358</text><rect x="419.5" y="214" width="96.2" height="22" class="f1"/><text x="467.6" y="229" text-anchor="middle" class="on">115</text><rect x="515.7" y="214" width="18.4" height="22" class="f2"/><rect x="534.1" y="214" width="20.1" height="22" class="f3"/><rect x="554.1" y="214" width="5.9" height="22" class="f5"/><text x="568" y="229" class="lab">526 failed</text><rect x="120" y="258" width="10" height="10" class="f0"/><text x="134" y="267">no_contact</text><rect x="212" y="258" width="10" height="10" class="f1"/><text x="226" y="267">pushed</text><rect x="304" y="258" width="10" height="10" class="f2"/><text x="318" y="267">dropped</text><rect x="396" y="258" width="10" height="10" class="f3"/><text x="410" y="267">holding</text><rect x="488" y="258" width="10" height="10" class="f4"/><text x="502" y="267">fell_off</text><rect x="580" y="258" width="10" height="10" class="f5"/><text x="594" y="267">knocked_place</text></svg></div></div>
+</section>
+
+<section>
+  <h2>The DAgger loop</h2>
+  <p>Each round rolls the current policy out, snapshots each failure, keeps the most uncertain within a balanced budget, and lets the scripted expert record a recovery from that exact state. Recoveries are weighted ×8 in training from round 2 on.</p>
+  <pre class="mermaid">
+flowchart LR
+  P["current policy"] -->|800 rollouts| F["failure snapshots"]
+  F -->|"uncertainty band 5–80%, budget per type"| K["kept states"]
+  K -->|scripted expert| R["recoveries"]
+  R -->|"×8 + base demos"| T["fine-tune 4k steps"]
+  T --> B["6 suites × 96 vs v5"]
+  B -->|"pooled gain, no suite worse"| P
+  </pre>
+  <p class="takeaway" style="margin-top:16px">Each round the policy fails less and the script rescues only about 40% of kept states, so recoveries shrank 85 → 72 → 59. Round 4 swapped in the residual RL expert, which recovered 88 of 120.</p>
+  <div class="chart"><div class="scroll"><svg viewBox="0 0 900 206" width="100%" style="min-width:520px" role="img" aria-label="DAgger funnels per round"><text x="10" y="14" class="lab strong">Round 1 (v5)</text><rect x="10" y="26" width="190.0" height="20" class="fn0"/><text x="204.0" y="40" class="lab">800</text><rect x="10" y="56" width="108.3" height="20" class="fn1"/><text x="122.3" y="70" class="lab">456</text><rect x="10" y="86" width="78.4" height="20" class="fn2"/><text x="92.4" y="100" class="lab">330</text><rect x="10" y="116" width="49.2" height="20" class="fn3"/><text x="63.2" y="130" class="lab">207</text><rect x="10" y="146" width="20.2" height="20" class="fn4"/><text x="34.2" y="160" class="lab">85</text><text x="230" y="14" class="lab strong">Round 2 (v5)</text><rect x="230" y="26" width="190.0" height="20" class="fn0"/><text x="424.0" y="40" class="lab">800</text><rect x="230" y="56" width="117.3" height="20" class="fn1"/><text x="351.3" y="70" class="lab">494</text><rect x="230" y="86" width="70.3" height="20" class="fn2"/><text x="304.3" y="100" class="lab">296</text><rect x="230" y="116" width="44.9" height="20" class="fn3"/><text x="278.9" y="130" class="lab">189</text><rect x="230" y="146" width="17.1" height="20" class="fn4"/><text x="251.1" y="160" class="lab">72</text><text x="450" y="14" class="lab strong">Round 3 (r2)</text><rect x="450" y="26" width="190.0" height="20" class="fn0"/><text x="644.0" y="40" class="lab">800</text><rect x="450" y="56" width="136.3" height="20" class="fn1"/><text x="590.3" y="70" class="lab">574</text><rect x="450" y="86" width="46.8" height="20" class="fn2"/><text x="500.8" y="100" class="lab">197</text><rect x="450" y="116" width="34.7" height="20" class="fn3"/><text x="488.7" y="130" class="lab">146</text><rect x="450" y="146" width="14.0" height="20" class="fn4"/><text x="468.0" y="160" class="lab">59</text><text x="670" y="14" class="lab strong">Round 4 (r3, RL expert)</text><rect x="670" y="26" width="190.0" height="20" class="fn0"/><text x="864.0" y="40" class="lab">800</text><rect x="670" y="56" width="145.8" height="20" class="fn1"/><text x="819.8" y="70" class="lab">614</text><rect x="670" y="86" width="39.2" height="20" class="fn2"/><text x="713.2" y="100" class="lab">165</text><rect x="670" y="116" width="28.5" height="20" class="fn3"/><text x="702.5" y="130" class="lab">120</text><rect x="670" y="146" width="20.9" height="20" class="fn4"/><text x="694.9" y="160" class="lab">88</text><rect x="10" y="186" width="10" height="10" class="fn0"/><text x="24" y="195">rollouts</text><rect x="138" y="186" width="10" height="10" class="fn1"/><text x="152" y="195">succeeded</text><rect x="266" y="186" width="10" height="10" class="fn2"/><text x="280" y="195">recoverable</text><rect x="394" y="186" width="10" height="10" class="fn3"/><text x="408" y="195">kept</text><rect x="522" y="186" width="10" height="10" class="fn4"/><text x="536" y="195">expert recovered</text></svg></div></div>
+</section>
+
+<section>
+  <h2>FLUX predicts well and acts badly</h2>
+  <p class="takeaway">Open-loop the LoRA beats holding the pose three to one at 32 steps; closed-loop it succeeds 50 times in 576.</p>
+  <p>Mean action error on 60 held-out demo frames, each fed its 7 preceding frames. The quantile bridge sits inside this loop both ways, so the mapping is not the problem.</p>
+  <div class="chart"><div class="scroll"><svg viewBox="0 0 640 226" width="100%" style="min-width:520px" role="img" aria-label="Open-loop action error by horizon"><line x1="50" y1="180" x2="610" y2="180" class="axis"/><text x="44" y="184.0" text-anchor="end">0</text><line x1="50" y1="180.0" x2="610" y2="180.0" class="grid"/><text x="44" y="104.0" text-anchor="end">4</text><line x1="50" y1="100.0" x2="610" y2="100.0" class="grid"/><text x="44" y="24.0" text-anchor="end">9</text><line x1="50" y1="20.0" x2="610" y2="20.0" class="grid"/><polyline points="67.5,175.9 190.0,160.8 330.0,148.9 610.0,131.8" class="l0" fill="none" stroke-width="2.5"/><circle cx="610.0" cy="131.8" r="4" class="l0-dot"/><rect x="60" y="196" width="12" height="4" class="l0-dot"/><text x="78" y="201">fair LoRA</text><polyline points="67.5,173.4 190.0,139.8 330.0,102.8 610.0,34.4" class="l1" fill="none" stroke-width="2.5"/><circle cx="610.0" cy="34.4" r="4" class="l1-dot"/><rect x="230" y="196" width="12" height="4" class="l1-dot"/><text x="248" y="201">zero-shot FLUX</text><polyline points="67.5,170.6 190.0,136.1 330.0,97.2 610.0,33.5" class="l2" fill="none" stroke-width="2.5"/><circle cx="610.0" cy="33.5" r="4" class="l2-dot"/><rect x="400" y="196" width="12" height="4" class="l2-dot"/><text x="418" y="201">hold pose</text><text x="610" y="218" text-anchor="end">steps ahead</text><text x="10" y="10">mean |action error|</text></svg></div></div>
+</section>
+
+<section>
+  <h2>An RL expert to recover what the script cannot</h2>
+  <p class="takeaway">A residual policy on top of the scripted expert recovers 74.0% of held-out failure snapshots; the expert alone recovers 45.9%.</p>
+  <p>Recovery from DAgger failure states the policy never trained on (W&amp;B run <code>fb6yv89f</code>), with fresh scenes still at 100%. Shaped PPO from scratch stays near 6% training success and is not shown. The next DAgger round records recoveries with this expert.</p>
+  <div class="chart"><div class="scroll"><svg viewBox="0 0 640 226" width="100%" style="min-width:520px" role="img" aria-label="RL expert held-out recovery"><line x1="50" y1="180" x2="610" y2="180" class="axis"/><text x="44" y="184.0" text-anchor="end">0</text><line x1="50" y1="180.0" x2="610" y2="180.0" class="grid"/><text x="44" y="104.0" text-anchor="end">50</text><line x1="50" y1="100.0" x2="610" y2="100.0" class="grid"/><text x="44" y="24.0" text-anchor="end">100</text><line x1="50" y1="20.0" x2="610" y2="20.0" class="grid"/><line x1="50" y1="106.6" x2="610" y2="106.6" class="ref"/><text x="610" y="100.6" text-anchor="end">scripted expert alone: 45.9%</text><polyline points="50.0,106.6 137.5,81.4 225.0,71.5 312.5,68.2 400.0,66.1 487.5,65.0 575.0,61.6" class="l0" fill="none" stroke-width="2.5"/><circle cx="575.0" cy="61.6" r="4" class="l0-dot"/><rect x="60" y="196" width="12" height="4" class="l0-dot"/><text x="78" y="201">residual PPO on the scripted expert</text><text x="610" y="218" text-anchor="end">thousand env steps</text><text x="10" y="10">held-out recovery %</text></svg></div></div>
+</section>
+
+<section>
+  <h2>Every experiment, with its verdict</h2>
+  <div class="ledger">
+    <div class="row"><span class="pill promoted">Promoted</span><div><strong>DAgger round 2, recoveries ×8</strong>Pooled 464 vs 438, no suite worse. Served until round 3.</div></div>
+    <div class="row"><span class="pill flat">Kept</span><div><strong>DAgger round 1</strong>436 vs 438. Recoveries were 3.5% of training, too diluted to matter.</div></div>
+    <div class="row"><span class="pill promoted">Promoted</span><div><strong>DAgger round 3</strong>Retrained from the kept recoveries: 483 vs round 2's 464, pooled better, no suite worse; now served. The first run scored 481 with held_out_objects 61 (p=0.043); the retrain 57, above round 2 in both runs.</div></div>
+    <div class="row"><span class="pill flat">Kept</span><div><strong>DAgger round 4, RL expert records recoveries</strong>The residual RL expert recovered 88 of 120 kept failure states (73%, vs the script's 40%), but the candidate scored 471 vs 483 (within noise) and no_contact rose from 18 to 39.</div></div>
+    <div class="row"><span class="pill rejected">Rejected</span><div><strong>FLUX 3 Action LoRA (fair)</strong>Same 800 demos, same sample volume: 50 vs 438, worse on every suite (p &lt; 0.001), 0/7 externally. Executing 16 instead of 32 actions per chunk did not help.</div></div>
+    <div class="row"><span class="pill flat">Flat</span><div><strong>Targeted demos (v6)</strong>Staged-mistake recoveries plus lookalike decoys: 421 vs 438, within noise.</div></div>
+    <div class="row"><span class="pill rejected">Rejected</span><div><strong>Visual domain randomisation (v7)</strong>Lifts the Seeed wrist-mount scenes 15 → 53 but drops clean_many 81 → 58; 1/50 on so101-benchmark.</div></div>
+    <div class="row"><span class="pill flat">Kept</span><div><strong>RL expert (residual PPO)</strong>74.0% held-out snapshot recovery vs the scripted expert's 45.9%. Plain PPO stopped at 1% after its reward paid hovering; shaped PPO from scratch stays near 6%.</div></div>
+    <div class="row"><span class="pill flat">Flat</span><div><strong>Best-of-8 chunk consensus</strong>Medoid of 8 flow-matching samples on round 2: held_out_objects 55 vs 50 (p=0.41), clean_many 87 vs 86. Within noise at 8× inference cost.</div></div>
+    <div class="row"><span class="pill rejected">Rejected</span><div><strong>Real-data co-training (v9)</strong>400 ArmnetBench SO-101 teleop demos of new objects at 23% of samples: 373 vs 438, held_out_objects 48 vs 52 (no gain), significantly worse on three suites, 0/50 externally. v9b (plus 515 real rollouts) is queued pending a decision.</div></div>
+  </div>
+</section>
+
+<section>
+  <h2>What is not established</h2>
+  <ul class="plain">
+    <li>Nothing has run on the physical arm. The repo will be updated with live results when it arrives.</li>
+    <li>Round 3's new-object gain (p=0.043) is one suite of six, uncorrected for multiple comparisons, from one seed.</li>
+    <li>No single suite gain from round 3's retrain is significant on its own; the pooled gain passed a gate fixed in advance, twice in a row for rounds 2 and 3.</li>
+    <li>FLUX's failure mechanism (8-frame self-history and integrated deltas) is a hypothesis, not tested by retraining.</li>
+    <li>The RL expert is measured on recovering failure snapshots, not yet as a source of DAgger data.</li>
+    <li>One benchmark seed and one training seed per checkpoint.</li>
+  </ul>
+</section>
+
+<footer>
+  Sources: <a href="https://github.com/charleneleong-ai/nebius-physical-ai">charleneleong-ai/nebius-physical-ai</a> — <code>docs/report.pdf</code>, <code>docs/experiment-card.md</code>, <code>docs/generalisation-diagnosis.md</code>; rebuilt by <code>scripts/build_artifact.py</code>. Runs: <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==">W&amp;B report</a>.
+</footer>
+</main>

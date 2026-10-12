@@ -1,0 +1,122 @@
+# One row per experiment (label, baseline, gate, result, verdict, pr, family, runs), rendered by the W&B report (scripts/wandb_report.py) and the artifact.
+# Gates:
+#   G1  promotion: pooled paired gain over the reference on the six gate suites (6 x 96, seed 42) and no suite
+#       significantly worse (scripts/benchmark.py gate). Fixed before DAgger round 1 was scored.
+#   S1  screen: paired McNemar per suite against the reference on the suites run; adopted only on a significant gain.
+pr_base: https://github.com/charleneleong-ai/nebius-physical-ai/pull
+experiments:
+  - label: v5 fine-tune (800 scripted twin demos)
+    family: v5
+    runs: {00rc0kh2: train, tlxeuuow: bench}
+    baseline: base hqfang/groot-so100_101
+    gate: reference
+    result: 438/576 pooled; held_out_objects 52/96; so101-benchmark 0/50. Reference for every later comparison.
+    verdict: PROMOTE
+    pr: 11
+  - label: v6 targeted demos (staged-mistake recoveries, lookalike decoys)
+    family: v6
+    runs: {0v6jtr5z: train, vng1etk3: bench}
+    baseline: v5 438
+    gate: G1
+    result: 421/576, within noise on every suite.
+    verdict: DISCARD
+    pr: 13
+  - label: v7 visual domain randomisation (textured floors, Seeed wrist mount)
+    family: v7
+    runs: {rmvx9ns7: train, xxynwczx: bench}
+    baseline: v5 (clean_many 81)
+    gate: S1
+    result: wrist-mount scenes 15 -> 53, but clean_many 81 -> 58; so101-benchmark 1/50.
+    verdict: DISCARD
+    pr: 17
+  - label: DAgger round 1 (recoveries 3.5% of training)
+    family: dagger
+    runs: {o3slkh2r: train, j3cac029: bench}
+    baseline: v5 438
+    gate: G1
+    result: 436/576; recoveries too diluted to move anything.
+    verdict: KEEP
+    pr: 15
+  - label: DAgger round 2 (recoveries x8, about a third of training)
+    family: dagger
+    runs: {0e0jg307: train, 6uu7xt8f: bench}
+    baseline: v5 438
+    gate: G1
+    result: 464/576, no suite worse; real_1_pomade_tin 86 vs 74 (+14/-2, p=0.004). Served until round 3 was promoted.
+    verdict: PROMOTE
+    pr: 15
+  - label: DAgger round 3, first run (harvested with round 2)
+    family: dagger
+    runs: {si90qxw0: train, n9iuijtc: bench}
+    baseline: round 2 464
+    gate: G1
+    result: 481/576, pooled gain within noise; held_out_objects 61 vs 50 (+18/-7, p=0.043), the first significant gain on new objects. Checkpoint deleted on KEEP; retrained below.
+    verdict: KEEP
+    pr: 23
+  - label: DAgger round 3, retrained from the kept recoveries
+    family: dagger
+    runs: {vdfjfwpa: train, gxnpzs9q: bench}
+    baseline: round 2 464
+    gate: G1
+    result: 483/576, pooled better (+19), no suite worse; held_out_objects 57 vs 50 (p=0.30; first run 61). The pooled gain replicates (481 then 483). Served policy.
+    verdict: PROMOTE
+    pr: 23
+  - label: DAgger round 4, residual RL expert recording recoveries
+    family: dagger
+    runs: {oshdu93s: train, q7cma6w2: bench}
+    baseline: round 3 483
+    gate: G1
+    result: harvest 614/800; RL expert recovered 88 of 120 kept states (73%, vs the script's 40%); 304 recoveries x8 in training. 471/576 (-12, within noise); held_out_objects 49 vs 57 (p=0.17); no_contact rose 18 to 39.
+    verdict: KEEP
+    pr: 26
+  - label: FLUX 3 Action LoRA, trained fairly (same demos, same sample volume)
+    family: flux3
+    runs: {exbxwyhy: train, hqt3v5n5: bench, 50tkg0jd: so101-benchmark}
+    baseline: v5 438
+    gate: G1
+    result: 50/576, worse on every suite (p<0.001); so101-benchmark 0/7. Open-loop error 2.71 vs 8.24 for holding the pose at 32 steps.
+    verdict: DISCARD
+    pr: 18
+  - label: FLUX 16-step chunks
+    family: flux3
+    runs: {je5ezhgc: bench}
+    baseline: FLUX LoRA 32-step
+    gate: S1
+    result: held_out_objects 4 vs 3 (p=1.0); clean_many 2 vs 9 (worse, p=0.039).
+    verdict: DISCARD
+    pr: 18
+  - label: Best-of-8 chunk consensus on round 2
+    family: best-of-n
+    runs: {dyvurfs6: bench}
+    baseline: round 2 (held_out 50, clean_many 86)
+    gate: S1
+    result: held_out_objects 55 (+14/-9, p=0.41); clean_many 87 (p=1.0). Within noise at 8x inference cost.
+    verdict: DISCARD
+    pr: 24
+  - label: RL expert, residual PPO on the scripted expert
+    family: rl-expert
+    runs: {fb6yv89f: train}
+    baseline: scripted expert 45.9% snapshot recovery
+    gate: S1
+    result: held-out snapshot recovery 74.0% vs the expert's 45.9% at 3.0M steps (61.6% at 500k); stopped 11 Oct to free CPU, best checkpoint kept, fresh scenes 100%. Clears its bar; next step is recording its recoveries as DAgger data.
+    verdict: KEEP
+    pr: 25
+  - label: RL expert, shaped PPO from scratch (grasp reward)
+    family: rl-expert
+    runs: {r7to1qnr: train}
+    baseline: scripted expert 45.9% snapshot recovery
+    gate: S1
+    result: held-out recovery 6% at 6.2M steps (training success 41%, fresh scenes 73%). Stopped 11 Oct for missing the bar.
+    verdict: DISCARD
+    pr: 25
+  - label: Real-data co-training v9 (400 ArmnetBench teleop demos, 23% of samples)
+    family: cotrain
+    runs: {aryg9mnj: train, poja6iyz: bench}
+    baseline: v5 438
+    gate: G1
+    result: 373/576 vs v5 438; held_out_objects 48 vs 52 (p=0.59); worse on clean_many (62 vs 81, p=0.001), clean_top_down_many (69 vs 83, p=0.001), real_1_pomade_tin (62 vs 74, p=0.043); so101-benchmark 0/50. Failures mostly pushed (84 of 203) and knocked_place (21).
+    verdict: DISCARD
+    pr: 21
+superseded:  # killed, crashed on launch, or relaunched; tagged `superseded`
+  [te8xslg6, uf547kdi, 5vzuj6cz, 9mq1zp6u, 7wdlq67i, cl3ltozz, z0etzlli, 15i8w2eg, rhicuin5, 9p93rb37, 30r7i00q, ap8n1409,
+   r83f86xc, kog76yhz, 2duwptwy, 9xe5clfu, 3fysf7vw, ypcoha4l, 6njr9qet]

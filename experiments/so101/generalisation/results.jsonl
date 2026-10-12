@@ -1,0 +1,9 @@
+{"experiment": 0, "name": "v5", "status": "BASELINE", "pooled": 438, "held_out_objects": 52}
+{"experiment": 1, "name": "v6 targeted demos", "status": "DISCARD", "pooled": 421, "held_out_objects": 54}
+{"experiment": 2, "name": "DAgger r1", "status": "DISCARD", "pooled": 436, "held_out_objects": 47}
+{"experiment": 3, "name": "DAgger r2", "status": "KEEP", "pooled": 464, "held_out_objects": 50}
+{"experiment": 4, "name": "FLUX LoRA (fair)", "status": "DISCARD", "pooled": 50, "held_out_objects": 3}
+{"experiment": 5, "name": "DAgger r3 (first run)", "status": "NOT_PROMOTED", "pooled": 481, "held_out_objects": 61}
+{"experiment": 6, "name": "v9 real co-training", "status": "DISCARD", "pooled": 373, "held_out_objects": 48}
+{"experiment": 7, "name": "DAgger r3 retrain", "status": "KEEP", "pooled": 483, "held_out_objects": 57}
+{"experiment": 8, "name": "DAgger r4 (RL recoveries)", "status": "NOT_PROMOTED", "pooled": 471, "held_out_objects": 49}

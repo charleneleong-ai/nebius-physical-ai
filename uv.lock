@@ -43,6 +43,25 @@ wheels = [
 ]
 
 [[package]]
+name = "autoresearch"
+version = "0.36.0"
+source = { git = "ssh://git@github.com/charleneleong-ai/autoresearch.git?rev=79aec56087d8035321227f427070288d353b874f#79aec56087d8035321227f427070288d353b874f" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "plotly" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "typer" },
+]
+
+[package.optional-dependencies]
+wandb = [
+    { name = "python-dotenv" },
+    { name = "wandb" },
+    { name = "wandb-workspaces" },
+]
+
+[[package]]
 name = "av"
 version = "19.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1194,6 +1213,10 @@ dev = [
     { name = "pytest" },
     { name = "ruff" },
 ]
+report = [
+    { name = "autoresearch", extra = ["wandb"] },
+    { name = "pyyaml" },
+]
 rl = [
     { name = "gymnasium" },
     { name = "stable-baselines3" },
@@ -1201,6 +1224,7 @@ rl = [
 
 [package.metadata]
 requires-dist = [
+    { name = "autoresearch", extras = ["wandb"], marker = "extra == 'report'", git = "ssh://git@github.com/charleneleong-ai/autoresearch.git?rev=79aec56087d8035321227f427070288d353b874f" },
     { name = "av", specifier = ">=19.0.0" },
     { name = "fastapi", specifier = ">=0.142.1" },
     { name = "gymnasium", marker = "extra == 'rl'", specifier = ">=1.4.0" },
@@ -1215,6 +1239,7 @@ requires-dist = [
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4" },
     { name = "pyarrow", specifier = ">=25.0.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
+    { name = "pyyaml", marker = "extra == 'report'", specifier = ">=6" },
     { name = "pyzmq", specifier = ">=27.2.0" },
     { name = "rich", specifier = ">=14" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16" },
@@ -1223,7 +1248,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
     { name = "wandb", extras = ["media"], specifier = ">=0.30.0" },
 ]
-provides-extras = ["rl", "dev"]
+provides-extras = ["rl", "report", "dev"]
 
 [[package]]
 name = "networkx"
@@ -2398,6 +2423,19 @@ media = [
     { name = "plotly" },
     { name = "rdkit" },
     { name = "soundfile" },
+]
+
+[[package]]
+name = "wandb-workspaces"
+version = "0.4.13"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "wandb" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bc/a1/f3459540afc4fca07a653ed3d65663101cfa23256152fe075fb991995b45/wandb_workspaces-0.4.13.tar.gz", hash = "sha256:819986e5196bc86273f3535062f1c1a411ad41fa88ae8eddbc876a70380f4b33", size = 228741, upload-time = "2026-10-06T19:55:31.833Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/d6/2e75c824f508b169e44a27d1ec3b2bf41209ba879104a5819036e5fda339/wandb_workspaces-0.4.13-py3-none-any.whl", hash = "sha256:b0b2e2f1e75afda8c2286882c3b502cee35da6b740ed48dec141a734e5e2e3bb", size = 115915, upload-time = "2026-10-06T19:55:30.182Z" },
 ]
 
 [[package]]

@@ -28,6 +28,10 @@ rl = [  # the RL expert (scripts/rl_expert.py) trains on CPU
     "stable-baselines3>=2.9.0",
     "gymnasium>=1.4.0",
 ]
+report = [
+    "autoresearch[wandb] @ git+ssh://git@github.com/charleneleong-ai/autoresearch.git@79aec56087d8035321227f427070288d353b874f",
+    "pyyaml>=6",
+]
 dev = [
     "pytest>=8",
     "ruff>=0.16",
