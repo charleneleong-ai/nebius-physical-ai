@@ -28,6 +28,9 @@ PARTS=${PARTS:-8} STEPS=${STEPS:-4000} LEARNING_RATE=${LEARNING_RATE:-1e-5}
 # drowned out by thousands of clean demos (round 1: 85 of 2,485 episodes, 3.5%, and no measurable change).
 BASE=${BASE:-} RECOVERIES=${RECOVERIES:-} UPWEIGHT=${UPWEIGHT:-8}
 TRAIN_WHEN=${TRAIN_WHEN:-true}  # shell condition polled before training, e.g. to wait for another job's GPU
+# RL_POLICY: a residual RL expert (scripts/rl_expert.py --residual) records the recoveries instead of the script; it
+# recovers about 74% of held-out failure states against the script's 46%.
+RL_POLICY=${RL_POLICY:-}
 SUITES=(clean_many seen_vocabulary held_out_objects clean_top_down_many real_1_pomade_tin_many in_path_pomade_tin_many)
 R=$((ROUND + 1))
 DIR=$PWD/logs/dagger/r$R RAW=$HOME/data/dagger_r$R NEXT_DATA=$HOME/data/dagger_agg_r${R}_v30
@@ -57,8 +60,8 @@ if [ "$STAGE" = harvest ]; then
   pids=()
   for k in $(seq 0 $((PARTS - 1))); do
     rm -rf "$RAW/part_$k"
-    uv run python scripts/dagger.py recover "$DIR/snapshots.jsonl" "$RAW/part_$k" --part "$k" --parts "$PARTS" \
-      > "$DIR/recover_$k.log" 2>&1 &
+    OMP_NUM_THREADS=1 uv run ${RL_POLICY:+--extra rl} python scripts/dagger.py recover "$DIR/snapshots.jsonl" \
+      "$RAW/part_$k" --part "$k" --parts "$PARTS" ${RL_POLICY:+--rl-policy "$RL_POLICY"} > "$DIR/recover_$k.log" 2>&1 &
     pids+=($!)
   done
   for p in "${pids[@]}"; do wait "$p" || { say "a recovery part failed; see $DIR/recover_*.log"; exit 1; }; done

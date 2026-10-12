@@ -15,13 +15,14 @@ state is the base action and the policy only adds a small bounded correction (re
 arXiv 2412.13630), so a zero policy is the scripted expert and learning only has to find the recoveries it misses.
 """
 
+from collections.abc import Callable
 from typing import Any
 
 import gymnasium as gym
 import numpy as np
 
 from nebius_physical_ai.twin.dagger import FailureSnapshot
-from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler, UnreachableTarget
+from nebius_physical_ai.twin.expert import Frame, PickPlaceExpert, SceneSampler, UnreachableTarget
 from nebius_physical_ai.twin.rollout import CONTROL_HZ, LIFTED_M, StackCheck
 from nebius_physical_ai.twin.scene import ARM_JOINTS, BlockPhysics, Twin, TwinLayout
 
@@ -57,6 +58,7 @@ class PickPlaceEnv(gym.Env):
         self.rng = np.random.default_rng(seed)
         self.horizon, self.residual = round(horizon_s * POLICY_HZ), residual
         self.twin, self.check = self.template, StackCheck()
+        self.on_tick: Callable[[np.ndarray], None] | None = None  # sees each control tick's target before it is applied
         self.action_space = gym.spaces.Box(-1.0, 1.0, (len(ARM_JOINTS),), np.float32)
         self.observation_space = gym.spaces.Box(-np.inf, np.inf, (OBS_SIZE,), np.float32)
 
@@ -170,6 +172,8 @@ class PickPlaceEnv(gym.Env):
         for _ in range(CONTROL_HZ // POLICY_HZ):
             if self.residual:  # the expert's target this tick, corrected
                 self.target = np.clip(self.base() + RESIDUAL_RAD * action, lo, hi)
+            if self.on_tick:
+                self.on_tick(self.target)
             self.twin.step_towards(self.target, 1 / CONTROL_HZ)
             self.tick += 1
         self.steps += 1
@@ -183,3 +187,24 @@ class PickPlaceEnv(gym.Env):
     def close(self) -> None:
         for twin in [self.template, *self.restored.values()]:
             twin.close()
+
+
+def record_residual_recovery(
+    snapshot: FailureSnapshot, act: Callable[[np.ndarray], np.ndarray], image_size: tuple[int, int] = (480, 640)
+) -> list[Frame] | None:
+    """A recovery demo from the snapshot's state by a residual policy (`act` maps an observation to an action), in the
+    same form as `dagger.record_recovery`: one camera frame and commanded target per control tick, or None on failure."""
+    env = PickPlaceEnv(snapshots=[snapshot], snapshot_share=0.0, residual=True)
+    obs, _ = env.reset(options={"snapshot": 0})
+    frames: list[Frame] = []
+    env.on_tick = lambda target: frames.append(
+        Frame(env.twin.observe(snapshot.prompt, image_size), env.twin.to_lerobot(target))
+    )
+    done = False
+    while not done:
+        obs, _, terminated, truncated, _ = env.step(act(obs))
+        done = terminated or truncated
+    env.twin.settle(0.5)
+    stacked = StackCheck(snapshot.pick, snapshot.place)(env.twin)
+    env.close()
+    return frames if stacked else None

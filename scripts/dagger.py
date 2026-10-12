@@ -10,6 +10,8 @@ harvest, recover, aggregate, fine-tune from the current policy, benchmark, and p
 
 import json
 from collections import Counter
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Annotated
 
@@ -20,7 +22,7 @@ from nebius_physical_ai.cli import build_randomizer
 from nebius_physical_ai.policy.gr00t import Gr00tClient
 from nebius_physical_ai.twin.dagger import FailureSnapshot, Harvester, record_recovery, select
 from nebius_physical_ai.twin.dataset import LeRobotWriter
-from nebius_physical_ai.twin.expert import SceneSampler
+from nebius_physical_ai.twin.expert import Frame, SceneSampler
 from nebius_physical_ai.twin.scene import TwinLayout
 
 REPO = Path(__file__).resolve().parent.parent
@@ -61,18 +63,38 @@ def harvest(
     print(f"kept {len(chosen)} of {len(harvested)} snapshots: {dict(Counter(s.failure for s in chosen))} -> {out}")
 
 
+def rl_recorder(path: Path) -> Callable[[FailureSnapshot], list[Frame] | None]:
+    """Recovery recording by the trained residual policy, with its saved observation normalisation."""
+    # stable-baselines3 and gymnasium are the optional `rl` extra, so they load only when an RL expert is asked for
+    from stable_baselines3 import PPO
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+
+    from nebius_physical_ai.twin.rl_env import PickPlaceEnv, record_residual_recovery
+
+    model = PPO.load(path / "policy.zip", device="cpu")
+    stats = VecNormalize.load(str(path / "vecnormalize.pkl"), DummyVecEnv([lambda: PickPlaceEnv(residual=True)]))
+    stats.training = False
+    return partial(
+        record_residual_recovery, act=lambda obs: model.predict(stats.normalize_obs(obs), deterministic=True)[0]
+    )
+
+
 @app.command()
 def recover(
     snapshots: Annotated[Path, typer.Argument(help="From `harvest`")],
     out: Annotated[Path, typer.Argument(help="LeRobot v2.1 dataset of the recoveries")],
     part: Annotated[int, typer.Option(help="Record every `parts`-th snapshot starting here (parallel shards)")] = 0,
     parts: int = 1,
+    rl_policy: Annotated[
+        Path | None, typer.Option(help="Residual RL expert (scripts/rl_expert.py --residual) instead of the script")
+    ] = None,
 ) -> None:
     """The expert's demo from every snapshot it can recover; the rest are counted and left out."""
     shard = FailureSnapshot.load(snapshots)[part::parts]
     writer, kept = LeRobotWriter(out), Counter()
+    record = rl_recorder(rl_policy) if rl_policy else partial(record_recovery, layout=TwinLayout())
     for snapshot in track(shard, description="recording recoveries"):
-        frames = record_recovery(snapshot, TwinLayout())
+        frames = record(snapshot)
         kept[(snapshot.failure, frames is not None)] += 1
         if frames is not None:
             writer.add_episode(frames, snapshot.prompt)

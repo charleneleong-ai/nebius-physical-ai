@@ -5,7 +5,8 @@ import pytest
 
 pytest.importorskip("gymnasium")
 
-from nebius_physical_ai.twin.rl_env import GAMMA, RESIDUAL_COST, PickPlaceEnv
+from nebius_physical_ai.twin.rl_env import GAMMA, POLICY_HZ, RESIDUAL_COST, PickPlaceEnv
+from nebius_physical_ai.twin.rollout import CONTROL_HZ
 from nebius_physical_ai.twin.scene import SO101_XML
 
 pytestmark = pytest.mark.skipif(not SO101_XML.exists(), reason="SO-101 menagerie model not fetched")
@@ -49,3 +50,13 @@ def test_standing_still_earns_nothing() -> None:
     rewards = [env.step(np.zeros(env.action_space.shape))[1] for _ in range(20)]
     env.close()
     assert -1.0 < sum(rewards) <= 0.0
+
+
+def test_on_tick_sees_every_commanded_target(residual_env: PickPlaceEnv) -> None:
+    """Recording hooks in per control tick, so a recovery has one frame for each target the arm was driven to."""
+    seen: list[np.ndarray] = []
+    residual_env.on_tick = seen.append
+    for _ in range(3):
+        residual_env.step(np.zeros(residual_env.action_space.shape))
+    assert len(seen) == 3 * (CONTROL_HZ // POLICY_HZ)
+    np.testing.assert_allclose(seen[-1], residual_env.target)
