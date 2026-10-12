@@ -24,6 +24,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+rl = [  # the RL expert (scripts/rl_expert.py) trains on CPU
+    "stable-baselines3>=2.9.0",
+    "gymnasium>=1.4.0",
+]
 dev = [
     "pytest>=8",
     "ruff>=0.16",

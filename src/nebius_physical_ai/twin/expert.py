@@ -141,15 +141,19 @@ class PickPlaceExpert:
             pass
         self.twin.settle(0.5)
 
-    def follow(self, segments: list[Segment]) -> Iterator[np.ndarray]:
-        """Drive through `segments` from wherever the arm is, yielding each commanded target before stepping to it."""
-        start = self.twin.arm_qpos()
+    @staticmethod
+    def targets(segments: list[Segment], start: np.ndarray) -> Iterator[np.ndarray]:
+        """The joint target for each control tick through `segments`, interpolated from `start`."""
         for arm, grip, seconds in segments:
             goal = np.append(arm, grip)
-            for target in np.linspace(start, goal, max(1, round(seconds * CONTROL_HZ)) + 1)[1:]:
-                yield target
-                self.twin.step_towards(target, 1 / CONTROL_HZ)
+            yield from np.linspace(start, goal, max(1, round(seconds * CONTROL_HZ)) + 1)[1:]
             start = goal
+
+    def follow(self, segments: list[Segment]) -> Iterator[np.ndarray]:
+        """Drive through `segments` from wherever the arm is, yielding each commanded target before stepping to it."""
+        for target in self.targets(segments, self.twin.arm_qpos()):
+            yield target
+            self.twin.step_towards(target, 1 / CONTROL_HZ)
 
     def run(self) -> Iterator[Frame]:
         for target in self.follow(self.waypoints()):
