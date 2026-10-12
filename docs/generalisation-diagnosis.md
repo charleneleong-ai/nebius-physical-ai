@@ -32,7 +32,7 @@ Ranges are two runs of the same checkpoint. Re-runs move a cell by up to ±9, so
 
 ## What the evidence says so far
 
-- **Targeted on-policy data is the lever, if it is weighted.** DAgger round 2 is the first change to beat v5 (+26 pooled), with recoveries at a third of training. Round 1's identical loop at 3.5% was flat, as were v5b and v6. Round 3 adds +17 pooled (within noise) and is the first candidate to move held_out_objects (50 → 61, +18/−7, p=0.043); its checkpoint was deleted on KEEP and a retrain is queued to check the gain replicates.
+- **Targeted on-policy data is the lever, if it is weighted.** DAgger round 2 is the first change to beat v5 (+26 pooled), with recoveries at a third of training. Round 1's identical loop at 3.5% was flat, as were v5b and v6. Round 3 adds +17 pooled (within noise) and is the first candidate to move held_out_objects (50 → 61, +18/−7, p=0.043); retrained, it scores 483 (+19, promoted, now served) with held_out_objects 57, so the pooled gain replicates and the new-object gain is smaller.
 - **Test-time sampling is not a lever here.** Best-of-8 medoid consensus is within noise on held_out_objects (55 vs 50, p=0.41) and clean_many (87 vs 86). DiVeR (arXiv 2610.04933) reports consensus selection flat in its own baselines and gains only from a trained verifier.
 - **The DAgger yield is shrinking** (85 → 72 → 59 recoveries) because the policy fails less and the scripted expert recovers only about 40% of kept states. A residual PPO expert on the script recovers 74.0% of held-out failure snapshots (fresh scenes still 100%).
 - **Data volume is not the lever.** v5b (more steps on the same data) and v6 (2× the data, targeted) both land within
@@ -48,7 +48,7 @@ Ranges are two runs of the same checkpoint. Re-runs move a cell by up to ±9, so
 
 ## Next moves
 
-1. **Retrain round 3** (queued after v9) to see whether held_out_objects 61 replicates, then **round 4 with the residual RL expert recording recoveries**, which roughly doubles the recoverable states. Failure-state synthesis (CARE, arXiv 2609.24118; Recova, arXiv 2610.01178) is the other way to grow the yield; see [`reports/so101-generalisation-sota-2026-10-11.md`](../reports/so101-generalisation-sota-2026-10-11.md).
+1. **Round 4 with the residual RL expert recording recoveries** ran: it recovered 88 of 120 kept states (73% vs the script's 40%), yet scored 471 vs 483 and no_contact doubled. Next, weight RL recoveries below ×8 or use them only for dropped and fell_off states. Failure-state synthesis (CARE, arXiv 2609.24118; Recova, arXiv 2610.01178) is the other way to grow the yield; see [`reports/so101-generalisation-sota-2026-10-11.md`](../reports/so101-generalisation-sota-2026-10-11.md).
 2. **FLUX is dropped** (#18): GR00T is the base going forward.
 3. **Real-data co-training is closed** (#21): v9 (400 ArmnetBench demos at 23%) scores 373 vs 438, held_out_objects 48 vs 52, significantly worse on three suites, 0/50 externally; failures shift to pushed and knocked_place. Best-of-8 is closed too (#24); an outcome-trained verifier (DiVeR) is the version of test-time sampling worth trying.
 4. **Train with the wrist mount randomised from the start, from the hqfang base**, instead of continuing v5. That should keep v7's +38 on the Seeed mount without its internal regression.

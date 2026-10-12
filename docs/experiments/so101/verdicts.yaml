@@ -42,17 +42,33 @@ experiments:
     runs: {0e0jg307: train, 6uu7xt8f: bench}
     baseline: v5 438
     gate: G1
-    result: 464/576, no suite worse; real_1_pomade_tin 86 vs 74 (+14/-2, p=0.004). Served policy.
+    result: 464/576, no suite worse; real_1_pomade_tin 86 vs 74 (+14/-2, p=0.004). Served until round 3 was promoted.
     verdict: PROMOTE
     pr: 15
-  - label: DAgger round 3 (harvested with round 2)
+  - label: DAgger round 3, first run (harvested with round 2)
     family: dagger
     runs: {si90qxw0: train, n9iuijtc: bench}
     baseline: round 2 464
     gate: G1
-    result: 481/576, pooled gain within noise; held_out_objects 61 vs 50 (+18/-7, p=0.043), the first significant gain on new objects. Retrain queued (first checkpoint deleted on KEEP).
+    result: 481/576, pooled gain within noise; held_out_objects 61 vs 50 (+18/-7, p=0.043), the first significant gain on new objects. Checkpoint deleted on KEEP; retrained below.
     verdict: KEEP
     pr: 23
+  - label: DAgger round 3, retrained from the kept recoveries
+    family: dagger
+    runs: {vdfjfwpa: train, gxnpzs9q: bench}
+    baseline: round 2 464
+    gate: G1
+    result: 483/576, pooled better (+19), no suite worse; held_out_objects 57 vs 50 (p=0.30; first run 61). The pooled gain replicates (481 then 483). Served policy.
+    verdict: PROMOTE
+    pr: 23
+  - label: DAgger round 4, residual RL expert recording recoveries
+    family: dagger
+    runs: {oshdu93s: train, q7cma6w2: bench}
+    baseline: round 3 483
+    gate: G1
+    result: harvest 614/800; RL expert recovered 88 of 120 kept states (73%, vs the script's 40%); 304 recoveries x8 in training. 471/576 (-12, within noise); held_out_objects 49 vs 57 (p=0.17); no_contact rose 18 to 39.
+    verdict: KEEP
+    pr: 26
   - label: FLUX 3 Action LoRA, trained fairly (same demos, same sample volume)
     family: flux3
     runs: {exbxwyhy: train, hqt3v5n5: bench, 50tkg0jd: so101-benchmark}

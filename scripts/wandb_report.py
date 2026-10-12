@@ -48,7 +48,8 @@ def fetch_runs(api: wandb.Api, ids: list[str]) -> dict[str, Any]:
 
 def tag_run(run: Any, experiment: dict[str, Any], role: str, pr_base: str) -> None:
     verdict = experiment["verdict"]
-    run.tags = sorted({*run.tags, experiment["family"], f"verdict:{verdict}", role} - {"superseded"})
+    kept = {t for t in run.tags if not t.startswith("verdict:")} - {"superseded"}  # one verdict tag, the current one
+    run.tags = sorted({*kept, experiment["family"], f"verdict:{verdict}", role})
     pr = f" PR: {pr_base}/{experiment['pr']}." if experiment.get("pr") else ""
     run.notes = f"{experiment['label']} ({role}). Verdict {verdict}: {experiment['result']}{pr}"
     run.summary["verdict"] = verdict

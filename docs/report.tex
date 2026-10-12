@@ -15,8 +15,7 @@
 \begin{abstract}
 We fine-tune GR00T~N1.7 for pick-and-place on a MuJoCo twin of the SO-101 arm and try seven ways to make it
 generalise. Every candidate is scored on the same six paired suites (96 rehearsals each) against the v5 baseline, with
-scene-by-scene McNemar tests and a promotion gate. One change beats v5: a DAgger round whose expert recoveries make up
-about a third of the training data (pooled $+26$ of 576 rehearsals, no suite worse). A fairly trained FLUX~3~Action LoRA
+scene-by-scene McNemar tests and a promotion gate. DAgger with upweighted expert recoveries is the one lever that passes the gate, twice: round~2 (pooled $+26$ of 576 over v5) and round~3 ($+19$ more, now served). A fairly trained FLUX~3~Action LoRA
 loses on every suite despite predicting the right actions open-loop. A third DAgger round is the first candidate to move
 new objects (61 vs 50 of 96, $p=0.043$), though its pooled gain over round~2 is within noise. All results are in simulation; the physical arm has not been delivered.
 \end{abstract}
@@ -49,10 +48,11 @@ denominator; failed recoveries (the expert could not stack from the state) are c
 Round (policy) & Rollouts & Succeeded & Failures kept & Recovered & Recoveries in training\\\midrule
 1 (v5) & 800 & 456 (57\%) & 207 of 330 recoverable & 85 (41\%) & 85 of 2,485 (3.5\%)\\
 2 (v5) & 800 & 494 (62\%) & 189 of 296 recoverable & 72 (38\%) & 157 $\times8$ of 3,656 ($\approx34\%$)\\
-3 (round 2) & 800 & 574 (72\%) & 146 of 197 recoverable & 59 (40\%) & 216 $\times8$ of 4,128\\\bottomrule
+3 (round 2) & 800 & 574 (72\%) & 146 of 197 recoverable & 59 (40\%) & 216 $\times8$ of 4,128\\
+4 (round 3, RL expert) & 800 & 614 (77\%) & 120 of 165 recoverable & 88 (73\%) & 304 $\times8$ of 4,832\\\bottomrule
 \end{tabular}
 \caption{DAgger funnels. ``Recoverable'' excludes \emph{holding}, which the open-loop expert cannot recover from a lifted
-state. Round 3 harvests with the promoted round-2 policy.}\label{tab:funnel}
+state. Round 3 harvests with round 2; round 4 with the promoted round-3 policy, and its recoveries are recorded by the residual RL expert.}\label{tab:funnel}
 \end{table}
 
 \begin{table}[h]\centering\small
@@ -65,7 +65,9 @@ clean\_top\_down\_many & 83 & 77 & 85 & $+6/-4$, $p=0.75$\\
 real\_1\_pomade\_tin\_many & 74 & 78 & \textbf{86} & $\mathbf{+14/-2}$, $\mathbf{p=0.004}$\\
 in\_path\_pomade\_tin\_many & 73 & 76 & 81 & $+13/-5$, $p=0.10$\\\midrule
 pooled (of 576) & 438 & 436 & \textbf{464} & $+26$: \textbf{promoted}\\\midrule
-Round 3 (vs round 2) & \multicolumn{3}{r}{481; held\_out 61 vs 50, $+18/-7$, $p=0.043$} & $+17$: kept\\\bottomrule
+Round 3 (vs round 2) & \multicolumn{3}{r}{481; held\_out 61 vs 50, $+18/-7$, $p=0.043$} & $+17$: kept\\
+Round 3 retrained & \multicolumn{3}{r}{\textbf{483}; held\_out 57 vs 50, $p=0.30$} & $+19$: \textbf{promoted}\\
+Round 4 (vs round 3) & \multicolumn{3}{r}{471; held\_out 49 vs 57, $p=0.17$} & $-12$: kept\\\bottomrule
 \end{tabular}
 \caption{Paired results. Round 1 (recoveries 3.5\% of training) was kept, not promoted. Round 2 upweighted them to about a
 third and was promoted. Round-2 failures fell from 138 to 112 (\emph{no\_contact} $57\to33$) while \emph{dropped} and
@@ -120,8 +122,8 @@ expert, with potential-based shaping, recovers 74.0\% of held-out failure snapsh
 \section{What is not established}
 \begin{itemize}\itemsep0pt
 \item \textbf{Nothing has run on the physical arm.} Every number is from the MuJoCo twin.
-\item \textbf{The new-object gain is one result.} Round 3's held\_out\_objects 61 vs 50 ($p=0.043$) is one suite of six,
-uncorrected, from one seed; earlier candidates stayed at 47--54. A retrain is queued.
+\item \textbf{The new-object gain is suggestive, not established.} Round 3's held\_out\_objects was 61 then 57 against round 2's
+50 over two training runs; only the first is significant on its own ($p=0.043$, uncorrected).
 \item \textbf{Round 2's gain is mostly one suite.} Only real\_1\_pomade\_tin is significant on its own; the other five are
 better but within noise. The pooled gain passed a gate fixed in advance.
 \item \textbf{The FLUX failure mechanism is a hypothesis.} Conditioning on its own 8-frame history and integrating deltas
@@ -131,7 +133,8 @@ fits the slow-start, no-contact pattern, but has not been tested by retraining.
 \end{itemize}
 
 \section{Next}
-A round~3 retrain to test replication; round~4 with the residual RL expert recording recoveries; and an RL
+Round~3 retrained and promoted (483); round~4 with RL-expert recoveries kept but not better (471). Next: weight RL recoveries
+below $\times8$ or use them only for the failure types the script cannot fix; and an RL
 expert that can recover dropped and held blocks. Code, PRs and runs: \url{\repo}, W\&B project \texttt{chaleong/preflight}.
 
 \end{document}

@@ -18,7 +18,7 @@ verdict that a Nemotron agent explains.
 |---|---|---|---|
 | Verdict explanation | **Nemotron 3 Ultra** (Super / 3.5 Lightning selectable) | **Nebius Token Factory**, called on every verdict | [`NemotronAgent`](src/nebius_physical_ai/pipeline.py) |
 | Scene perception | **Cosmos 3** Reasoner, with a Token Factory VLM as an alternative | our GPU (vLLM) or **Nebius Token Factory** | [`CosmosClient`, `TokenFactoryVLClient`](src/nebius_physical_ai/pipeline.py), [`scripts/cosmos_local.sh`](scripts/cosmos_local.sh) |
-| Policy | **GR00T N1.7**: DAgger round 2 (v5 plus on-policy expert recoveries), fine-tuned from [hqfang/groot-so100_101](https://huggingface.co/hqfang/groot-so100_101); GR00T N1.6 for v1–v4c | our A100 | [`scripts/lerobot_policy_server.py`](scripts/lerobot_policy_server.py), [`scripts/finetune.py`](scripts/finetune.py) |
+| Policy | **GR00T N1.7**: DAgger round 3 (v5 plus three rounds of on-policy expert recoveries), fine-tuned from [hqfang/groot-so100_101](https://huggingface.co/hqfang/groot-so100_101); GR00T N1.6 for v1–v4c | our A100 | [`scripts/lerobot_policy_server.py`](scripts/lerobot_policy_server.py), [`scripts/finetune.py`](scripts/finetune.py) |
 | Rehearsal, benchmark, trust score | — | our A100 (MuJoCo, headless) | [`twin/`](src/nebius_physical_ai/twin), [`benchmark.py`](src/nebius_physical_ai/benchmark.py), [`trust/`](src/nebius_physical_ai/trust) |
 
 Every verdict makes a runtime call to Token Factory; without a `NEBIUS_API_KEY` the explanation step fails rather than
@@ -40,10 +40,10 @@ Hackathon rules digest: [`docs/hackathon-rules.md`](docs/hackathon-rules.md). De
 
 ## Policy
 
-The served policy is **DAgger round 2**: [hqfang/groot-so100_101](https://huggingface.co/hqfang/groot-so100_101)
+The served policy is **DAgger round 3**: [hqfang/groot-so100_101](https://huggingface.co/hqfang/groot-so100_101)
 (GR00T N1.7, pretrained on 1,209 SO-100/101 datasets) fine-tuned with LeRobot on 800 scripted twin demos (**v5**), then
-on the expert's recoveries from v5's own failure states ([`scripts/dagger_round.sh`](scripts/dagger_round.sh)). It beat
-v5 on the paired benchmark and passed the promotion gate; see [Generalisation results](#generalisation-results).
+on the expert's recoveries from the policy's own failure states, three rounds deep ([`scripts/dagger_round.sh`](scripts/dagger_round.sh)). Rounds 2
+and 3 each passed the promotion gate; see [Generalisation results](#generalisation-results).
 All results are in simulation: **the physical arm has not been delivered yet, and the repo will be updated with
 live-arm results when it arrives.**
 
@@ -54,7 +54,7 @@ Isaac-GR00T server. It runs in its own LeRobot environment on a GPU host:
 ```bash
 uv venv ~/lerobot-n17/.venv --python 3.12
 uv pip install --python ~/lerobot-n17/.venv/bin/python "lerobot[groot,training]==0.6.1"   # keeps wandb below 0.28
-CKPT=~/checkpoints/gr00t-preflight-dagger-r2/checkpoints/004000/pretrained_model   # or gr00t-preflight-v5/checkpoints/012000
+CKPT=~/checkpoints/gr00t-preflight-dagger-r3/checkpoints/004000/pretrained_model   # or gr00t-preflight-v5/checkpoints/012000
 ln -sfn ~/checkpoints/hqfang-groot-so100_101/vlm_processor "$CKPT/vlm_processor"   # saved checkpoints omit it
 ~/lerobot-n17/.venv/bin/python scripts/lerobot_policy_server.py "$CKPT" --port 5558
 ```
@@ -76,8 +76,10 @@ scene by scene with McNemar tests; a candidate is promoted only with a pooled ga
 |---|---|---|---|---|
 | v5 | 438 | 52 | 0/50 | baseline |
 | DAgger round 1 (recoveries 3.5% of training) | 436 | 47 | — | kept, within noise |
-| **DAgger round 2** (recoveries ~34%) | **464** | 50 | — | **promoted** (+26; real_1_pomade_tin 74 → 86, p=0.004) |
-| DAgger round 3 (harvested with round 2) | 481 | **61** | — | kept: pooled +17 over round 2 within noise; held_out_objects 50 → 61 (p=0.043); retrain queued |
+| DAgger round 2 (recoveries ~34%) | 464 | 50 | — | promoted (+26; real_1_pomade_tin 74 → 86, p=0.004) |
+| DAgger round 3, first run | 481 | 61 | — | kept: pooled +17 within noise; held_out_objects 50 → 61 (p=0.043) |
+| **DAgger round 3, retrained** | **483** | **57** | — | **promoted** (+19 over round 2; the pooled gain replicates) |
+| DAgger round 4 (residual RL expert records recoveries) | 471 | 49 | — | kept: −12 vs round 3, within noise |
 | Best-of-8 chunk consensus on round 2 (2 suites) | — | 55 | — | within noise (p=0.41); not adopted |
 | v9: + 400 real ArmnetBench demos (23% of samples) | 373 | 48 | 0/50 | worse on 3 suites (p≤0.043); dropped |
 | FLUX 3 Action LoRA, fair (v5's data and volume) | 50 | 3 | 0/7 | worse on every suite; dropped |
@@ -94,10 +96,10 @@ flowchart LR
   G -->|pooled gain, no suite worse| P
 ```
 
-The funnel above is round 3 (harvested with round 2). Round 3 is the first candidate to move new objects (61 vs 50 of
-96, one suite of six and one seed, so a retrain is queued to check it replicates); the external benchmark is still
-0–1/50. A residual RL expert on the scripted expert recovers 74.0% of failure snapshots against the script's 45.9%,
-which is the next source of DAgger recoveries. Latest literature sweep:
+The funnel above is round 3 (harvested with round 2). Retrained, round 3 scores 483 (first run 481) and is promoted;
+held_out_objects sits above round 2 in both runs (61 and 57 vs 50), though not significant on its own in the retrain.
+The external benchmark is still 0–1/50. In round 4 a residual RL expert recorded the recoveries (88 of 120 kept
+states, 73%, against the script's 40%), but the extra recoveries did not improve the policy (471 vs 483). Latest literature sweep:
 [`reports/so101-generalisation-sota-2026-10-11.md`](reports/so101-generalisation-sota-2026-10-11.md).
 
 ![pooled](experiments/progress/generalisation/pooled.png)
