@@ -1,6 +1,6 @@
 ## Highlights
 
-**Status, 12 Oct 2026 08:45 UTC.** DAgger round 3 (retrained) is the served policy. Round 4 with RL-expert recoveries was kept, not promoted; v9 real-data co-training was discarded. Everything is simulation; the physical SO-101 has not arrived.
+**Status, 13 Oct 2026 21:30 AEDT.** DAgger round 3 (retrained) is the served policy. RL-expert recoveries were tried in rounds 4 (×8, 471) and 5 (×2, 455) and are closed; v9 real-data co-training was discarded. Everything is simulation; the physical SO-101 has not arrived.
 
 | | Pooled (of 576) | held_out_objects (of 96) | so101-benchmark (of 50) |
 |---|---|---|---|
@@ -26,6 +26,7 @@
 | 11 Oct | v9 | + 400 real ArmnetBench demos | 373 | 48 |
 | 12 Oct | **DAgger r3 retrain** | same recipe, retrained | **483** | 57 |
 | 12 Oct | DAgger r4 | RL expert records recoveries | 471 | 49 |
+| 13 Oct | DAgger r5 | RL recoveries weighted ×2 | 455 | 41 |
 
 Companion page: [Preflight Generalisation Ledger](https://claude.ai/artifact/JUihdgT9xtqYc8a4ieJPQU). Report and experiment card: [docs/report.pdf](https://github.com/charleneleong-ai/nebius-physical-ai/blob/main/docs/report.pdf), [docs/experiment-card.md](https://github.com/charleneleong-ai/nebius-physical-ai/blob/main/docs/experiment-card.md).
 
@@ -43,7 +44,7 @@ The served policy is GR00T N1.7 (`hqfang/groot-so100_101`) fine-tuned with LeRob
 |---|---|
 | DAgger recoveries ×8 (round 2) | +26 pooled vs v5, real_1_pomade_tin +12 (p=0.004) |
 | A further DAgger round (round 3) | +17 / +19 pooled vs round 2 over two runs (the retrain passes the gate); held_out_objects +11 / +7 |
-| RL-expert recoveries (round 4) | 88/120 recovered vs the script's ~40%, but 471 vs 483 (−12, within noise) |
+| RL-expert recoveries (rounds 4-5) | 73% / 64% of kept states recovered vs the script's ~40%, but 471 (×8) and 455 (×2) vs 483 |
 | Residual RL on the scripted expert | snapshot recovery 45.9% → 74.0% |
 
 **Closed / do not retry**
@@ -54,10 +55,11 @@ The served policy is GR00T N1.7 (`hqfang/groot-so100_101`) fine-tuned with LeRob
 - Visual domain randomisation (v7): fixes the wrist-mount scenes but costs clean_many 23 successes.
 - Plain PPO from scratch on privileged state: reward paid hovering; 1% recovery.
 - Real-data co-training (v9, 400 ArmnetBench demos at 23%): 373 vs 438, no gain on new objects, worse on three suites.
+- RL-expert recoveries in DAgger (rounds 4 and 5, at ×8 and ×2): 471 and 455 vs 483; new objects 49 then 41 vs 57.
 
 ## Next
 
-- Done overnight: the round 3 retrain (promoted, 483) and round 4 with RL-expert recoveries (kept, 471). v9b is cancelled.
-- Next candidates: weight RL recoveries below ×8, or use the RL expert only for the failure types the script cannot fix (dropped, fell_off).
+- Closed: RL-expert recoveries (rounds 4-5). Round 3 stays served.
+- Next candidates from the SOTA sweep: an outcome-trained verifier for best-of-N on round 3 (DiVeR), and failure-state synthesis with the scripted expert (CARE, Recova).
 - Queued: DAgger round 4 with the residual RL expert recording recoveries; the scripted expert recovers 40% of kept states, the RL expert about 72%.
 - Deadline: hackathon submission 30 Oct 2026 17:00 UTC. The physical arm has not arrived; the repo will be updated with live results when it does.

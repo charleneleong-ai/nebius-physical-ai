@@ -49,7 +49,8 @@ Round (policy) & Rollouts & Succeeded & Failures kept & Recovered & Recoveries i
 1 (v5) & 800 & 456 (57\%) & 207 of 330 recoverable & 85 (41\%) & 85 of 2,485 (3.5\%)\\
 2 (v5) & 800 & 494 (62\%) & 189 of 296 recoverable & 72 (38\%) & 157 $\times8$ of 3,656 ($\approx34\%$)\\
 3 (round 2) & 800 & 574 (72\%) & 146 of 197 recoverable & 59 (40\%) & 216 $\times8$ of 4,128\\
-4 (round 3, RL expert) & 800 & 614 (77\%) & 120 of 165 recoverable & 88 (73\%) & 304 $\times8$ of 4,832\\\bottomrule
+4 (round 3, RL expert) & 800 & 614 (77\%) & 120 of 165 recoverable & 88 (73\%) & 304 $\times8$ of 4,832\\
+5 (round 3, RL $\times2$) & 800 & 610 (76\%) & 113 of 160 recoverable & 72 (64\%) & 216 $\times8$ + 160 $\times2$ of 4,448\\\bottomrule
 \end{tabular}
 \caption{DAgger funnels. ``Recoverable'' excludes \emph{holding}, which the open-loop expert cannot recover from a lifted
 state. Round 3 harvests with round 2; round 4 with the promoted round-3 policy, and its recoveries are recorded by the residual RL expert.}\label{tab:funnel}
@@ -67,7 +68,8 @@ in\_path\_pomade\_tin\_many & 73 & 76 & 81 & $+13/-5$, $p=0.10$\\\midrule
 pooled (of 576) & 438 & 436 & \textbf{464} & $+26$: \textbf{promoted}\\\midrule
 Round 3 (vs round 2) & \multicolumn{3}{r}{481; held\_out 61 vs 50, $+18/-7$, $p=0.043$} & $+17$: kept\\
 Round 3 retrained & \multicolumn{3}{r}{\textbf{483}; held\_out 57 vs 50, $p=0.30$} & $+19$: \textbf{promoted}\\
-Round 4 (vs round 3) & \multicolumn{3}{r}{471; held\_out 49 vs 57, $p=0.17$} & $-12$: kept\\\bottomrule
+Round 4 (vs round 3) & \multicolumn{3}{r}{471; held\_out 49 vs 57, $p=0.17$} & $-12$: kept\\
+Round 5 (vs round 3) & \multicolumn{3}{r}{455; held\_out 41 vs 57, $p=0.004$} & $-28$: discarded\\\bottomrule
 \end{tabular}
 \caption{Paired results. Round 1 (recoveries 3.5\% of training) was kept, not promoted. Round 2 upweighted them to about a
 third and was promoted. Round-2 failures fell from 138 to 112 (\emph{no\_contact} $57\to33$) while \emph{dropped} and
@@ -133,8 +135,8 @@ fits the slow-start, no-contact pattern, but has not been tested by retraining.
 \end{itemize}
 
 \section{Next}
-Round~3 retrained and promoted (483); round~4 with RL-expert recoveries kept but not better (471). Next: weight RL recoveries
-below $\times8$ or use them only for the failure types the script cannot fix; and an RL
+Round~3 retrained and promoted (483); RL-expert recoveries in rounds~4 and~5 ($\times8$, $\times2$) scored 471 and 455 and are dropped.
+Next: an outcome-trained verifier for best-of-$N$ and failure-state synthesis with the scripted expert; and an RL
 expert that can recover dropped and held blocks. Code, PRs and runs: \url{\repo}, W\&B project \texttt{chaleong/preflight}.
 
 \end{document}

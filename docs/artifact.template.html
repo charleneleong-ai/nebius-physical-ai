@@ -64,7 +64,7 @@ footer { font-size: 13px; color: var(--muted); }
 
 <main>
 <header>
-  <div class="eyebrow">Preflight · SO-101 · MuJoCo twin · updated 12 Oct 2026, 08:45 UTC</div>
+  <div class="eyebrow">Preflight · SO-101 · MuJoCo twin · updated 13 Oct 2026, 21:30 AEDT</div>
   <h1>Nine attempts to make a GR00T arm policy generalise. One passed the gate; one moved new objects.</h1>
   <p class="lede">Every candidate runs the same six suites (12 scenes × 8 perturbed rehearsals, seed 42) and is compared with v5 scene by scene (paired McNemar). It is promoted only with a pooled gain and no suite significantly worse, a gate fixed before the first round was scored. Everything is simulation; the physical arm has not arrived.</p>
   <div class="headline">
@@ -77,7 +77,7 @@ footer { font-size: 13px; color: var(--muted); }
 
 <section>
   <h2>Scoreboard</h2>
-  <p class="takeaway">DAgger rounds 2 and 3 each cleared the gate: 464, then 483 on the retrain (the first round-3 run scored 481). Round 4, with RL-expert recoveries, dropped back to 471. Real co-training (v9) loses 65; FLUX, trained on the same demos for the same volume, collapses.</p>
+  <p class="takeaway">DAgger rounds 2 and 3 each cleared the gate: 464, then 483 on the retrain (the first round-3 run scored 481). Rounds 4 and 5, with RL-expert recoveries at ×8 and ×2, dropped back to 471 and 455. Real co-training (v9) loses 65; FLUX, trained on the same demos for the same volume, collapses.</p>
   <div class="chart"><!--POOLED--></div>
 </section>
 
@@ -107,7 +107,7 @@ flowchart LR
   T --> B["6 suites × 96 vs v5"]
   B -->|"pooled gain, no suite worse"| P
   </pre>
-  <p class="takeaway" style="margin-top:16px">Each round the policy fails less and the script rescues only about 40% of kept states, so recoveries shrank 85 → 72 → 59. Round 4 swapped in the residual RL expert, which recovered 88 of 120.</p>
+  <p class="takeaway" style="margin-top:16px">Each round the policy fails less and the script rescues only about 40% of kept states, so recoveries shrank 85 → 72 → 59. Rounds 4 and 5 swapped in the residual RL expert, which recovered 88 of 120 and 72 of 113, but the policy got worse.</p>
   <div class="chart"><!--FUNNELS--></div>
 </section>
 
@@ -132,6 +132,7 @@ flowchart LR
     <div class="row"><span class="pill flat">Kept</span><div><strong>DAgger round 1</strong>436 vs 438. Recoveries were 3.5% of training, too diluted to matter.</div></div>
     <div class="row"><span class="pill promoted">Promoted</span><div><strong>DAgger round 3</strong>Retrained from the kept recoveries: 483 vs round 2's 464, pooled better, no suite worse; now served. The first run scored 481 with held_out_objects 61 (p=0.043); the retrain 57, above round 2 in both runs.</div></div>
     <div class="row"><span class="pill flat">Kept</span><div><strong>DAgger round 4, RL expert records recoveries</strong>The residual RL expert recovered 88 of 120 kept failure states (73%, vs the script's 40%), but the candidate scored 471 vs 483 (within noise) and no_contact rose from 18 to 39.</div></div>
+    <div class="row"><span class="pill rejected">Rejected</span><div><strong>DAgger round 5, RL recoveries weighted ×2</strong>72 of 113 recovered; 160 RL recoveries at ×2 beside the scripted ×8. 455 vs 483 and held_out_objects 41 vs 57 (p=0.004): the RL-recovery line is closed.</div></div>
     <div class="row"><span class="pill rejected">Rejected</span><div><strong>FLUX 3 Action LoRA (fair)</strong>Same 800 demos, same sample volume: 50 vs 438, worse on every suite (p &lt; 0.001), 0/7 externally. Executing 16 instead of 32 actions per chunk did not help.</div></div>
     <div class="row"><span class="pill flat">Flat</span><div><strong>Targeted demos (v6)</strong>Staged-mistake recoveries plus lookalike decoys: 421 vs 438, within noise.</div></div>
     <div class="row"><span class="pill rejected">Rejected</span><div><strong>Visual domain randomisation (v7)</strong>Lifts the Seeed wrist-mount scenes 15 → 53 but drops clean_many 81 → 58; 1/50 on so101-benchmark.</div></div>

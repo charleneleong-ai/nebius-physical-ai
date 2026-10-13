@@ -20,6 +20,7 @@ SCORES = {  # successes of 96 per suite, seed 42
     "v9 real co-training": [48, 66, 62, 69, 62, 66],
     "DAgger r3 retrain": [57, 78, 88, 85, 87, 88],
     "DAgger r4 (RL recoveries)": [49, 77, 86, 88, 83, 88],
+    "DAgger r5 (RL x2)": [41, 78, 86, 84, 79, 87],
     "FLUX LoRA (fair)": [3, 11, 9, 17, 6, 4],
 }
 # McNemar (+, -, p) of round 2 vs v5 per suite, from `scripts/benchmark.py compare` on the two bench JSONs
@@ -32,6 +33,7 @@ FAILURES = {
     "DAgger r3": [24, 32, 17, 13, 9, 0],
     "DAgger r3 retrain": [18, 35, 22, 13, 5, 0],
     "DAgger r4": [39, 19, 25, 17, 5, 0],
+    "DAgger r5": [28, 32, 39, 19, 2, 1],
     "FLUX LoRA": [358, 115, 22, 24, 0, 7],
 }
 FUNNELS = {  # rollouts, succeeded, recoverable failures, kept, recovered
@@ -39,6 +41,7 @@ FUNNELS = {  # rollouts, succeeded, recoverable failures, kept, recovered
     "Round 2 (v5)": [800, 494, 296, 189, 72],
     "Round 3 (r2)": [800, 574, 197, 146, 59],
     "Round 4 (r3, RL expert)": [800, 614, 165, 120, 88],
+    "Round 5 (r3, RL x2)": [800, 610, 160, 113, 72],
 }
 FUNNEL_STAGES = ["rollouts", "succeeded", "recoverable", "kept", "expert recovered"]
 OPENLOOP = {

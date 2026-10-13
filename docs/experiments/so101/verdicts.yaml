@@ -69,6 +69,14 @@ experiments:
     result: harvest 614/800; RL expert recovered 88 of 120 kept states (73%, vs the script's 40%); 304 recoveries x8 in training. 471/576 (-12, within noise); held_out_objects 49 vs 57 (p=0.17); no_contact rose 18 to 39.
     verdict: KEEP
     pr: 26
+  - label: DAgger round 5, RL-expert recoveries weighted x2
+    family: dagger
+    runs: {yrwqpu1z: train, 1rnb4eeq: bench}
+    baseline: round 3 483
+    gate: G1
+    result: harvest 610/800; RL expert recovered 72 of 113 (64%); 160 RL recoveries x2 + 216 scripted x8. 455/576; held_out_objects 41 vs 57 (p=0.004, worse). Lower weight did not help; the RL-recovery line is closed.
+    verdict: DISCARD
+    pr: 27
   - label: FLUX 3 Action LoRA, trained fairly (same demos, same sample volume)
     family: flux3
     runs: {exbxwyhy: train, hqt3v5n5: bench, 50tkg0jd: so101-benchmark}

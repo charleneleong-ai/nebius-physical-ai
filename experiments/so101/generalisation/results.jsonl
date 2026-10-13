@@ -7,3 +7,4 @@
 {"experiment": 6, "name": "v9 real co-training", "status": "DISCARD", "pooled": 373, "held_out_objects": 48}
 {"experiment": 7, "name": "DAgger r3 retrain", "status": "KEEP", "pooled": 483, "held_out_objects": 57}
 {"experiment": 8, "name": "DAgger r4 (RL recoveries)", "status": "NOT_PROMOTED", "pooled": 471, "held_out_objects": 49}
+{"experiment": 9, "name": "DAgger r5 (RL x2)", "status": "DISCARD", "pooled": 455, "held_out_objects": 41}
