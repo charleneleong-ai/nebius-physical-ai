@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 import typer
 from huggingface_hub import hf_hub_download, snapshot_download
-from lerobot.datasets.dataset_tools import merge_datasets
+from lerobot.datasets.dataset_tools import delete_episodes, merge_datasets
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -139,8 +139,9 @@ def convert(
     print(f"wrote {out}: {target.meta.total_episodes} episodes, {target.meta.total_frames} frames")
 
 
-def grasp_points(root: Path, episodes: int) -> np.ndarray:
-    """Gripper-frame positions (base frame, metres) where each episode's gripper starts closing."""
+def episode_grasps(root: Path, episodes: int | None = None) -> dict[int, np.ndarray]:
+    """Per episode, the gripper-frame positions (base frame, metres) where its gripper starts closing, through the twin's
+    kinematics: where the recorded joints would put the gripper on the twin."""
     model = mujoco.MjModel.from_xml_path(str(SO101_XML))
     data, site = mujoco.MjData(model), model.site("gripperframe").id
     limits = np.array([model.joint(j).range for j in ARM_JOINTS])
@@ -148,14 +149,19 @@ def grasp_points(root: Path, episodes: int) -> np.ndarray:
     frames = pd.concat(
         pd.read_parquet(p, columns=["episode_index", "observation.state"]) for p in root.rglob("data/**/*.parquet")
     )
-    points = []
-    for _, rows in list(frames.groupby("episode_index"))[:episodes]:
-        state = np.stack(rows["observation.state"].to_numpy())
+    grasps = {}
+    for index, rows in list(frames.groupby("episode_index"))[:episodes]:
+        state, points = np.stack(rows["observation.state"].to_numpy()), []
         for i in closing_frames(state[:, 5]):
             data.qpos[adr] = lerobot_to_qpos(state[i], limits)
             mujoco.mj_kinematics(model, data)
             points.append(data.site_xpos[site].copy())
-    return np.array(points)
+        grasps[int(index)] = np.array(points).reshape(-1, 3)
+    return grasps
+
+
+def grasp_points(root: Path, episodes: int | None = None) -> np.ndarray:
+    return np.concatenate(list(episode_grasps(root, episodes).values()))
 
 
 @app.command()
@@ -174,6 +180,35 @@ def check(
     if abs(heights["real"] - heights["twin"]) > 0.05:
         print(f"median grasp height real {heights['real']} m vs twin {heights['twin']} m: the unit mapping looks wrong")
         raise typer.Exit(1)
+
+
+@app.command("filter")
+def keep_in_workspace(
+    real: Annotated[Path, typer.Argument(help="Converted real dataset")],
+    twin: Annotated[Path, typer.Argument(help="Twin demos whose grasp band the real demos must fall in")],
+    out: Annotated[Path, typer.Argument(help="The real demos that pass")],
+    margin_xy: Annotated[float, typer.Option(help="Metres the band is widened by in reach and sideways")] = 0.03,
+    margin_z: Annotated[float, typer.Option(help="Metres the band is widened by in height")] = 0.02,
+) -> None:
+    """Keep the real demos whose every grasp, through the twin's kinematics, lands inside the twin's own grasp band.
+
+    ArmnetBench does not record which farm arm ran an episode, so calibration can't be corrected per arm. Instead the
+    twin decides: a grasp under the table or out of reach is a calibration or workspace mismatch, and its demo is
+    dropped rather than teaching the policy joint targets the twin never needs. The band is the twin demos' 2-98%
+    grasp range, widened by the margins; demos that never close the gripper are dropped too."""
+    lo, hi = np.percentile(grasp_points(twin, 400), [2, 98], axis=0)
+    margin = np.array([margin_xy, margin_xy, margin_z])
+    lo, hi = lo - margin, hi + margin
+    grasps = episode_grasps(real)
+    keep = [i for i, g in grasps.items() if len(g) and ((g >= lo) & (g <= hi)).all()]
+    print(f"band x {lo[0]:.3f}..{hi[0]:.3f}, y {lo[1]:.3f}..{hi[1]:.3f}, z {lo[2]:.3f}..{hi[2]:.3f} m")
+    source = LeRobotDataset(f"local/{real.name}", root=real)
+    tasks = pd.Series([source.meta.episodes[i]["tasks"][0] for i in keep]).value_counts()
+    print(f"kept {len(keep)}/{len(grasps)} demos; by task: {tasks.to_dict()}")
+    if out.exists():
+        shutil.rmtree(out)
+    drop = sorted(set(grasps) - set(keep))
+    delete_episodes(source, drop, output_dir=out, repo_id=f"local/{out.name}")
 
 
 @app.command()

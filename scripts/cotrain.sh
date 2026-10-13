@@ -18,6 +18,7 @@ LR=~/lerobot-n17/.venv/bin
 NAME=${NAME:-v9-cotrain} REAL_SHARE=${REAL_SHARE:-0.25} STEPS=${STEPS:-12000} LEARNING_RATE=${LEARNING_RATE:-2.5e-5}
 MAX_STEPS=${MAX_STEPS:-10000}  # the cosine horizon; v5 ran 12k steps of a 10k schedule
 RESTAT=${RESTAT:-1}  # recompute the checkpoint's joint normalisation on the mix (0 keeps the checkpoint's own)
+REAL_FILTER=${REAL_FILTER:-0}  # 1 keeps only real demos whose grasps land in the twin's workspace (real_mix.py filter)
 WAIT_FOR=${WAIT_FOR:-true}
 SUITES=(clean_many seen_vocabulary held_out_objects clean_top_down_many real_1_pomade_tin_many in_path_pomade_tin_many)
 TWIN=${TWIN:-$HOME/data/preflight_demos_v4c_v30} REAL=$HOME/data/armnet_twin MIX=$HOME/data/${NAME}_mix
@@ -38,6 +39,11 @@ if [ ! -f "$REAL/meta/info.json" ]; then
   nice -n 10 $LR/python scripts/real_mix.py convert "$REAL" --like "$TWIN" > "$LOGS/convert.log" 2>&1 || die "convert failed"
 fi
 $LR/python scripts/real_mix.py check "$REAL" "$TWIN" || die "unit check failed"
+if [ "$REAL_FILTER" = 1 ]; then
+  say "keeping the real demos that grasp inside the twin's workspace"
+  $LR/python scripts/real_mix.py filter "$REAL" "$TWIN" "${REAL}_in_workspace" || die "filter failed"
+  REAL=${REAL}_in_workspace
+fi
 say "mixing at real share $REAL_SHARE"
 rm -rf "$MIX"
 $LR/python scripts/real_mix.py mix "$TWIN" "$REAL" "$MIX" --real-share "$REAL_SHARE" ${EXTRA:+--extra "$EXTRA"} || die "mix failed"
