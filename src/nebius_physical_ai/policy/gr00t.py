@@ -133,10 +133,13 @@ class Gr00tClient:
         port: int = DEFAULT_PORT,
         timeout_ms: int = 120_000,
         layout: JointLayout | None = None,
+        info: bool = False,
     ) -> None:
+        """With `info`, each get_action asks for the server's best-of-N extras, kept in `last_info`."""
         self.address = f"tcp://{host}:{port}"
         self.timeout_ms = timeout_ms
         self._layout = layout
+        self.info, self.last_info = info, {}  # last_info: per-row extras from the latest get_action
         self._context = zmq.Context.instance()
         self._socket = self.connect()
 
@@ -198,5 +201,6 @@ class Gr00tClient:
     def act_batch(self, observations: list[Observation]) -> np.ndarray:
         layout = self.layout
         observation = Observation.stack(observations, layout)
-        action, _info = self.call("get_action", {"observation": observation, "options": None})
+        options = {"info": True} if self.info else None
+        action, self.last_info = self.call("get_action", {"observation": observation, "options": options})
         return np.concatenate([action[k] for k in layout.keys], axis=-1)

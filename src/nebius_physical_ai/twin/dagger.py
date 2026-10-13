@@ -14,6 +14,7 @@ Two refinements decide which failures are worth recording:
 
 import json
 from collections import Counter, defaultdict
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,7 @@ from nebius_physical_ai.policy.gr00t import Policy
 from nebius_physical_ai.twin.expert import Frame, PickPlaceExpert, SceneSampler, UnreachableTarget
 from nebius_physical_ai.twin.randomize import SceneRandomizer
 from nebius_physical_ai.twin.rehearsal import REHEARSAL_IMAGE_SIZE, REHEARSAL_MAX_STEPS, Perturbation, Variant
-from nebius_physical_ai.twin.rollout import STACK_TASK, BatchRollout, StackCheck
+from nebius_physical_ai.twin.rollout import STACK_TASK, BatchRollout, RolloutResult, StackCheck
 from nebius_physical_ai.twin.scene import ARM_JOINTS, BlockPhysics, SceneLook, Twin, TwinLayout
 
 # Still in the jaws at the end: the open-loop expert opens on its way to the pick and would drop it where it hangs.
@@ -141,15 +142,22 @@ class Harvester:
 
     def roll(self, batch: list[Rehearsed]) -> list[tuple[Rehearsed, str, FailureSnapshot | None]]:
         """(rollout, failure or "", snapshot of a recoverable failure) for one batch."""
+        return [
+            (r, res.failure, FailureSnapshot.capture(twin, r, res.failure) if self.keep(res.failure) else None)
+            for r, res, twin in self.rollouts(batch)
+        ]
+
+    def rollouts(
+        self, batch: list[Rehearsed], record_decisions: bool = False
+    ) -> Iterator[tuple[Rehearsed, RolloutResult, Twin]]:
+        """Each rollout of one batch with its result and its twin, still open (closed once the batch is consumed)."""
         twins: list[Twin] = []
         try:
             twins.extend(self.build(r) for r in batch)  # inside the try: a failed build still closes the rest
-            rollout = BatchRollout(twins, self.policy, [r.prompt for r in batch], self.image_size)
-            results = rollout.run([r.check for r in batch], self.max_steps)
-            return [
-                (r, res.failure, FailureSnapshot.capture(twin, r, res.failure) if self.keep(res.failure) else None)
-                for twin, r, res in zip(twins, batch, results)
-            ]
+            runner = BatchRollout(
+                twins, self.policy, [r.prompt for r in batch], self.image_size, record_decisions=record_decisions
+            )
+            yield from zip(batch, runner.run([r.check for r in batch], self.max_steps), twins)
         finally:
             for twin in twins:
                 twin.close()
