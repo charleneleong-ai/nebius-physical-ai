@@ -298,15 +298,21 @@ def mix(
     real_share: Annotated[float, typer.Option(help="Real frames' share of the training samples")] = 0.25,
     extra: Annotated[list[Path] | None, typer.Option(help="More converted real datasets (e.g. the rollouts)")] = None,
 ) -> None:
-    """Twin demos repeated against the real sets so real frames are about `real_share` of the merged set."""
+    """Twin demos repeated against the real sets, or the real sets against the twin when they are the smaller side, so
+    real frames are about `real_share` of the merged set."""
     t = LeRobotDataset("local/twin", root=twin)
     reals = [LeRobotDataset(f"local/real_{i}", root=root) for i, root in enumerate([real, *(extra or [])])]
     real_frames = sum(r.meta.total_frames for r in reals)
-    copies = max(1, round(real_frames * (1 - real_share) / (real_share * t.meta.total_frames)))
-    merged = merge_datasets([*[t] * copies, *reals], f"local/{out.name}", output_dir=out, concatenate_videos=False)
+    ratio = real_frames * (1 - real_share) / (real_share * t.meta.total_frames)  # twin copies per real copy
+    copies, real_copies = (max(1, round(ratio)), 1) if ratio >= 1 else (1, max(1, round(1 / ratio)))
+    merged = merge_datasets(
+        [*[t] * copies, *reals * real_copies], f"local/{out.name}", output_dir=out, concatenate_videos=False
+    )
     episodes = sum(r.meta.total_episodes for r in reals)
-    share = real_frames / merged.meta.total_frames
-    print(f"{out}: twin x{copies} + {episodes} real episodes = {merged.meta.total_frames} frames, real {share:.0%}")
+    share = real_frames * real_copies / merged.meta.total_frames
+    print(
+        f"{out}: twin x{copies} + {episodes} real episodes x{real_copies} = {merged.meta.total_frames} frames, real {share:.0%}"
+    )
 
 
 if __name__ == "__main__":

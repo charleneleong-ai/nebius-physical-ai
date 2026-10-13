@@ -20,6 +20,7 @@ MAX_STEPS=${MAX_STEPS:-10000}  # the cosine horizon; v5 ran 12k steps of a 10k s
 RESTAT=${RESTAT:-1}  # recompute the checkpoint's joint normalisation on the mix (0 keeps the checkpoint's own)
 REAL_FILTER=${REAL_FILTER:-0}  # 1 keeps only real demos whose grasps land in the twin's workspace (real_mix.py filter)
 TASK=${TASK:-} CALIBRATION=${CALIBRATION:-}  # one ArmnetBench task (instruction substring); joint offsets (real_mix.py calibrate)
+ROLLOUTS=${ROLLOUTS:-}  # non-empty adds the policies' rollouts labelled successful
 CACHE=${CACHE:-}  # ArmnetBench download cache; give concurrent conversions their own (convert deletes finished videos)
 FREE_FIRST=${FREE_FIRST:-}  # regenerable paths deleted once WAIT_FOR passes, before the disk check
 WAIT_FOR=${WAIT_FOR:-true}
@@ -39,7 +40,7 @@ trap '[ -n "$SERVER" ] && kill $SERVER 2>/dev/null' EXIT
 
 if [ ! -f "$REAL/meta/info.json" ]; then
   say "converting ArmnetBench teleoperation"
-  nice -n 10 $LR/python scripts/real_mix.py convert "$REAL" --like "$TWIN" ${TASK:+--task "$TASK"} ${CACHE:+--cache "$CACHE"} \
+  nice -n 10 $LR/python scripts/real_mix.py convert "$REAL" --like "$TWIN" ${TASK:+--task "$TASK"} ${CACHE:+--cache "$CACHE"} ${ROLLOUTS:+--rollouts} \
     ${CALIBRATION:+--calibration "$CALIBRATION"} > "$LOGS/convert.log" 2>&1 || die "convert failed"
 fi
 $LR/python scripts/real_mix.py check "$REAL" "$TWIN" || die "unit check failed"
