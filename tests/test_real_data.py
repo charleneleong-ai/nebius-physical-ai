@@ -36,6 +36,10 @@ class TestUnits:
         np.testing.assert_array_equal(out[0], [-100, 50, 0, 99, 100, 0])
         np.testing.assert_array_equal(out[1], joints[1])
 
+    def test_offsets_shift_before_clipping(self):
+        out = to_twin_units(np.array([[-98.0, 0, 0, 0, 0, 50]]), offsets=np.array([-5.0, 3, 0, 0, 0, 0]))
+        np.testing.assert_array_equal(out[0], [-100, 3, 0, 0, 0, 50])
+
     def test_lerobot_to_qpos_spans_the_limits_and_broadcasts(self):
         joints = np.array([[-100, -100, -100, -100, -100, 0], [100, 100, 100, 100, 100, 100], [0, 0, 0, 0, 0, 50]])
         qpos = lerobot_to_qpos(joints, LIMITS)
