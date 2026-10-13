@@ -48,7 +48,7 @@ Ranges are two runs of the same checkpoint. Re-runs move a cell by up to ±9, so
 
 ## Next moves
 
-1. **Round 4 with the residual RL expert recording recoveries** ran: it recovered 88 of 120 kept states (73% vs the script's 40%), yet scored 471 vs 483 and no_contact doubled. Next, weight RL recoveries below ×8 or use them only for dropped and fell_off states. Failure-state synthesis (CARE, arXiv 2609.24118; Recova, arXiv 2610.01178) is the other way to grow the yield; see [`reports/so101-generalisation-sota-2026-10-11.md`](../reports/so101-generalisation-sota-2026-10-11.md).
+1. **Round 4 with the residual RL expert recording recoveries** ran: it recovered 88 of 120 kept states (73% vs the script's 40%), yet scored 471 vs 483 and no_contact doubled. Round 5 weighted them ×2: 455 vs 483 and held_out_objects 41 vs 57 (p=0.004), so RL-expert recoveries are dropped and round 3 stays served. Failure-state synthesis (CARE, arXiv 2609.24118; Recova, arXiv 2610.01178) is the other way to grow the yield; see [`reports/so101-generalisation-sota-2026-10-11.md`](../reports/so101-generalisation-sota-2026-10-11.md).
 2. **FLUX is dropped** (#18): GR00T is the base going forward.
 3. **Real-data co-training is closed** (#21): v9 (400 ArmnetBench demos at 23%) scores 373 vs 438, held_out_objects 48 vs 52, significantly worse on three suites, 0/50 externally; failures shift to pushed and knocked_place. Best-of-8 is closed too (#24); an outcome-trained verifier (DiVeR) is the version of test-time sampling worth trying.
 4. **Train with the wrist mount randomised from the start, from the hqfang base**, instead of continuing v5. That should keep v7's +38 on the Seeed mount without its internal regression.

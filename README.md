@@ -80,6 +80,7 @@ scene by scene with McNemar tests; a candidate is promoted only with a pooled ga
 | DAgger round 3, first run | 481 | 61 | — | kept: pooled +17 within noise; held_out_objects 50 → 61 (p=0.043) |
 | **DAgger round 3, retrained** | **483** | **57** | — | **promoted** (+19 over round 2; the pooled gain replicates) |
 | DAgger round 4 (residual RL expert records recoveries) | 471 | 49 | — | kept: −12 vs round 3, within noise |
+| DAgger round 5 (RL recoveries weighted ×2) | 455 | 41 | — | worse on held_out_objects (p=0.004); RL-recovery line closed |
 | Best-of-8 chunk consensus on round 2 (2 suites) | — | 55 | — | within noise (p=0.41); not adopted |
 | v9: + 400 real ArmnetBench demos (23% of samples) | 373 | 48 | 0/50 | worse on 3 suites (p≤0.043); dropped |
 | FLUX 3 Action LoRA, fair (v5's data and volume) | 50 | 3 | 0/7 | worse on every suite; dropped |
@@ -99,7 +100,8 @@ flowchart LR
 The funnel above is round 3 (harvested with round 2). Retrained, round 3 scores 483 (first run 481) and is promoted;
 held_out_objects sits above round 2 in both runs (61 and 57 vs 50), though not significant on its own in the retrain.
 The external benchmark is still 0–1/50. In round 4 a residual RL expert recorded the recoveries (88 of 120 kept
-states, 73%, against the script's 40%), but the extra recoveries did not improve the policy (471 vs 483). Latest literature sweep:
+states, 73%, against the script's 40%), but the extra recoveries did not improve the policy (471 vs 483). Round 5 weighted them ×2 instead of ×8 and new
+objects fell further (41 vs 57, p=0.004), so RL-expert recoveries are dropped and round 3 stays served. Latest literature sweep:
 [`reports/so101-generalisation-sota-2026-10-11.md`](reports/so101-generalisation-sota-2026-10-11.md).
 
 ![pooled](experiments/progress/generalisation/pooled.png)

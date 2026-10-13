@@ -37,7 +37,8 @@ and what remains unmeasured. Results and reasoning: [`report.pdf`](report.pdf) (
 | DAgger r2 harvest (v5) | 800 | 494; 189 of 296 kept; 72 recovered | 107 over budget; 117 unrecovered; 10 *holding* |
 | DAgger r3 harvest (round 2) | 800 | 574; 146 of 197 kept; 59 recovered | 51 over budget; 87 unrecovered; 29 *holding* |
 | DAgger r4 harvest (round 3) | 800 | 614; 120 of 165 kept; 88 recovered by the RL expert | 45 over budget; 32 unrecovered; 21 *holding* |
-| Promotion attempts | 5 DAgger candidates scored | 2 promoted (round 2, round 3 retrain) | round 1, round 3 first run, round 4 kept |
+| DAgger r5 harvest (round 3) | 800 | 610; 113 of 160 kept; 72 recovered by the RL expert | 47 over budget; 41 unrecovered; 30 *holding* |
+| Promotion attempts | 6 DAgger candidates scored | 2 promoted (round 2, round 3 retrain) | round 1, round 3 first run, round 4 kept; round 5 discarded |
 | FLUX | zero-shot, LoRA v8, fair LoRA, 16-step | 0 promoted | all four worse than v5 |
 | DAgger r3 retrain | 4k steps, 6 suites × 96 | 483/576, promoted | first r3 checkpoint had been deleted on KEEP |
 | Best-of-8 | 2 suites × 96 on round 2 | 142 succeeded | within noise; not adopted |
