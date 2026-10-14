@@ -109,15 +109,18 @@ def convert(
         str | None, typer.Option("--task", help="Only episodes whose instruction contains this")
     ] = None,
     calibration: Annotated[Path | None, typer.Option(help="Joint offsets from `calibrate`")] = None,
+    all_outcomes: Annotated[bool, typer.Option(help="Every episode, failures included (for verifier labels)")] = False,
 ) -> None:
-    """ArmnetBench in the twin's dataset shape, one packed video file on disk at a time."""
+    """ArmnetBench in the twin's dataset shape, one packed video file on disk at a time. Writes `labels.json` beside
+    the dataset: each converted episode's source index, policy and strict success flag."""
     offsets = None if calibration is None else np.array(json.loads(calibration.read_text())["offsets"])
     info = json.loads((like / "meta/info.json").read_text())
     features = {k: v for k, v in info["features"].items() if k in (*JOINTS, *CAMERAS)}
     src_fps, episodes, data = load_armnet(cache)
     if only_task:
         episodes = episodes[episodes.tasks.map(lambda t: only_task in t[0])]
-    chosen = episodes.set_index("episode_index").loc[armnet_episodes(episodes, rollouts, teleop)[:limit]].reset_index()
+    keep = list(episodes.episode_index) if all_outcomes else armnet_episodes(episodes, rollouts, teleop)
+    chosen = episodes.set_index("episode_index").loc[keep[:limit]].reset_index()
     rows = dict(iter(data.groupby("episode_index")))
     drop_after = defaultdict(list)  # episode position -> video files no later episode needs
     for name, last in {video_name(e, c): i for i, e in chosen.iterrows() for c in CAMERAS}.items():
@@ -150,7 +153,13 @@ def convert(
         k: v["shape"] for k, v in info["features"].items()
     }
     info_path.write_text(json.dumps({**written, "features": info["features"]}, indent=4))
-    print(f"wrote {out}: {target.meta.total_episodes} episodes, {target.meta.total_frames} frames")
+    labels = [
+        {"source": int(e.episode_index), "policy": str(e.policy_type), "success": int(e.success)}
+        for _, e in chosen.iterrows()
+    ]
+    (out / "labels.json").write_text(json.dumps(labels, indent=1))
+    wins = sum(label["success"] for label in labels)
+    print(f"wrote {out}: {target.meta.total_episodes} episodes ({wins} successful), {target.meta.total_frames} frames")
 
 
 class TwinKinematics:
