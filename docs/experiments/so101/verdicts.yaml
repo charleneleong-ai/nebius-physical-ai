@@ -133,6 +133,14 @@ experiments:
     result: 373/576 vs v5 438; held_out_objects 48 vs 52 (p=0.59); worse on clean_many (62 vs 81, p=0.001), clean_top_down_many (69 vs 83, p=0.001), real_1_pomade_tin (62 vs 74, p=0.043); so101-benchmark 0/50. Failures mostly pushed (84 of 203) and knocked_place (21).
     verdict: DISCARD
     pr: 21
+  - label: Calibrated co-training v11 (block-stacking real episodes, joint offsets fitted to the twin, 9% of samples)
+    family: cotrain
+    runs: {hroermf4: train, lqpeg54i: bench}
+    baseline: round 3 483
+    gate: G1
+    result: calibrate fits offsets of -6.0, -6.0, -5.1 (LeRobot units) on shoulder lift, elbow flex and wrist flex, cutting real frames under the twin's table from 99.7% to 4.2%. Round 3 fine-tuned 4k steps at lr 1e-5 with 87 block-stacking episodes (50 teleop, 37 successful rollouts) at 9% of samples - 472/576 vs 483, every suite within noise (lowest p=0.18, held_out_objects 57 vs 57). Calibrated real data no longer costs the twin anything (v9 lost 65); whether it helps on the real arm is untested. v10, the workspace filter tried first, kept 11 of 400 demos and was superseded.
+    verdict: KEEP
+    pr: 29
 superseded:  # killed, crashed on launch, or relaunched; tagged `superseded`
   [te8xslg6, uf547kdi, 5vzuj6cz, 9mq1zp6u, 7wdlq67i, cl3ltozz, z0etzlli, 15i8w2eg, rhicuin5, 9p93rb37, 30r7i00q, ap8n1409,
    r83f86xc, kog76yhz, 2duwptwy, 9xe5clfu, 3fysf7vw, ypcoha4l, 6njr9qet]
