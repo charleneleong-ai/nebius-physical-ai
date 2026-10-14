@@ -24,8 +24,11 @@ def test_verifier_picks_the_top_score_and_survives_a_round_trip(tmp_path: Path) 
         verifier.net[4].weight[0, 0] = 1.0
     x = np.zeros((2, 3, 4), dtype=np.float32)
     x[0, 2, 0], x[1, 1, 0] = 5.0, 3.0
+    verifier.expert = True
     verifier.save(tmp_path / "v.pt")
-    np.testing.assert_array_equal(Verifier.load(tmp_path / "v.pt").pick(x), [2, 1])
+    loaded = Verifier.load(tmp_path / "v.pt")
+    np.testing.assert_array_equal(loaded.pick(x), [2, 1])
+    assert loaded.expert
 
 
 class InfoPolicy:

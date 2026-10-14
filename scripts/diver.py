@@ -59,20 +59,23 @@ def collect(
                 np.savez_compressed(
                     out / f"ep{start + k:05d}.npz", features=np.stack([x["features"] for x in d]),
                     joints=np.stack([x["joints"] for x in d]), candidates=np.stack([x["candidates"] for x in d]),
-                    chosen=np.array([x["chosen"] for x in d]), success=res.success, failure=res.failure,
+                    chosen=np.array([x["chosen"] for x in d]), expert=np.stack([x["expert"] for x in d]),
+                    success=res.success, failure=res.failure,
                 )  # fmt: skip
                 wins += res.success
             print(f"{start + len(batch)}/{len(rollouts)} episodes, {wins} succeeded", flush=True)
 
 
-def load(root: Path, beta: float) -> list[tuple[np.ndarray, int, np.ndarray]]:
-    """Per episode: executed-candidate features (T, F), outcome, DiVeR weights (T,)."""
+def load(root: Path, beta: float, expert: bool = False) -> list[tuple[np.ndarray, int, np.ndarray]]:
+    """Per episode: executed-candidate features (T, F), outcome, DiVeR weights (T,). With `expert`, each step's
+    features end with the executed candidate's action-expert state."""
     episodes = []
     for path in sorted(root.glob("ep*.npz")):
         ep = np.load(path)
-        candidates, chosen = ep["candidates"], ep["chosen"]
-        executed = candidates[np.arange(len(chosen)), chosen][:, None]  # (T, 1, H, 6)
-        x = candidate_features(ep["features"].astype(np.float32), ep["joints"], executed)[:, 0]
+        candidates, chosen, steps = ep["candidates"], ep["chosen"], np.arange(len(ep["chosen"]))
+        executed = candidates[steps, chosen][:, None]  # (T, 1, H, 6)
+        state = ep["expert"][steps, chosen][:, None].astype(np.float32) if expert else None  # (T, 1, E)
+        x = candidate_features(ep["features"].astype(np.float32), ep["joints"], executed, state)[:, 0]
         episodes.append((x, int(ep["success"]), decision_weights(criticality(candidates), beta)))
     return episodes
 
@@ -107,6 +110,7 @@ def train(
     data: Annotated[Path, typer.Argument(help="From `collect`")],
     out: Annotated[Path, typer.Argument(help="Verifier checkpoint (.pt)")],
     beta: Annotated[float, typer.Option(help="DiVeR weight temperature; 0 = uniform outcome classification")] = 1.0,
+    expert: Annotated[bool, typer.Option(help="Add each candidate's action-expert state (needs it collected)")] = False,
     epochs: int = 40,
     val_share: float = 0.2,
     seed: int = 0,
@@ -116,11 +120,11 @@ def train(
 
     from nebius_physical_ai.policy.verifier import Verifier
 
-    episodes = load(data, beta)
+    episodes = load(data, beta, expert)
     train_eps, val_eps = split_episodes(episodes, val_share, seed)
     x, y, w = (torch.as_tensor(a) for a in to_arrays(train_eps))
     vx, vy, _ = to_arrays(val_eps)
-    verifier = Verifier(x.shape[1]).fit_normaliser(x)
+    verifier = Verifier(x.shape[1], expert=expert).fit_normaliser(x)
     optimiser = torch.optim.AdamW(verifier.parameters(), lr=1e-3, weight_decay=1e-2)
     loss_fn = torch.nn.BCEWithLogitsLoss(reduction="none")
     for epoch in range(epochs):
@@ -138,7 +142,7 @@ def train(
     verifier.eval().save(out)
     summary = {
         "episodes": {"train": len(train_eps), "val": len(val_eps)},
-        "successes": int(sum(e[1] for e in episodes)), "beta": beta, "val_step_auc": val_auc,
+        "successes": int(sum(e[1] for e in episodes)), "beta": beta, "expert": expert, "val_step_auc": val_auc,
     }  # fmt: skip
     (out.parent / "train.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary))
