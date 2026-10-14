@@ -101,6 +101,14 @@ experiments:
     result: held_out_objects 55 (+14/-9, p=0.41); clean_many 87 (p=1.0). Within noise at 8x inference cost.
     verdict: DISCARD
     pr: 24
+  - label: DiVeR verifier best-of-8 on round 3
+    family: best-of-n
+    runs: {hfn4dzef: bench}
+    baseline: round 3 (held_out 57, clean_many 88)
+    gate: S1
+    result: verifier trained on 300 round-3 rollouts (226 succeeded) reaches held-out step AUC 0.79, but picking with it scores held_out_objects 54 (+12/-9, p=0.66) and clean_many 85 (+6/-3, p=0.51). Best-of-N selection is closed.
+    verdict: DISCARD
+    pr: 30
   - label: RL expert, residual PPO on the scripted expert
     family: rl-expert
     runs: {fb6yv89f: train}
