@@ -20,6 +20,7 @@ class RolloutResult:
     steps: int
     frames: list[np.ndarray] = field(default_factory=list, repr=False)  # top camera, one per action chunk
     failure: str = ""  # why it failed (FailureWatch.FAILURES), empty on success
+    decisions: list[dict[str, np.ndarray]] = field(default_factory=list, repr=False)  # policy extras, one per chunk
 
 
 class FailureWatch:
@@ -78,7 +79,8 @@ class BatchRollout:
     """Steps several twins in lockstep: one batched policy call per action chunk, each target at CONTROL_HZ.
 
     A twin stops at success or after `max_steps`. With `record`, each result keeps the top-camera frame the policy
-    saw at every chunk plus the final state, at no extra rendering cost. `task` and `run`'s `success` are shared by
+    saw at every chunk plus the final state, at no extra rendering cost. With `record_decisions`, it also keeps the
+    policy's per-row extras for every chunk (the server's best-of-N features and candidates, read off `last_info`). `task` and `run`'s `success` are shared by
     every twin, or given one per twin when each runs its own scene.
     """
 
@@ -90,10 +92,11 @@ class BatchRollout:
         image_size: tuple[int, int] = (480, 640),
         renderer: TwinRenderer | None = None,
         record: bool = False,
+        record_decisions: bool = False,
     ) -> None:
         self.twins, self.policy, self.image_size, self.renderer = twins, policy, image_size, renderer
         self.tasks = [task] * len(twins) if isinstance(task, str) else task
-        self.record = record
+        self.record, self.record_decisions = record, record_decisions
 
     def execute(
         self, twin: Twin, chunk: np.ndarray, success: StackCheck, steps_left: int, watch: FailureWatch
@@ -112,7 +115,11 @@ class BatchRollout:
         active = list(range(len(self.twins)))
         while active:
             observations = [self.twins[i].observe(self.tasks[i], self.image_size, self.renderer) for i in active]
-            for i, obs, chunk in zip(active, observations, self.policy.act_batch(observations)):
+            chunks = self.policy.act_batch(observations)
+            info = getattr(self.policy, "last_info", {}) if self.record_decisions else {}
+            for row, (i, obs, chunk) in enumerate(zip(active, observations, chunks)):
+                if info:
+                    results[i].decisions.append({k: v[row] for k, v in info.items()} | {"joints": obs.joints})
                 done, steps = self.execute(self.twins[i], chunk, checks[i], max_steps - results[i].steps, watches[i])
                 results[i].success, results[i].steps = done, results[i].steps + steps
                 if self.record:

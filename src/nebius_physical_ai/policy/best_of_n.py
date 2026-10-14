@@ -1,14 +1,35 @@
-"""Best-of-N action chunks without a learned verifier: a flow-matching policy draws a different chunk per noise seed, and
-the one closest to all the others (the medoid) is the consensus. RoboMonkey (arXiv 2506.17811) samples and picks with a
-trained VLM verifier; this is its verifier-free first step, chosen because it needs no reward model."""
+"""Best-of-N action chunks: a flow-matching policy draws a different chunk per noise seed, and one is executed.
+
+`medoid_index` picks the consensus (the chunk closest to all the others), RoboMonkey's (arXiv 2506.17811) verifier-free
+first step. The rest are the torch-free parts of the learned verifier (`policy.verifier`, after DiVeR, arXiv
+2610.04933): each candidate's features, and how much a step's candidates disagree."""
 
 import numpy as np
 
 
-def medoid(chunks: np.ndarray) -> np.ndarray:
-    """(N, B, T, D) candidate chunks -> (B, T, D): per batch row, the candidate with the least summed distance to the
+def medoid_index(chunks: np.ndarray) -> np.ndarray:
+    """(N, B, T, D) candidate chunks -> (B,): per batch row, the candidate with the least summed distance to the
     other candidates (Euclidean over the whole chunk)."""
     flat = chunks.reshape(chunks.shape[0], chunks.shape[1], -1)  # (N, B, T*D)
-    distances = np.linalg.norm(flat[:, None] - flat[None], axis=-1).sum(axis=1)  # (N, B): summed over the others
-    best = distances.argmin(axis=0)  # (B,)
-    return chunks[best, np.arange(chunks.shape[1])]
+    return np.linalg.norm(flat[:, None] - flat[None], axis=-1).sum(axis=1).argmin(axis=0)
+
+
+def candidate_features(features: np.ndarray, joints: np.ndarray, chunks: np.ndarray) -> np.ndarray:
+    """(B, D) pooled observation features, (B, 6) joints and (B, N, T, 6) candidate chunks -> (B, N, D + 6 + T*6):
+    one row per candidate, the chunk as offsets from the current joints."""
+    batch, n = chunks.shape[:2]
+    offsets = (chunks - joints[:, None, None, :]).reshape(batch, n, -1)
+    shared = np.concatenate([features, joints], axis=-1)[:, None].repeat(n, axis=1)
+    return np.concatenate([shared, offsets], axis=-1).astype(np.float32)
+
+
+def criticality(chunks: np.ndarray) -> np.ndarray:
+    """(B, N, T, 6) candidates -> (B,) mean per-coordinate variance across the N candidates (DiVeR eq. 8)."""
+    flat = chunks.reshape(chunks.shape[0], chunks.shape[1], -1)
+    return flat.var(axis=1).mean(axis=-1)
+
+
+def decision_weights(scores: np.ndarray, beta: float) -> np.ndarray:
+    """One trajectory's criticality scores -> positive weights exp(beta * standardised score) (DiVeR eq. 9)."""
+    spread = scores.std()
+    return np.exp(beta * (scores - scores.mean()) / spread) if spread > 0 else np.ones_like(scores)

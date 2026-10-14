@@ -1,6 +1,6 @@
 ## Highlights
 
-**Status, 13 Oct 2026 21:30 AEDT.** DAgger round 3 (retrained) is the served policy. RL-expert recoveries were tried in rounds 4 (×8, 471) and 5 (×2, 455) and are closed; v9 real-data co-training was discarded. Everything is simulation; the physical SO-101 has not arrived.
+**Status, 14 Oct 2026 22:30 AEDT.** DAgger round 3 (retrained) is the served policy. RL-expert recoveries were tried in rounds 4 (×8, 471) and 5 (×2, 455) and are closed; v9 real-data co-training was discarded; the DiVeR verifier (best-of-8 on round 3) is within noise and closes best-of-N. Everything is simulation; the physical SO-101 has not arrived.
 
 | | Pooled (of 576) | held_out_objects (of 96) | so101-benchmark (of 50) |
 |---|---|---|---|
@@ -10,7 +10,7 @@
 
 - **Recoveries from the policy's own failure states are the only lever that moved the gate**: round 2 (+26 pooled over v5) and round 3 (+19 more on the retrain, which is now served).
 - **Upweighting matters more than volume**: round 1's recoveries were 3.5% of training and did nothing; ×8 (about a third) made round 2.
-- **Swapping the model or adding sampling did not help**: FLUX 3 Action LoRA 50/576; best-of-8 consensus within noise.
+- **Swapping the model or adding sampling did not help**: FLUX 3 Action LoRA 50/576; best-of-8 consensus and a trained DiVeR verifier both within noise.
 - **A residual RL expert recovers 74.0% of failure snapshots vs the scripted expert's 45.9%**, so it can feed DAgger states the script cannot recover.
 
 **Pooled progression (gate suites, 6 × 96)**
@@ -51,6 +51,7 @@ The served policy is GR00T N1.7 (`hqfang/groot-so100_101`) fine-tuned with LeRob
 
 - FLUX 3 Action LoRA: predicts well open-loop (2.71 vs 8.24 hold-pose error at 32 steps) but 50/576 closed-loop; 16-step chunks did not fix it.
 - Best-of-8 chunk medoid: within noise at 8× inference.
+- DiVeR verifier best-of-8 on round 3: step AUC 0.79 on held-out episodes, but 54 vs 57 and 85 vs 88.
 - Targeted demos (v6): staged mistakes and decoys did not move any suite.
 - Visual domain randomisation (v7): fixes the wrist-mount scenes but costs clean_many 23 successes.
 - Plain PPO from scratch on privileged state: reward paid hovering; 1% recovery.
@@ -60,6 +61,7 @@ The served policy is GR00T N1.7 (`hqfang/groot-so100_101`) fine-tuned with LeRob
 ## Next
 
 - Closed: RL-expert recoveries (rounds 4-5). Round 3 stays served.
-- Next candidates from the SOTA sweep: an outcome-trained verifier for best-of-N on round 3 (DiVeR), and failure-state synthesis with the scripted expert (CARE, Recova).
+- Closed: best-of-N selection (medoid and DiVeR verifier).
+- Next candidates from the SOTA sweep: failure-state synthesis with the scripted expert (CARE, Recova).
 - Queued: DAgger round 4 with the residual RL expert recording recoveries; the scripted expert recovers 40% of kept states, the RL expert about 72%.
 - Deadline: hackathon submission 30 Oct 2026 17:00 UTC. The physical arm has not arrived; the repo will be updated with live results when it does.
