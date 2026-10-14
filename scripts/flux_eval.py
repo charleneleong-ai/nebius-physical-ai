@@ -27,6 +27,7 @@ import numpy as np
 import torch
 import typer
 from huggingface_hub import hf_hub_download
+from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies.factory import make_pre_post_processors
 from lerobot.policies.flux3 import Flux3Policy
 from lerobot.policies.flux3.processor_flux3 import ObservationHistoryNormalizerProcessorStep
@@ -72,11 +73,14 @@ class FluxDriver:
 
     @staticmethod
     def load(checkpoint: str) -> Flux3Policy:
-        """A full checkpoint, or a LoRA adapter (BFL's recipe saves only the adapter) merged into its base."""
+        """A full checkpoint, or a LoRA adapter (BFL's recipe saves only the adapter) merged into its base. The base is
+        built with the adapter's own config, so a LoRA trained with other conditioning or actions (`flux_train.py`) gets
+        its re-initialised heads at their trained shape."""
         if not (Path(checkpoint) / "adapter_config.json").exists():
             return Flux3Policy.from_pretrained(checkpoint)
         adapter = PeftConfig.from_pretrained(checkpoint)
-        base = Flux3Policy.from_pretrained(adapter.base_model_name_or_path)
+        config = PreTrainedConfig.from_pretrained(checkpoint)
+        base = Flux3Policy.from_pretrained(adapter.base_model_name_or_path, config=config, strict=False)
         return PeftModel.from_pretrained(base, checkpoint, config=adapter).merge_and_unload()
 
     def reset(self) -> None:
