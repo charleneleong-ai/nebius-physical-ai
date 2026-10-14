@@ -66,15 +66,66 @@ def collect(
             print(f"{start + len(batch)}/{len(rollouts)} episodes, {wins} succeeded", flush=True)
 
 
+@app.command("collect-real")
+def collect_real(
+    real: Annotated[Path, typer.Argument(help="Converted ArmnetBench episodes with labels.json (real_mix.py convert)")],
+    out: Annotated[Path, typer.Argument(help="One .npz per episode lands here")],
+    port: int = 5568,
+    stride: Annotated[int, typer.Option(help="Frames between decisions: the server's --horizon, as in the twin")] = 16,
+    batch_size: int = 8,
+) -> None:
+    """Real outcomes for the verifier: every `stride` frames of each real episode the served policy draws its candidates
+    for that real observation, and the chunk the robot actually executed next is stored as `executed`, labelled with
+    the episode's human-judged outcome. Real episodes carry no action-expert state for what they executed, so they train
+    the observation-and-chunk verifier only. Runs in the LeRobot venv, which reads the dataset's videos."""
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset  # LeRobot venv only
+
+    from nebius_physical_ai.policy.gr00t import Gr00tClient, Observation
+
+    labels = json.loads((real / "labels.json").read_text())
+    dataset = LeRobotDataset(f"local/{real.name}", root=real)
+    out.mkdir(parents=True, exist_ok=True)
+    with Gr00tClient(port=port, info=True) as policy:
+        for e, label in enumerate(labels):
+            first, last = (int(dataset.meta.episodes[e][k]) for k in ("dataset_from_index", "dataset_to_index"))
+            actions = np.stack([dataset.hf_dataset[i]["action"] for i in range(first, last)]).astype(np.float32)
+            rows = []
+            for start in range(first, last, stride * batch_size):
+                frames = [dataset[i] for i in range(start, min(start + stride * batch_size, last), stride)]
+                policy.act_batch([Observation(
+                    front=(f["observation.images.front"].permute(1, 2, 0).numpy() * 255).astype(np.uint8),
+                    wrist=(f["observation.images.wrist"].permute(1, 2, 0).numpy() * 255).astype(np.uint8),
+                    joints=f["observation.state"].numpy(), task=f["task"],
+                ) for f in frames])  # fmt: skip
+                info, horizon = policy.last_info, policy.last_info["candidates"].shape[2]
+                for k, f in enumerate(frames):
+                    t = int(f["index"]) - first
+                    chunk = actions[np.minimum(np.arange(t, t + horizon), len(actions) - 1)]
+                    rows.append((info["features"][k], f["observation.state"].numpy(), info["candidates"][k], chunk))
+            np.savez_compressed(
+                out / f"real{e:05d}.npz", features=np.stack([r[0] for r in rows]), joints=np.stack([r[1] for r in rows]),
+                candidates=np.stack([r[2] for r in rows]), executed=np.stack([r[3] for r in rows]),
+                success=label["success"], policy=label["policy"],
+            )  # fmt: skip
+            print(f"{e + 1}/{len(labels)} real episodes ({label['policy']}, success {label['success']})", flush=True)
+
+
 def load(root: Path, beta: float, expert: bool = False) -> list[tuple[np.ndarray, int, np.ndarray]]:
     """Per episode: executed-candidate features (T, F), outcome, DiVeR weights (T,). With `expert`, each step's
-    features end with the executed candidate's action-expert state."""
+    features end with the executed candidate's action-expert state. Real episodes (`collect-real`) store the chunk the
+    robot executed rather than an index into the candidates, and have no expert state."""
     episodes = []
-    for path in sorted(root.glob("ep*.npz")):
+    for path in sorted(root.glob("*.npz")):
         ep = np.load(path)
-        candidates, chosen, steps = ep["candidates"], ep["chosen"], np.arange(len(ep["chosen"]))
-        executed = candidates[steps, chosen][:, None]  # (T, 1, H, 6)
-        state = ep["expert"][steps, chosen][:, None].astype(np.float32) if expert else None  # (T, 1, E)
+        candidates = ep["candidates"]
+        if "executed" in ep:
+            if expert:
+                continue
+            executed, state = ep["executed"][:, None], None
+        else:
+            steps, chosen = np.arange(len(ep["chosen"])), ep["chosen"]
+            executed = candidates[steps, chosen][:, None]  # (T, 1, H, 6)
+            state = ep["expert"][steps, chosen][:, None].astype(np.float32) if expert else None  # (T, 1, E)
         x = candidate_features(ep["features"].astype(np.float32), ep["joints"], executed, state)[:, 0]
         episodes.append((x, int(ep["success"]), decision_weights(criticality(candidates), beta)))
     return episodes
@@ -111,6 +162,9 @@ def train(
     out: Annotated[Path, typer.Argument(help="Verifier checkpoint (.pt)")],
     beta: Annotated[float, typer.Option(help="DiVeR weight temperature; 0 = uniform outcome classification")] = 1.0,
     expert: Annotated[bool, typer.Option(help="Add each candidate's action-expert state (needs it collected)")] = False,
+    extra: Annotated[
+        list[Path] | None, typer.Option(help="More episodes for training only, e.g. collect-real's")
+    ] = None,
     epochs: int = 40,
     val_share: float = 0.2,
     seed: int = 0,
@@ -121,7 +175,8 @@ def train(
     from nebius_physical_ai.policy.verifier import Verifier
 
     episodes = load(data, beta, expert)
-    train_eps, val_eps = split_episodes(episodes, val_share, seed)
+    train_eps, val_eps = split_episodes(episodes, val_share, seed)  # held-out AUC stays on `data`'s own episodes
+    train_eps += [e for root in extra or [] for e in load(root, beta, expert)]
     x, y, w = (torch.as_tensor(a) for a in to_arrays(train_eps))
     vx, vy, _ = to_arrays(val_eps)
     verifier = Verifier(x.shape[1], expert=expert).fit_normaliser(x)
@@ -141,7 +196,7 @@ def train(
     out.parent.mkdir(parents=True, exist_ok=True)
     verifier.eval().save(out)
     summary = {
-        "episodes": {"train": len(train_eps), "val": len(val_eps)},
+        "episodes": {"train": len(train_eps), "val": len(val_eps)}, "extra": [str(p) for p in extra or []],
         "successes": int(sum(e[1] for e in episodes)), "beta": beta, "expert": expert, "val_step_auc": val_auc,
     }  # fmt: skip
     (out.parent / "train.json").write_text(json.dumps(summary, indent=2))
