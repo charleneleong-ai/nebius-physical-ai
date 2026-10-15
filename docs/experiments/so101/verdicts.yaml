@@ -109,6 +109,22 @@ experiments:
     result: verifier trained on 300 round-3 rollouts (226 succeeded) reaches held-out step AUC 0.79, but picking with it scores held_out_objects 54 (+12/-9, p=0.66) and clean_many 85 (+6/-3, p=0.51). Best-of-N selection is closed.
     verdict: DISCARD
     pr: 30
+  - label: DiVeR verifier on the action expert's per-candidate state
+    family: best-of-n
+    runs: {6lde7lhw: bench}
+    baseline: round 3 (held_out 57, clean_many 88)
+    gate: S1
+    result: each candidate adds the action head's last denoising output (1,024-dim, pooled over its action tokens). 300 fresh rollouts (230 succeeded), held-out step AUC 0.77. held_out_objects 48 vs 57 (+13/-4 for round 3, p=0.049, worse); clean_many 84 vs 88 (p=0.34).
+    verdict: DISCARD
+    pr: 31
+  - label: DiVeR verifier with ArmnetBench real outcomes
+    family: best-of-n
+    runs: {4rmqlrv9: bench}
+    baseline: round 3 (held_out 57, clean_many 88)
+    gate: S1
+    result: #30's twin rollouts plus all 305 calibrated real block-stacking episodes (87 successful, 218 failed; 11,578 real decision points scored by round 3). Held-out step AUC 0.77. held_out_objects 52 vs 57 (p=0.33), clean_many 83 vs 88 (p=0.18).
+    verdict: DISCARD
+    pr: 31
   - label: RL expert, residual PPO on the scripted expert
     family: rl-expert
     runs: {fb6yv89f: train}

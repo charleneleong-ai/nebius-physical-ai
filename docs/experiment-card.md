@@ -43,6 +43,8 @@ and what remains unmeasured. Results and reasoning: [`report.pdf`](report.pdf) (
 | DAgger r3 retrain | 4k steps, 6 suites × 96 | 483/576, promoted | first r3 checkpoint had been deleted on KEEP |
 | Best-of-8 | 2 suites × 96 on round 2 | 142 succeeded | within noise; not adopted |
 | DiVeR verifier | 300 round-3 rollouts (226 succeeded; 240 train, 60 held out); 2 suites × 96 | 139 succeeded vs 145 | within noise; best-of-N closed |
+| DiVeR, action-expert state | 300 fresh rollouts (230 succeeded); 2 suites × 96 | 132 vs 145 | DISCARD: held_out_objects worse (p=0.049) |
+| DiVeR, + real outcomes | #30's rollouts + 305 real episodes (87 succeeded, 11,578 decision points); 2 suites × 96 | 135 vs 145 | DISCARD: within noise |
 | RL expert | plain PPO (stopped at 4.4M steps), 2 relaunches killed for bugs | residual PPO: 74.0% held-out snapshot recovery at 3.0M steps; shaped PPO ~6% training success | runs tagged `superseded` in W&B |
 | v9 real co-training | 12k steps, 6 suites × 96 + 50 external | 373/576, 0/50 | DISCARD: worse on 3 suites |
 | v11 calibrated co-training | 400 teleop demos calibrated, 87 block-stacking episodes kept; 4k steps; 6 suites × 96 | 472/576 | KEEP: within noise of 483; real-arm benefit untested |
