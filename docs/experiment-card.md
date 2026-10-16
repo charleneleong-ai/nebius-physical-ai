@@ -39,7 +39,7 @@ and what remains unmeasured. Results and reasoning: [`report.pdf`](report.pdf) (
 | DAgger r4 harvest (round 3) | 800 | 614; 120 of 165 kept; 88 recovered by the RL expert | 45 over budget; 32 unrecovered; 21 *holding* |
 | DAgger r5 harvest (round 3) | 800 | 610; 113 of 160 kept; 72 recovered by the RL expert | 47 over budget; 41 unrecovered; 30 *holding* |
 | Promotion attempts | 6 DAgger candidates scored | 2 promoted (round 2, round 3 retrain) | round 1, round 3 first run, round 4 kept; round 5 discarded |
-| FLUX | zero-shot, LoRA v8, fair LoRA, 16-step | 0 promoted | all four worse than v5 |
+| FLUX | zero-shot, LoRA v8, fair LoRA, 16-step, frame + absolute | 0 promoted | all worse than v5; frame + absolute beats the fair LoRA (21 vs 3 on held_out_objects) |
 | DAgger r3 retrain | 4k steps, 6 suites × 96 | 483/576, promoted | first r3 checkpoint had been deleted on KEEP |
 | Best-of-8 | 2 suites × 96 on round 2 | 142 succeeded | within noise; not adopted |
 | DiVeR verifier | 300 round-3 rollouts (226 succeeded; 240 train, 60 held out); 2 suites × 96 | 139 succeeded vs 145 | within noise; best-of-N closed |
@@ -61,6 +61,6 @@ and what remains unmeasured. Results and reasoning: [`report.pdf`](report.pdf) (
 
 - Anything on the physical arm (not delivered).
 - More than one training seed per checkpoint, or more than one benchmark seed.
-- Whether FLUX's closed-loop failure comes from its 8-frame history or its delta actions (hypothesis, untested).
+- Which of FLUX's two changes (current-frame conditioning, absolute targets) carries the gain; they were changed together. And how far a full-budget run climbs.
 - Whether calibrated real data (v11) helps on the physical arm; the twin benchmark can only show it does no harm.
 - Whether round 3's held_out_objects gain is real: 61 then 57 vs 50 over two runs, significant only in the first.

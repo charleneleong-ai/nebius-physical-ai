@@ -86,6 +86,7 @@ scene by scene with McNemar tests; a candidate is promoted only with a pooled ga
 | v9: + 400 real ArmnetBench demos (23% of samples) | 373 | 48 | 0/50 | worse on 3 suites (p≤0.043); dropped |
 | v11: round 3 + 87 joint-calibrated block-stacking real episodes (9%) | 472 | 57 | — | within noise on every suite; kept for the real arm ([#29](https://github.com/charleneleong-ai/nebius-physical-ai/pull/29)) |
 | FLUX 3 Action LoRA, fair (v5's data and volume) | 50 | 3 | 0/7 | worse on every suite; dropped |
+| FLUX, current frame + absolute targets (quarter budget, 2 suites) | — | 21 | — | 7× the fair LoRA on new objects (p<0.001); mechanism confirmed, still far below round 3 ([#32](https://github.com/charleneleong-ai/nebius-physical-ai/pull/32)) |
 
 ```mermaid
 flowchart LR
