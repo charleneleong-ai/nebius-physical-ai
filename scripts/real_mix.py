@@ -30,8 +30,9 @@ import numpy as np
 import pandas as pd
 import typer
 from huggingface_hub import hf_hub_download, snapshot_download
-from lerobot.datasets.dataset_tools import merge_datasets
+from lerobot.datasets.dataset_tools import delete_episodes, merge_datasets
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from scipy.optimize import least_squares
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from nebius_physical_ai.real_data import (
@@ -71,7 +72,7 @@ def decode(path: Path, start: float, stop: float) -> Iterator[np.ndarray]:
 
 
 def episode_frames(
-    episode: pd.Series, rows: pd.DataFrame, cache: Path, src_fps: int, fps: int
+    episode: pd.Series, rows: pd.DataFrame, cache: Path, src_fps: int, fps: int, offsets: np.ndarray | None = None
 ) -> Iterator[dict[str, object]]:
     """One ArmnetBench episode as twin frames, resampled to `fps`: joints interpolated, images nearest."""
     rows = rows.sort_values("frame_index")
@@ -81,10 +82,19 @@ def episode_frames(
         images[camera] = [fit_frame(f) for f in decode(cache / video_name(episode, camera), start, stop)]
     n = min(len(rows), *(len(v) for v in images.values()))
     positions = resample_positions(n, src_fps, fps)
-    joints = {k: interpolate(to_twin_units(np.stack(rows[k].to_numpy()[:n])), positions) for k in JOINTS}
+    joints = {k: interpolate(to_twin_units(np.stack(rows[k].to_numpy()[:n]), offsets), positions) for k in JOINTS}
     nearest = np.minimum(np.round(positions).astype(int), n - 1)
     for i, j in enumerate(nearest):
         yield {k: joints[k][i].astype(np.float32) for k in JOINTS} | {c: images[c][j] for c in CAMERAS}
+
+
+def load_armnet(cache: Path, columns: list[str] | None = None) -> tuple[int, pd.DataFrame, pd.DataFrame]:
+    """ArmnetBench's fps, per-episode metadata and per-frame table (state and action only: 50 MB, no video)."""
+    snapshot_download(ARMNET, repo_type="dataset", local_dir=cache, allow_patterns=["meta/*", "data/*"])
+    src_fps = json.loads((cache / "meta/info.json").read_text())["fps"]
+    episodes = pd.read_parquet(cache / "meta/episodes/chunk-000/file-000.parquet")
+    frames = pd.concat(pd.read_parquet(p, columns=columns) for p in (cache / "data").rglob("*.parquet"))
+    return src_fps, episodes, frames
 
 
 @app.command()
@@ -95,15 +105,22 @@ def convert(
     rollouts: Annotated[bool, typer.Option(help="The policies' rollouts labelled successful")] = False,
     teleop: Annotated[bool, typer.Option(help="The 400 teleoperated demos")] = True,
     limit: Annotated[int | None, typer.Option(help="Only the first N selected episodes (a smoke test)")] = None,
+    only_task: Annotated[
+        str | None, typer.Option("--task", help="Only episodes whose instruction contains this")
+    ] = None,
+    calibration: Annotated[Path | None, typer.Option(help="Joint offsets from `calibrate`")] = None,
+    all_outcomes: Annotated[bool, typer.Option(help="Every episode, failures included (for verifier labels)")] = False,
 ) -> None:
-    """ArmnetBench in the twin's dataset shape, one packed video file on disk at a time."""
+    """ArmnetBench in the twin's dataset shape, one packed video file on disk at a time. Writes `labels.json` beside
+    the dataset: each converted episode's source index, policy and strict success flag."""
+    offsets = None if calibration is None else np.array(json.loads(calibration.read_text())["offsets"])
     info = json.loads((like / "meta/info.json").read_text())
     features = {k: v for k, v in info["features"].items() if k in (*JOINTS, *CAMERAS)}
-    snapshot_download(ARMNET, repo_type="dataset", local_dir=cache, allow_patterns=["meta/*", "data/*"])  # 50 MB
-    src_fps = json.loads((cache / "meta/info.json").read_text())["fps"]
-    episodes = pd.read_parquet(cache / "meta/episodes/chunk-000/file-000.parquet")
-    chosen = episodes.set_index("episode_index").loc[armnet_episodes(episodes, rollouts, teleop)[:limit]].reset_index()
-    data = pd.concat(pd.read_parquet(p) for p in (cache / "data").rglob("*.parquet"))
+    src_fps, episodes, data = load_armnet(cache)
+    if only_task:
+        episodes = episodes[episodes.tasks.map(lambda t: only_task in t[0])]
+    keep = list(episodes.episode_index) if all_outcomes else armnet_episodes(episodes, rollouts, teleop)
+    chosen = episodes.set_index("episode_index").loc[keep[:limit]].reset_index()
     rows = dict(iter(data.groupby("episode_index")))
     drop_after = defaultdict(list)  # episode position -> video files no later episode needs
     for name, last in {video_name(e, c): i for i, e in chosen.iterrows() for c in CAMERAS}.items():
@@ -122,7 +139,7 @@ def convert(
         for camera in CAMERAS:
             hf_hub_download(ARMNET, video_name(episode, camera), repo_type="dataset", local_dir=cache)
         task = str(episode.tasks[0])
-        for frame in episode_frames(episode, rows[episode.episode_index], cache, src_fps, info["fps"]):
+        for frame in episode_frames(episode, rows[episode.episode_index], cache, src_fps, info["fps"], offsets):
             target.add_frame(frame | {"task": task})
         target.save_episode()
         for name in drop_after[i]:
@@ -136,26 +153,50 @@ def convert(
         k: v["shape"] for k, v in info["features"].items()
     }
     info_path.write_text(json.dumps({**written, "features": info["features"]}, indent=4))
-    print(f"wrote {out}: {target.meta.total_episodes} episodes, {target.meta.total_frames} frames")
+    labels = [
+        {"source": int(e.episode_index), "policy": str(e.policy_type), "success": int(e.success)}
+        for _, e in chosen.iterrows()
+    ]
+    (out / "labels.json").write_text(json.dumps(labels, indent=1))
+    wins = sum(label["success"] for label in labels)
+    print(f"wrote {out}: {target.meta.total_episodes} episodes ({wins} successful), {target.meta.total_frames} frames")
 
 
-def grasp_points(root: Path, episodes: int) -> np.ndarray:
-    """Gripper-frame positions (base frame, metres) where each episode's gripper starts closing."""
-    model = mujoco.MjModel.from_xml_path(str(SO101_XML))
-    data, site = mujoco.MjData(model), model.site("gripperframe").id
-    limits = np.array([model.joint(j).range for j in ARM_JOINTS])
-    adr = [model.joint(j).qposadr[0] for j in ARM_JOINTS]
+class TwinKinematics:
+    """Where a joint reading (twin units) puts the twin's gripper frame, in the base frame (metres)."""
+
+    def __init__(self) -> None:
+        self.model = mujoco.MjModel.from_xml_path(str(SO101_XML))
+        self.data, self.site = mujoco.MjData(self.model), self.model.site("gripperframe").id
+        self.limits = np.array([self.model.joint(j).range for j in ARM_JOINTS])
+        self.adr = [self.model.joint(j).qposadr[0] for j in ARM_JOINTS]
+
+    def __call__(self, state: np.ndarray) -> np.ndarray:
+        self.data.qpos[self.adr] = lerobot_to_qpos(state, self.limits)
+        mujoco.mj_kinematics(self.model, self.data)
+        return self.data.site_xpos[self.site].copy()
+
+    def heights(self, raw: np.ndarray, offsets: np.ndarray | None = None) -> np.ndarray:
+        """Gripper heights for raw ArmnetBench readings, converted exactly as `convert` does."""
+        return np.array([self(s)[2] for s in to_twin_units(raw, offsets)])
+
+
+def episode_grasps(root: Path, episodes: int | None = None) -> dict[int, np.ndarray]:
+    """Per episode, the gripper-frame positions (base frame, metres) where its gripper starts closing, through the twin's
+    kinematics: where the recorded joints would put the gripper on the twin."""
+    fk = TwinKinematics()
     frames = pd.concat(
         pd.read_parquet(p, columns=["episode_index", "observation.state"]) for p in root.rglob("data/**/*.parquet")
     )
-    points = []
-    for _, rows in list(frames.groupby("episode_index"))[:episodes]:
+    grasps = {}
+    for index, rows in list(frames.groupby("episode_index"))[:episodes]:
         state = np.stack(rows["observation.state"].to_numpy())
-        for i in closing_frames(state[:, 5]):
-            data.qpos[adr] = lerobot_to_qpos(state[i], limits)
-            mujoco.mj_kinematics(model, data)
-            points.append(data.site_xpos[site].copy())
-    return np.array(points)
+        grasps[int(index)] = np.array([fk(state[i]) for i in closing_frames(state[:, 5])]).reshape(-1, 3)
+    return grasps
+
+
+def grasp_points(root: Path, episodes: int | None = None) -> np.ndarray:
+    return np.concatenate(list(episode_grasps(root, episodes).values()))
 
 
 @app.command()
@@ -176,6 +217,88 @@ def check(
         raise typer.Exit(1)
 
 
+HEIGHT_JOINTS = [1, 2, 3]  # shoulder lift, elbow flex, wrist flex: the joints that set the gripper's height
+CLEARANCE_M = 0.003  # an episode's lowest frames must keep the gripper frame this far above the table
+UNDER_WEIGHT = 3.0  # a frame under the table costs this many times a grasp-height error of the same size
+
+
+@app.command()
+def calibrate(
+    out: Annotated[Path, typer.Argument(help="Calibration JSON (offsets in observation.state order, LeRobot units)")],
+    cache: Path = ARMNET_CACHE,
+    bound: Annotated[float, typer.Option(help="Largest offset per joint, LeRobot units (6 is a few degrees)")] = 6.0,
+    grasp_height: Annotated[
+        float, typer.Option(help="Gripper-frame height (m) of a grasp on a table-top object")
+    ] = 0.015,
+) -> None:
+    """Fit the joint offsets that put the real teleoperators' gripper on the twin's table rather than through it.
+
+    Through the twin's kinematics, 99.7% of ArmnetBench's teleoperated episodes push the gripper frame 1-3 cm under the
+    table, every task alike: a calibration offset, not noise. ArmnetBench records no per-arm calibration, so one set of
+    offsets on the height-setting joints is fitted to all 400 demos, bounded like a hand calibration's error: each
+    episode's three lowest frames must clear the table, and the first grasp of the table-top pick tasks (blocks, eye
+    drops into the basket) must sit at `grasp_height`."""
+    _, episodes, frames = load_armnet(cache, ["episode_index", "frame_index", "observation.state"])
+    teleop = episodes.set_index("episode_index").loc[armnet_episodes(episodes)]
+    fk, lowest, grasps = TwinKinematics(), [], []
+    for index, rows in frames[frames.episode_index.isin(teleop.index)].groupby("episode_index"):
+        state = np.stack(rows.sort_values("frame_index")["observation.state"].to_numpy())[::2]
+        lowest.append(state[np.argsort(fk.heights(state))[:3]])
+        closing = closing_frames(state[:, 5])
+        if len(closing) and teleop.tasks[index][0].startswith(("Stack", "Put the eye drops into")):
+            grasps.append(state[closing[0]])
+    lowest, grasps = np.concatenate(lowest), np.stack(grasps)
+
+    def offsets(x: np.ndarray) -> np.ndarray:
+        full = np.zeros(6)
+        full[HEIGHT_JOINTS] = x
+        return full
+
+    def residuals(x: np.ndarray) -> np.ndarray:
+        under = np.minimum(fk.heights(lowest, offsets(x)) - CLEARANCE_M, 0) * UNDER_WEIGHT
+        return np.concatenate([under, fk.heights(grasps, offsets(x)) - grasp_height])
+
+    def report(x: np.ndarray) -> dict[str, object]:
+        grasp_z = np.percentile(fk.heights(grasps, offsets(x)), [10, 50, 90])
+        return {"under_table": round(float((fk.heights(lowest, offsets(x)) < 0).mean()), 3),
+                "grasp_z_10_50_90": grasp_z.round(4).tolist()}  # fmt: skip
+
+    x = least_squares(residuals, np.zeros(3), bounds=(-bound, bound), diff_step=1e-2).x
+    result = {"offsets": offsets(x).round(2).tolist(), "before": report(np.zeros(3)), "after": report(x),
+              "episodes": len(teleop), "grasps": len(grasps)}  # fmt: skip
+    out.write_text(json.dumps(result, indent=2))
+    print(json.dumps(result))
+
+
+@app.command("filter")
+def keep_in_workspace(
+    real: Annotated[Path, typer.Argument(help="Converted real dataset")],
+    twin: Annotated[Path, typer.Argument(help="Twin demos whose grasp band the real demos must fall in")],
+    out: Annotated[Path, typer.Argument(help="The real demos that pass")],
+    margin_xy: Annotated[float, typer.Option(help="Metres the band is widened by in reach and sideways")] = 0.03,
+    margin_z: Annotated[float, typer.Option(help="Metres the band is widened by in height")] = 0.02,
+) -> None:
+    """Keep the real demos whose every grasp, through the twin's kinematics, lands inside the twin's own grasp band.
+
+    ArmnetBench does not record which farm arm ran an episode, so calibration can't be corrected per arm. Instead the
+    twin decides: a grasp under the table or out of reach is a calibration or workspace mismatch, and its demo is
+    dropped rather than teaching the policy joint targets the twin never needs. The band is the twin demos' 2-98%
+    grasp range, widened by the margins; demos that never close the gripper are dropped too."""
+    lo, hi = np.percentile(grasp_points(twin, 400), [2, 98], axis=0)
+    margin = np.array([margin_xy, margin_xy, margin_z])
+    lo, hi = lo - margin, hi + margin
+    grasps = episode_grasps(real)
+    keep = [i for i, g in grasps.items() if len(g) and ((g >= lo) & (g <= hi)).all()]
+    print(f"band x {lo[0]:.3f}..{hi[0]:.3f}, y {lo[1]:.3f}..{hi[1]:.3f}, z {lo[2]:.3f}..{hi[2]:.3f} m")
+    source = LeRobotDataset(f"local/{real.name}", root=real)
+    tasks = pd.Series([source.meta.episodes[i]["tasks"][0] for i in keep]).value_counts()
+    print(f"kept {len(keep)}/{len(grasps)} demos; by task: {tasks.to_dict()}")
+    if out.exists():
+        shutil.rmtree(out)
+    drop = sorted(set(grasps) - set(keep))
+    delete_episodes(source, drop, output_dir=out, repo_id=f"local/{out.name}")
+
+
 @app.command()
 def mix(
     twin: Annotated[Path, typer.Argument(help="Twin demos")],
@@ -184,15 +307,21 @@ def mix(
     real_share: Annotated[float, typer.Option(help="Real frames' share of the training samples")] = 0.25,
     extra: Annotated[list[Path] | None, typer.Option(help="More converted real datasets (e.g. the rollouts)")] = None,
 ) -> None:
-    """Twin demos repeated against the real sets so real frames are about `real_share` of the merged set."""
+    """Twin demos repeated against the real sets, or the real sets against the twin when they are the smaller side, so
+    real frames are about `real_share` of the merged set."""
     t = LeRobotDataset("local/twin", root=twin)
     reals = [LeRobotDataset(f"local/real_{i}", root=root) for i, root in enumerate([real, *(extra or [])])]
     real_frames = sum(r.meta.total_frames for r in reals)
-    copies = max(1, round(real_frames * (1 - real_share) / (real_share * t.meta.total_frames)))
-    merged = merge_datasets([*[t] * copies, *reals], f"local/{out.name}", output_dir=out, concatenate_videos=False)
+    ratio = real_frames * (1 - real_share) / (real_share * t.meta.total_frames)  # twin copies per real copy
+    copies, real_copies = (max(1, round(ratio)), 1) if ratio >= 1 else (1, max(1, round(1 / ratio)))
+    merged = merge_datasets(
+        [*[t] * copies, *reals * real_copies], f"local/{out.name}", output_dir=out, concatenate_videos=False
+    )
     episodes = sum(r.meta.total_episodes for r in reals)
-    share = real_frames / merged.meta.total_frames
-    print(f"{out}: twin x{copies} + {episodes} real episodes = {merged.meta.total_frames} frames, real {share:.0%}")
+    share = real_frames * real_copies / merged.meta.total_frames
+    print(
+        f"{out}: twin x{copies} + {episodes} real episodes x{real_copies} = {merged.meta.total_frames} frames, real {share:.0%}"
+    )
 
 
 if __name__ == "__main__":

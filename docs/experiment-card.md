@@ -45,6 +45,7 @@ and what remains unmeasured. Results and reasoning: [`report.pdf`](report.pdf) (
 | DiVeR verifier | 300 round-3 rollouts (226 succeeded; 240 train, 60 held out); 2 suites × 96 | 139 succeeded vs 145 | within noise; best-of-N closed |
 | RL expert | plain PPO (stopped at 4.4M steps), 2 relaunches killed for bugs | residual PPO: 74.0% held-out snapshot recovery at 3.0M steps; shaped PPO ~6% training success | runs tagged `superseded` in W&B |
 | v9 real co-training | 12k steps, 6 suites × 96 + 50 external | 373/576, 0/50 | DISCARD: worse on 3 suites |
+| v11 calibrated co-training | 400 teleop demos calibrated, 87 block-stacking episodes kept; 4k steps; 6 suites × 96 | 472/576 | KEEP: within noise of 483; real-arm benefit untested |
 | ArmnetBench conversion | 400 teleop + 515 successful rollouts selected from 2,499 episodes | all 915 converted | 1,532 failed and 52 suboptimal rollouts excluded by design |
 
 ## Filters: before or after seeing results
@@ -61,5 +62,5 @@ and what remains unmeasured. Results and reasoning: [`report.pdf`](report.pdf) (
 - Anything on the physical arm (not delivered).
 - More than one training seed per checkpoint, or more than one benchmark seed.
 - Whether FLUX's closed-loop failure comes from its 8-frame history or its delta actions (hypothesis, untested).
-- v9b (v9 plus 515 successful real rollouts), queued pending a decision.
+- Whether calibrated real data (v11) helps on the physical arm; the twin benchmark can only show it does no harm.
 - Whether round 3's held_out_objects gain is real: 61 then 57 vs 50 over two runs, significant only in the first.

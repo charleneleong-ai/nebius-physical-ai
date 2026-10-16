@@ -84,6 +84,7 @@ scene by scene with McNemar tests; a candidate is promoted only with a pooled ga
 | Best-of-8 chunk consensus on round 2 (2 suites) | — | 55 | — | within noise (p=0.41); not adopted |
 | DiVeR verifier best-of-8 on round 3 (2 suites) | — | 54 | — | within noise (p=0.66; clean_many 85 vs 88); best-of-N closed ([#30](https://github.com/charleneleong-ai/nebius-physical-ai/pull/30)) |
 | v9: + 400 real ArmnetBench demos (23% of samples) | 373 | 48 | 0/50 | worse on 3 suites (p≤0.043); dropped |
+| v11: round 3 + 87 joint-calibrated block-stacking real episodes (9%) | 472 | 57 | — | within noise on every suite; kept for the real arm ([#29](https://github.com/charleneleong-ai/nebius-physical-ai/pull/29)) |
 | FLUX 3 Action LoRA, fair (v5's data and volume) | 50 | 3 | 0/7 | worse on every suite; dropped |
 
 ```mermaid

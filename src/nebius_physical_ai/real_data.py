@@ -20,11 +20,12 @@ def armnet_episodes(episodes: Mapping[str, Sequence[object]], rollouts: bool = F
     return keep
 
 
-def to_twin_units(joints: np.ndarray) -> np.ndarray:
+def to_twin_units(joints: np.ndarray, offsets: np.ndarray | None = None) -> np.ndarray:
     """ArmnetBench records LeRobot's range mode, each joint's calibrated travel as [-100, 100] (gripper [0, 100]), and the
-    twin maps the menagerie joint ranges onto the same scale, so the units carry over. Only overshoot past the calibrated
-    ends is clipped (shoulder lift reaches -103; wrist roll, a full-turn joint, 155)."""
-    out = np.asarray(joints, dtype=np.float64).copy()
+    twin maps the menagerie joint ranges onto the same scale, so the units carry over. `offsets` (same units, from
+    `real_mix.py calibrate`) correct the farm arms' hand calibration first; overshoot past the calibrated ends is then
+    clipped (shoulder lift reaches -103; wrist roll, a full-turn joint, 155)."""
+    out = np.asarray(joints, dtype=np.float64) + (0.0 if offsets is None else offsets)
     out[..., :5] = np.clip(out[..., :5], -100, 100)
     out[..., 5] = np.clip(out[..., 5], 0, 100)
     return out

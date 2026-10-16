@@ -139,7 +139,8 @@ flowchart LR
     <div class="row"><span class="pill flat">Kept</span><div><strong>RL expert (residual PPO)</strong>74.0% held-out snapshot recovery vs the scripted expert's 45.9%. Plain PPO stopped at 1% after its reward paid hovering; shaped PPO from scratch stays near 6%.</div></div>
     <div class="row"><span class="pill flat">Flat</span><div><strong>Best-of-8 chunk consensus</strong>Medoid of 8 flow-matching samples on round 2: held_out_objects 55 vs 50 (p=0.41), clean_many 87 vs 86. Within noise at 8× inference cost.</div></div>
     <div class="row"><span class="pill flat">Flat</span><div><strong>DiVeR verifier, best-of-8 on round 3</strong>Trained on 300 round-3 rollouts, it ranks held-out steps at AUC 0.79, yet picking with it scores held_out_objects 54 vs 57 (p=0.66) and clean_many 85 vs 88. Best-of-N is closed.</div></div>
-    <div class="row"><span class="pill rejected">Rejected</span><div><strong>Real-data co-training (v9)</strong>400 ArmnetBench SO-101 teleop demos of new objects at 23% of samples: 373 vs 438, held_out_objects 48 vs 52 (no gain), significantly worse on three suites, 0/50 externally. v9b (plus 515 real rollouts) is queued pending a decision.</div></div>
+    <div class="row"><span class="pill rejected">Rejected</span><div><strong>Real-data co-training (v9)</strong>400 ArmnetBench SO-101 teleop demos of new objects at 23% of samples: 373 vs 438, held_out_objects 48 vs 52 (no gain), significantly worse on three suites, 0/50 externally.</div></div>
+    <div class="row"><span class="pill flat">Kept</span><div><strong>Calibrated co-training (v11)</strong>Joint offsets fitted to the twin cut real frames under the table from 99.7% to 4.2%. Round 3 with 87 calibrated block-stacking episodes at 9%: 472 vs 483, every suite within noise. Neutral in the twin; kept for the real arm.</div></div>
   </div>
 </section>
 

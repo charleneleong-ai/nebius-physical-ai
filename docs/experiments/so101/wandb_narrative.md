@@ -1,6 +1,6 @@
 ## Highlights
 
-**Status, 14 Oct 2026 22:30 AEDT.** DAgger round 3 (retrained) is the served policy. RL-expert recoveries were tried in rounds 4 (×8, 471) and 5 (×2, 455) and are closed; v9 real-data co-training was discarded; the DiVeR verifier (best-of-8 on round 3) is within noise and closes best-of-N. Everything is simulation; the physical SO-101 has not arrived.
+**Status, 14 Oct 2026 22:30 AEDT.** DAgger round 3 (retrained) is the served policy. RL-expert recoveries were tried in rounds 4 (×8, 471) and 5 (×2, 455) and are closed; v9 real-data co-training was discarded, and v11 (joint-calibrated block-stacking demos) is within noise of round 3 (472 vs 483), kept for the real arm; the DiVeR verifier (best-of-8 on round 3) is within noise and closes best-of-N. Everything is simulation; the physical SO-101 has not arrived.
 
 | | Pooled (of 576) | held_out_objects (of 96) | so101-benchmark (of 50) |
 |---|---|---|---|
@@ -27,6 +27,7 @@
 | 12 Oct | **DAgger r3 retrain** | same recipe, retrained | **483** | 57 |
 | 12 Oct | DAgger r4 | RL expert records recoveries | 471 | 49 |
 | 13 Oct | DAgger r5 | RL recoveries weighted ×2 | 455 | 41 |
+| 14 Oct | v11 | r3 + 87 calibrated real block-stacking episodes (9%) | 472 | 57 |
 
 Companion page: [Preflight Generalisation Ledger](https://claude.ai/artifact/JUihdgT9xtqYc8a4ieJPQU). Report and experiment card: [docs/report.pdf](https://github.com/charleneleong-ai/nebius-physical-ai/blob/main/docs/report.pdf), [docs/experiment-card.md](https://github.com/charleneleong-ai/nebius-physical-ai/blob/main/docs/experiment-card.md).
 
@@ -55,7 +56,7 @@ The served policy is GR00T N1.7 (`hqfang/groot-so100_101`) fine-tuned with LeRob
 - Targeted demos (v6): staged mistakes and decoys did not move any suite.
 - Visual domain randomisation (v7): fixes the wrist-mount scenes but costs clean_many 23 successes.
 - Plain PPO from scratch on privileged state: reward paid hovering; 1% recovery.
-- Real-data co-training (v9, 400 ArmnetBench demos at 23%): 373 vs 438, no gain on new objects, worse on three suites.
+- Uncalibrated real-data co-training (v9, 400 ArmnetBench demos of eight tasks at 23%): 373 vs 438, worse on three suites. Calibrated and restricted to block stacking (v11) it is neutral: 472 vs 483.
 - RL-expert recoveries in DAgger (rounds 4 and 5, at ×8 and ×2): 471 and 455 vs 483; new objects 49 then 41 vs 57.
 
 ## Next
