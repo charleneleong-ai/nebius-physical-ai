@@ -6,7 +6,15 @@ import pytest
 
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import Observation
-from nebius_physical_ai.twin.dagger import FailureSnapshot, Harvester, Rehearsed, record_recovery, select
+from nebius_physical_ai.twin.dagger import (
+    FailureJitter,
+    FailureSnapshot,
+    Harvester,
+    Rehearsed,
+    record_recovery,
+    select,
+    synthesise,
+)
 from nebius_physical_ai.twin.expert import SceneSampler
 from nebius_physical_ai.twin.randomize import Randomization, SceneRandomizer
 from nebius_physical_ai.twin.scene import SO101_XML, BlockPhysics, SceneLook, TwinLayout
@@ -107,3 +115,23 @@ class TestHarvest:
         with snapshot.restore(LAYOUT) as twin:
             np.testing.assert_allclose(frames[0].obs.joints, twin.to_lerobot(twin.arm_qpos()), atol=1e-4)
         assert frames[0].obs.task == snapshot.prompt
+
+    def test_synthesised_failures_move_the_blocks_and_arm_but_keep_the_scene(self, harvested: tuple) -> None:
+        seed = harvested[1][0]
+        made = synthesise(seed, LAYOUT, np.random.default_rng(0), copies=4, jitter=FailureJitter())
+        assert made  # an untouched scene leaves room to move every block
+        with seed.restore(LAYOUT) as twin:
+            blocks = [twin.model.joint(name).qposadr[0] for name in twin.blocks]
+            arm = [twin.model.joint(j).qposadr[0] for j in ("shoulder_pan", "elbow_flex")]
+        for copy in made:
+            assert (copy.objects, copy.prompt, copy.failure, copy.scene) == (
+                seed.objects,
+                seed.prompt,
+                seed.failure,
+                seed.scene,
+            )
+            q, q0 = np.array(copy.qpos), np.array(seed.qpos)
+            moved = [np.linalg.norm(q[a : a + 2] - q0[a : a + 2]) for a in blocks]
+            assert max(moved) > 1e-4 and max(moved) < 0.035 and (q[[a + 2 for a in blocks]] > 0).all()
+            assert not np.allclose(q[arm], q0[arm])
+        assert len({tuple(np.round(c.qpos, 4)) for c in made}) == len(made)  # each copy is its own state

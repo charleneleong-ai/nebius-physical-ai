@@ -15,12 +15,20 @@ from functools import partial
 from pathlib import Path
 from typing import Annotated
 
+import numpy as np
 import typer
 from rich.progress import track
 
 from nebius_physical_ai.cli import build_randomizer
 from nebius_physical_ai.policy.gr00t import Gr00tClient
-from nebius_physical_ai.twin.dagger import FailureSnapshot, Harvester, record_recovery, select
+from nebius_physical_ai.twin.dagger import (
+    FailureJitter,
+    FailureSnapshot,
+    Harvester,
+    record_recovery,
+    select,
+    synthesise,
+)
 from nebius_physical_ai.twin.dataset import LeRobotWriter
 from nebius_physical_ai.twin.expert import Frame, SceneSampler
 from nebius_physical_ai.twin.scene import TwinLayout
@@ -61,6 +69,27 @@ def harvest(
     rates = Counter(round(s.scene_p, 2) for s in harvested)
     print(f"failures by their scene's success rate: {dict(sorted(rates.items()))}")
     print(f"kept {len(chosen)} of {len(harvested)} snapshots: {dict(Counter(s.failure for s in chosen))} -> {out}")
+
+
+@app.command("synthesise")
+def synthesise_failures(
+    snapshots: Annotated[list[Path], typer.Argument(help="`harvest` files whose failures seed the synthesis")],
+    out: Annotated[Path, typer.Option(help="The observed snapshots followed by their synthesised copies")],
+    copies: Annotated[int, typer.Option(help="Synthesised states per observed failure")] = 6,
+    seed: int = 1700,
+    block_mm: float = 12.0,
+    arm_rad: float = 0.06,
+) -> None:
+    """Seed `copies` nearby failure states from every observed one (`twin.dagger.synthesise`), for `recover`."""
+    observed = [s for path in snapshots for s in FailureSnapshot.load(path)]
+    rng, jitter, layout = np.random.default_rng(seed), FailureJitter(block_mm=block_mm, arm_rad=arm_rad), TwinLayout()
+    made: list[FailureSnapshot] = []
+    for snapshot in track(observed, description="synthesising failure states"):
+        made += synthesise(snapshot, layout, rng, copies, jitter)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("".join(json.dumps(s.record()) + "\n" for s in [*observed, *made]))
+    print(f"{len(observed)} observed + {len(made)} synthesised of {len(observed) * copies} tried "
+          f"({dict(Counter(s.failure for s in made))}) -> {out}")  # fmt: skip
 
 
 def rl_recorder(path: Path) -> Callable[[FailureSnapshot], list[Frame] | None]:

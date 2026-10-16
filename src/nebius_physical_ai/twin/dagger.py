@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import mujoco
+import numpy as np
 
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import Policy
@@ -31,6 +32,11 @@ from nebius_physical_ai.twin.scene import ARM_JOINTS, BlockPhysics, SceneLook, T
 
 # Still in the jaws at the end: the open-loop expert opens on its way to the pick and would drop it where it hangs.
 UNRECOVERABLE = ("holding",)
+
+
+def state_of(twin: Twin) -> dict[str, list[float]]:
+    """The simulator state a snapshot saves."""
+    return {"qpos": twin.data.qpos.round(6).tolist(), "qvel": twin.data.qvel.round(6).tolist()}
 
 
 @dataclass
@@ -75,9 +81,8 @@ class FailureSnapshot:
 
     @classmethod
     def capture(cls, twin: Twin, scene: "Rehearsed", failure: str) -> "FailureSnapshot":
-        state = {"qpos": twin.data.qpos.round(6).tolist(), "qvel": twin.data.qvel.round(6).tolist()}
         v = scene.variant
-        return cls(v.objects, scene.check.top, scene.check.bottom, scene.prompt, scene.look, v.physics, **state,
+        return cls(v.objects, scene.check.top, scene.check.bottom, scene.prompt, scene.look, v.physics, **state_of(twin),
                    failure=failure, scene=scene.scene)  # fmt: skip
 
     def restore(self, layout: TwinLayout) -> Twin:
@@ -202,6 +207,50 @@ def select(
     order = sorted(queues, key=lambda f: -len(queues[f]))
     ranked = sorted((i, k, s) for k, f in enumerate(order) for i, s in enumerate(queues[f]))
     return [s for *_, s in ranked[:budget]]
+
+
+@dataclass(frozen=True)
+class FailureJitter:
+    """How far a synthesised failure state may move from an observed one."""
+
+    block_mm: float = 12.0  # each block's resting position, in the table plane
+    yaw_rad: float = 0.3  # each block's turn about the vertical
+    arm_rad: float = 0.06  # each arm joint except the gripper, whose open or closed state the failure depends on
+    settle_s: float = 0.3  # simulated time to let the moved blocks come to rest
+    max_drift_mm: float = 20.0  # a block that moves further than this while settling fell or was pushed into another
+
+
+def synthesise(
+    snapshot: FailureSnapshot, layout: TwinLayout, rng: np.random.Generator, copies: int, jitter: FailureJitter
+) -> list[FailureSnapshot]:
+    """Failure-state synthesis after CARE (arXiv 2609.24118): DAgger records one recovery per failure the policy happens
+    to reach, about 100 a round, so its yield shrinks as the policy improves. Here each observed failure seeds `copies`
+    nearby states of the same kind: every block moved and turned on the table where the policy left it, the arm's joints
+    moved a little, then settled so the blocks rest physically. A copy whose blocks fall through the table, leave it, or
+    slide far while settling (pushed into a neighbour) is dropped. The expert then records a recovery from each."""
+    out = []
+    with snapshot.restore(layout) as twin:
+        base = np.array(snapshot.qpos)
+        blocks = [twin.model.joint(name).qposadr[0] for name in twin.blocks]
+        arm = [twin.model.joint(j).qposadr[0] for j in ARM_JOINTS[:-1]]
+        limits = twin.arm_limits()[:-1]
+        for _ in range(copies):
+            qpos = base.copy()
+            for adr in blocks:
+                qpos[adr : adr + 2] += rng.uniform(-jitter.block_mm, jitter.block_mm, 2) / 1000
+                turn = rng.uniform(-jitter.yaw_rad, jitter.yaw_rad) / 2
+                quat = np.empty(4)
+                mujoco.mju_mulQuat(quat, np.array([np.cos(turn), 0, 0, np.sin(turn)]), qpos[adr + 3 : adr + 7])
+                qpos[adr + 3 : adr + 7] = quat
+            qpos[arm] = np.clip(qpos[arm] + rng.uniform(-jitter.arm_rad, jitter.arm_rad, len(arm)), *limits.T)
+            moved = replace(snapshot, qpos=qpos.tolist(), qvel=[0.0] * len(snapshot.qvel)).apply(twin)
+            placed = np.array([moved.data.qpos[adr : adr + 3] for adr in blocks])
+            moved.settle(jitter.settle_s)
+            rest = np.array([moved.data.qpos[adr : adr + 3] for adr in blocks])
+            # 3D: a block knocked off a stack, or squeezed out of the gripper, moves far even if it stays on the table
+            if (rest[:, 2] > 0).all() and np.linalg.norm(rest - placed, axis=1).max() * 1000 <= jitter.max_drift_mm:
+                out.append(replace(snapshot, **state_of(moved)))
+    return out
 
 
 def record_recovery(
