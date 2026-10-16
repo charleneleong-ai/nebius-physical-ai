@@ -134,8 +134,9 @@ expert, with potential-based shaping, recovers 74.0\% of held-out failure snapsh
 50 over two training runs; only the first is significant on its own ($p=0.043$, uncorrected).
 \item \textbf{Round 2's gain is mostly one suite.} Only real\_1\_pomade\_tin is significant on its own; the other five are
 better but within noise. The pooled gain passed a gate fixed in advance.
-\item \textbf{The FLUX failure mechanism is a hypothesis.} Conditioning on its own 8-frame history and integrating deltas
-fits the slow-start, no-contact pattern, but has not been tested by retraining.
+\item \textbf{Which half of the FLUX fix matters is open.} Retrained with current-frame conditioning and absolute joint targets
+(a quarter of the budget), FLUX scores 21 vs 3 on held\_out\_objects ($p<0.001$), confirming the mechanism; the two changes
+were made together, and it remains far below round~3.
 \item \textbf{so101-benchmark remains 0--1 of 50} for every policy; the external gap is open.
 \item \textbf{Single seed} for every benchmark (seed 42); no checkpoint was trained twice.
 \end{itemize}

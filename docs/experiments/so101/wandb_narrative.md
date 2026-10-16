@@ -50,7 +50,7 @@ The served policy is GR00T N1.7 (`hqfang/groot-so100_101`) fine-tuned with LeRob
 
 **Closed / do not retry**
 
-- FLUX 3 Action LoRA: predicts well open-loop (2.71 vs 8.24 hold-pose error at 32 steps) but 50/576 closed-loop; 16-step chunks did not fix it.
+- FLUX 3 Action LoRA: predicts well open-loop (2.71 vs 8.24 hold-pose error at 32 steps) but 50/576 closed-loop; 16-step chunks did not fix it. Current-frame conditioning with absolute targets did, partly: held_out_objects 21 vs 3 at a quarter of the budget, still far below round 3.
 - Best-of-8 chunk medoid: within noise at 8× inference.
 - DiVeR verifier best-of-8 on round 3: step AUC 0.79 on held-out episodes, but 54 vs 57 and 85 vs 88.
 - Targeted demos (v6): staged mistakes and decoys did not move any suite.
