@@ -14,13 +14,18 @@ def medoid_index(chunks: np.ndarray) -> np.ndarray:
     return np.linalg.norm(flat[:, None] - flat[None], axis=-1).sum(axis=1).argmin(axis=0)
 
 
-def candidate_features(features: np.ndarray, joints: np.ndarray, chunks: np.ndarray) -> np.ndarray:
+def candidate_features(
+    features: np.ndarray, joints: np.ndarray, chunks: np.ndarray, expert: np.ndarray | None = None
+) -> np.ndarray:
     """(B, D) pooled observation features, (B, 6) joints and (B, N, T, 6) candidate chunks -> (B, N, D + 6 + T*6):
-    one row per candidate, the chunk as offsets from the current joints."""
+    one row per candidate, the chunk as offsets from the current joints. `expert` (B, N, E), the action expert's own
+    pooled state for each candidate, is appended when given: it differs per candidate where the shared observation
+    features cannot."""
     batch, n = chunks.shape[:2]
     offsets = (chunks - joints[:, None, None, :]).reshape(batch, n, -1)
     shared = np.concatenate([features, joints], axis=-1)[:, None].repeat(n, axis=1)
-    return np.concatenate([shared, offsets], axis=-1).astype(np.float32)
+    parts = [shared, offsets] if expert is None else [shared, offsets, expert]
+    return np.concatenate(parts, axis=-1).astype(np.float32)
 
 
 def criticality(chunks: np.ndarray) -> np.ndarray:

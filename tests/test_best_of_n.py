@@ -28,6 +28,13 @@ class TestVerifierFeatures:
         np.testing.assert_allclose(x[:, 0, :11], x[:, 2, :11])
         np.testing.assert_allclose(x[1, 1, 11:], (chunks[1, 1] - joints[1]).ravel(), rtol=1e-6)
 
+    def test_expert_state_is_appended_per_candidate(self) -> None:
+        features, joints, chunks = RNG.normal(size=(2, 5)), RNG.normal(size=(2, 6)), RNG.normal(size=(2, 3, 4, 6))
+        expert = RNG.normal(size=(2, 3, 7))
+        x = candidate_features(features, joints, chunks, expert)
+        assert x.shape == (2, 3, 5 + 6 + 4 * 6 + 7)
+        np.testing.assert_allclose(x[..., -7:], expert, rtol=1e-6)
+
     def test_criticality_grows_with_candidate_disagreement(self) -> None:
         same = np.repeat(RNG.normal(size=(1, 1, 4, 6)), 8, axis=1)
         spread = same + RNG.normal(scale=2.0, size=same.shape)

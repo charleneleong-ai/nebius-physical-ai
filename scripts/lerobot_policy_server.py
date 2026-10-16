@@ -34,21 +34,23 @@ from nebius_physical_ai.policy.gr00t import MsgCodec
 from nebius_physical_ai.policy.verifier import Verifier
 
 ACTION_KEYS = {"single_arm": (0, 5), "gripper": (5, 6)}
-Selector = Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray] | None  # (N,B,T,6), (B,D), (B,6) -> (B,) index
+# (N,B,T,6) drawn, (B,D) features, (B,6) joints, (B,N,E) expert state -> (B,) index
+Selector = Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray], np.ndarray] | None
 
 
-def first(drawn: np.ndarray, _features: np.ndarray, _joints: np.ndarray) -> np.ndarray:
+def first(drawn: np.ndarray, _features: np.ndarray, _joints: np.ndarray, _expert: np.ndarray) -> np.ndarray:
     """The policy as is: the first sample (how verifier training data is collected)."""
     return np.zeros(drawn.shape[1], dtype=int)
 
 
-def consensus(drawn: np.ndarray, _features: np.ndarray, _joints: np.ndarray) -> np.ndarray:
+def consensus(drawn: np.ndarray, _features: np.ndarray, _joints: np.ndarray, _expert: np.ndarray) -> np.ndarray:
     return medoid_index(drawn)
 
 
 def scored_by(verifier: Verifier) -> Selector:
-    def pick(drawn: np.ndarray, features: np.ndarray, joints: np.ndarray) -> np.ndarray:
-        return verifier.pick(candidate_features(features, joints, drawn.transpose(1, 0, 2, 3)))
+    def pick(drawn: np.ndarray, features: np.ndarray, joints: np.ndarray, expert: np.ndarray) -> np.ndarray:
+        candidates = drawn.transpose(1, 0, 2, 3)
+        return verifier.pick(candidate_features(features, joints, candidates, expert if verifier.expert else None))
 
     return pick
 
@@ -65,14 +67,23 @@ class LeRobotGr00t:
         self.pre, self.post = make_pre_post_processors(self.policy.config, pretrained_path=str(checkpoint))
         self.horizon, self.cameras, self.samples = horizon, cameras, samples
         self.select = select or first
-        self.rows, self.pooled = 0, torch.empty(0)
+        self.rows, self.pooled, self.expert = 0, torch.empty(0), torch.empty(0)
         self.policy._groot_model.backbone.register_forward_hook(self.pool)
+        action_head = self.policy._groot_model.action_head
+        self.action_tokens = action_head.action_horizon
+        action_head.model.register_forward_hook(self.keep_expert)
 
     def pool(self, _module: torch.nn.Module, _inputs: object, output: Any) -> None:
         """Keep the vision-language features of one copy per observation, mean-pooled over the attended tokens."""
         features, mask = output["backbone_features"][: self.rows].float(), output.get("backbone_attention_mask")
         weights = torch.ones(features.shape[:2], device=features.device) if mask is None else mask[: self.rows].float()
         self.pooled = (features * weights[..., None]).sum(1) / weights.sum(1, keepdim=True).clamp_min(1)
+
+    def keep_expert(self, _module: torch.nn.Module, _inputs: object, output: Any) -> None:
+        """Each candidate's action-expert state, the DiT output mean-pooled over its action tokens. The last denoising
+        step's call overwrites the earlier ones, so after a prediction this holds the step that produced the chunk."""
+        hidden = output[0] if isinstance(output, tuple) else output
+        self.expert = hidden[:, -self.action_tokens :].float().mean(1)
 
     def sample(self, front: np.ndarray, wrist: np.ndarray, joints: np.ndarray, task: str) -> dict[str, Any]:
         views = [front, wrist, front, wrist][: self.cameras]
@@ -103,11 +114,12 @@ class LeRobotGr00t:
         chunk = self.post(self.policy.predict_action_chunk(self.pre(self.batch(samples * self.samples))))
         drawn = np.asarray(chunk.float().cpu()).reshape(self.samples, len(samples), -1, 6)[:, :, : self.horizon]
         features = self.pooled.cpu().numpy()  # copies of one observation share their features
-        chosen = self.select(drawn, features, joints) if self.samples > 1 else np.zeros(len(samples), dtype=int)
+        expert = self.expert.cpu().numpy().reshape(self.samples, len(samples), -1).transpose(1, 0, 2)  # (B, N, E)
+        chosen = self.select(drawn, features, joints, expert) if self.samples > 1 else np.zeros(len(samples), dtype=int)
         actions = drawn[chosen, np.arange(len(samples))].astype(np.float32)
         extras = {
             "features": features.astype(np.float16), "candidates": drawn.transpose(1, 0, 2, 3).astype(np.float32),
-            "chosen": chosen.astype(np.int64),
+            "chosen": chosen.astype(np.int64), "expert": expert.astype(np.float16),
         } if info else {}  # fmt: skip
         return {key: actions[..., lo:hi] for key, (lo, hi) in ACTION_KEYS.items()}, extras
 
