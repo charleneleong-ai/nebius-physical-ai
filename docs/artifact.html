@@ -134,6 +134,7 @@ flowchart LR
     <div class="row"><span class="pill flat">Kept</span><div><strong>DAgger round 4, RL expert records recoveries</strong>The residual RL expert recovered 88 of 120 kept failure states (73%, vs the script's 40%), but the candidate scored 471 vs 483 (within noise) and no_contact rose from 18 to 39.</div></div>
     <div class="row"><span class="pill rejected">Rejected</span><div><strong>DAgger round 5, RL recoveries weighted ×2</strong>72 of 113 recovered; 160 RL recoveries at ×2 beside the scripted ×8. 455 vs 483 and held_out_objects 41 vs 57 (p=0.004): the RL-recovery line is closed.</div></div>
     <div class="row"><span class="pill rejected">Rejected</span><div><strong>FLUX 3 Action LoRA (fair)</strong>Same 800 demos, same sample volume: 50 vs 438, worse on every suite (p &lt; 0.001), 0/7 externally. Executing 16 instead of 32 actions per chunk did not help.</div></div>
+    <div class="row"><span class="pill flat">Kept</span><div><strong>FLUX, current frame + absolute targets</strong>Same demos at a quarter of the budget, action heads re-initialised: held_out_objects 21 vs 3 (p&lt;0.001), clean_many 15 vs 9. The self-history and deltas caused most of the collapse; still far below round 3.</div></div>
     <div class="row"><span class="pill flat">Flat</span><div><strong>Targeted demos (v6)</strong>Staged-mistake recoveries plus lookalike decoys: 421 vs 438, within noise.</div></div>
     <div class="row"><span class="pill rejected">Rejected</span><div><strong>Visual domain randomisation (v7)</strong>Lifts the Seeed wrist-mount scenes 15 → 53 but drops clean_many 81 → 58; 1/50 on so101-benchmark.</div></div>
     <div class="row"><span class="pill flat">Kept</span><div><strong>RL expert (residual PPO)</strong>74.0% held-out snapshot recovery vs the scripted expert's 45.9%. Plain PPO stopped at 1% after its reward paid hovering; shaped PPO from scratch stays near 6%.</div></div>
@@ -152,7 +153,7 @@ flowchart LR
     <li>Nothing has run on the physical arm. The repo will be updated with live results when it arrives.</li>
     <li>Round 3's new-object gain (p=0.043) is one suite of six, uncorrected for multiple comparisons, from one seed.</li>
     <li>No single suite gain from round 3's retrain is significant on its own; the pooled gain passed a gate fixed in advance, twice in a row for rounds 2 and 3.</li>
-    <li>FLUX's failure mechanism (8-frame self-history and integrated deltas) is a hypothesis, not tested by retraining.</li>
+    <li>Which of FLUX's two changes (current-frame conditioning, absolute targets) carries its 21-vs-3 gain; they were tested together.</li>
     <li>The RL expert is measured on recovering failure snapshots, not yet as a source of DAgger data.</li>
     <li>One benchmark seed and one training seed per checkpoint.</li>
   </ul>
