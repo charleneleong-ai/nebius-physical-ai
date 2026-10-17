@@ -1,0 +1,15 @@
+.git
+.venv
+**/__pycache__
+.ruff_cache
+.pytest_cache
+logs
+wandb
+data
+docs
+experiments
+reports
+research_notes
+tests
+*.mp4
+.env
