@@ -30,8 +30,9 @@ from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler, Unreac
 from nebius_physical_ai.twin.randomize import SEEED_WRIST, Randomization, SceneRandomizer
 from nebius_physical_ai.twin.rehearsal import Rehearsal, RehearsalResult
 from nebius_physical_ai.twin.roles import HELD_OUT_COLOURS, HELD_OUT_REAL, TRAIN_COLOURS
-from nebius_physical_ai.twin.rollout import STACK_TASK, StackCheck
-from nebius_physical_ai.twin.scene import SceneLook, Twin, TwinLayout
+from nebius_physical_ai.twin.rollout import STACK_TASK, Check, StackCheck
+from nebius_physical_ai.twin.scene import Fixture, SceneLook, Twin, TwinLayout
+from nebius_physical_ai.twin.tasks import Basket, BasketCheck, Peg, PegCheck, Ring, TaskCheck, TaskExpert
 from nebius_physical_ai.twin.textures import HELD_OUT_SEED, KINDS
 
 SEED = 42
@@ -83,9 +84,14 @@ class Case:
     prompt: str
     camera: dict[str, Any] | None = None  # None = straight down
     look: SceneLook | None = None  # floor texture and wrist camera; None = the plain twin
+    fixtures: tuple[Fixture, ...] = ()  # `twin.tasks` fixtures (a basket, a peg, a ring) beside the blocks
+    check: TaskCheck | None = None  # the task's success test; None = stack `pick` on `place`
 
     def layout(self, base: TwinLayout) -> FixedCameraLayout:
         return FixedCameraLayout(base.mat, base.base_offset_mm, base.front_camera, self.camera)
+
+    def success(self) -> Check:
+        return self.check or StackCheck(self.pick, self.place)
 
 
 @dataclass(frozen=True)
@@ -196,18 +202,24 @@ def legacy_suites(real: list[DetectedObject], layout: TwinLayout, calibrated: Ca
 def expert_solves(case: Case, layout: TwinLayout, start: np.ndarray) -> bool:
     """Whether the scripted expert completes this case: if it can't, a policy miss says nothing about the policy."""
     own = case.layout(layout)
-    with Twin.from_objects(case.objects, own, start_pose=start, look=SceneLook(camera=case.camera)) as twin:
+    look = SceneLook(camera=case.camera)
+    with Twin.from_objects(case.objects, own, start_pose=start, look=look, fixtures=case.fixtures) as twin:
+        expert = (
+            TaskExpert(twin, case.prompt, case.check, image_size=(24, 32))
+            if case.check
+            else PickPlaceExpert(twin, case.prompt, case.pick, case.place, image_size=(24, 32))
+        )
         try:
-            list(PickPlaceExpert(twin, case.prompt, case.pick, case.place, image_size=(24, 32)).run())
+            list(expert.run())
         except UnreachableTarget:
             return False
         twin.settle(0.5)
-        return StackCheck(case.pick, case.place)(twin)
+        return case.success()(twin)
 
 
 def solvable_cases(
     name: str,
-    draw: Callable[[], tuple[list[DetectedObject], str, str, str]],
+    draw: Callable[[], Case],
     layout: TwinLayout,
     camera: dict[str, Any] | None,
     count: int = GENERATED_CASES,
@@ -215,8 +227,7 @@ def solvable_cases(
     """Up to `count` cases from `draw` that the expert solves, and how many draws it did not."""
     start, cases, rejected = start_pose(np.random.default_rng(SEED)), [], 0
     for _ in range(count * MAX_TRIES_PER_CASE):
-        objects, pick, place, prompt = draw()
-        case = Case(f"{name}_{len(cases)}", objects, pick, place, prompt, camera)
+        case = replace(draw(), name=f"{name}_{len(cases)}")
         if expert_solves(case, layout, start):
             cases.append(case)
         else:
@@ -224,6 +235,66 @@ def solvable_cases(
         if len(cases) == count:
             break
     return cases, rejected
+
+
+EYE_DROPS_MM = (26.0, 40.0)  # diameter, height: narrower than ~24 mm slips out of the closed gripper
+TASK_GAP_MM = 120.0  # object to fixture, so the gripper never starts inside the basket or the ring over the peg
+DECOY_SIDE_MM = 30.0
+DECOY_GAP_MM = 48.0 + DECOY_SIDE_MM / 2 + 15.0  # the ring's outer radius plus the decoy's half side, plus margin
+
+
+def held_out_task_suites(layout: TwinLayout) -> list[Suite]:
+    """Tasks no checkpoint here was trained on, after ArmnetBench's eye_drops_to_basket and ring_insert, in its own
+    words: an object and a fixture placed apart in the arm's reach, plus one training-colour cube as a decoy. Variants
+    perturb the eye drops and the decoy; the basket, the peg and the ring stay put. Every case is one the scripted
+    expert solves (`TaskExpert`); the ring is grasped on the side along the reach, the only grasp it holds."""
+    camera = oblique_camera(layout, OBLIQUE_ELEVATION_DEG, 0.0)
+
+    sampler = SceneSampler(layout)
+
+    def spots(rng: np.random.Generator) -> np.ndarray:
+        """Object, fixture and decoy positions (mat mm) inside reach: object and fixture TASK_GAP_MM apart."""
+        while True:
+            xy = rng.uniform([sampler.x_range[0], sampler.y_range[0]], [sampler.x_range[1], sampler.y_range[1]], (3, 2))
+            gaps = np.linalg.norm(xy[:, None] - xy[None], axis=-1)
+            if gaps[0, 1] >= TASK_GAP_MM and min(gaps[2, 0], gaps[2, 1]) >= DECOY_GAP_MM:
+                return xy
+
+    def decoy(rng: np.random.Generator, xy: np.ndarray) -> DetectedObject:
+        return DetectedObject(str(rng.choice(TRAIN_COLOURS)), *np.round(xy, 1), DECOY_SIDE_MM**2)
+
+    def basket_draw(rng: np.random.Generator) -> Callable[[], Case]:
+        def draw() -> Case:
+            (drops_xy, basket_xy, decoy_xy) = spots(rng)
+            dia, height = EYE_DROPS_MM
+            drops = DetectedObject("eye_drops", *np.round(drops_xy, 1), dia * dia, length_mm=dia, width_mm=dia,
+                                   height_mm=height, shape="cylinder", rgb=(0.92, 0.92, 0.95))  # fmt: skip
+            basket = Basket(*np.round(basket_xy, 1))
+            return Case(name="", objects=[drops, decoy(rng, decoy_xy)], pick="eye_drops", place=basket.name,
+                        prompt="Put the eye drops into the basket", camera=camera, fixtures=(basket,),
+                        check=BasketCheck("eye_drops", basket))  # fmt: skip
+
+        return draw
+
+    def ring_draw(rng: np.random.Generator) -> Callable[[], Case]:
+        def draw() -> Case:
+            (ring_xy, peg_xy, decoy_xy) = spots(rng)
+            ring, peg = Ring(*np.round(ring_xy, 1), radius_mm=36.0, tube_mm=12.0), Peg(*np.round(peg_xy, 1))
+            check = PegCheck(ring, peg, float(rng.choice([0.0, np.pi])))
+            return Case(name="", objects=[decoy(rng, decoy_xy)], pick=ring.name, place=peg.name,
+                        prompt="Insert the colourful ring into the central wooden peg", camera=camera,
+                        fixtures=(ring, peg), check=check)  # fmt: skip
+
+        return draw
+
+    suites = []
+    for name, stream, draw, note in (
+        ("held_out_task_basket", 30, basket_draw, "eye drops into a basket (ArmnetBench eye_drops_to_basket)"),
+        ("held_out_task_ring", 31, ring_draw, "ring over a peg (ArmnetBench ring_insert)"),
+    ):
+        cases, rejected = solvable_cases(name, draw(np.random.default_rng([SEED, stream])), layout, camera)
+        suites.append(Suite(name, "held_out_tasks", cases, note, rejected))
+    return suites
 
 
 def held_out_suites(real: list[DetectedObject], layout: TwinLayout) -> list[Suite]:
@@ -253,7 +324,7 @@ def held_out_suites(real: list[DetectedObject], layout: TwinLayout) -> list[Suit
         )
         sampler = SceneSampler(layout, seed=[SEED, seed])
         draw = episode_draw(randomizer, sampler, reals.get(place_on) if place_on else None)
-        cases, rejected = solvable_cases(name, draw, layout, camera)
+        cases, rejected = solvable_cases(name, lambda: Case("", *draw(), camera=camera), layout, camera)
         return Suite(name, "held_out", cases, note, rejected)
 
     suites = [
@@ -285,7 +356,7 @@ def diagnostic_suites(layout: TwinLayout, real: list[DetectedObject] | None = No
         def draw() -> tuple[list[DetectedObject], str, str, str]:
             return add(randomizer, randomizer.standard_objects(sampler)), "blue", "red", STACK_TASK
 
-        cases, rejected = solvable_cases(name, draw, layout, camera)
+        cases, rejected = solvable_cases(name, lambda: Case("", *draw(), camera=camera), layout, camera)
         return Suite(name, "diagnostic", cases, f"{name.removesuffix('_many')} in 12 random scenes", rejected)
 
     def keep(_: SceneRandomizer, objects: list[DetectedObject]) -> list[DetectedObject]:
@@ -353,6 +424,8 @@ def build_suites(
         suites += diagnostic_suites(layout, real)
     if group in ("appearance", "all"):
         suites += appearance_suites(layout)
+    if group == "held_out_tasks":  # not in "all": a new task, scored apart from the stacking gate
+        suites += held_out_task_suites(layout)
     patterns = list(only)
     return [s for s in suites if not patterns or any(fnmatch.fnmatch(s.name, p) for p in patterns)]
 
@@ -377,11 +450,12 @@ def run_suite(
         rehearsal = Rehearsal(
             policy,
             case.prompt,
-            StackCheck(case.pick, case.place),
+            case.success(),
             case.layout(layout),
             batch_size=batch_size,
             look=case.look,
             record_examples=record_videos,
+            fixtures=case.fixtures,
         )
         result = rehearsal.run(case.objects, suite.variants, SEED)
         per_case.append(result.successes)

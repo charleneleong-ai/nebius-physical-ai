@@ -30,7 +30,7 @@ from nebius_physical_ai.twin.rollout import FailureWatch
 from nebius_physical_ai.twin.scene import TwinLayout
 
 REPO = Path(__file__).resolve().parent.parent
-GROUPS = ("all", "legacy", "held_out", "diagnostic", "appearance")
+GROUPS = ("all", "legacy", "held_out", "diagnostic", "appearance", "held_out_tasks")
 console = Console(width=140)
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
