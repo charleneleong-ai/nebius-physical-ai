@@ -398,6 +398,12 @@ def run(pipe: PreflightPipeline, s: SyntheticScene) -> PipelineResult:
 
 
 class TestPipelineRun:
+    def test_without_rehearsal_a_trusted_scene_stops_at_the_gate(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        pipe, _, rehearsal = pipeline([True] * 32, monkeypatch)
+        pipe.rehearse, pipe.gr00t.ping = False, lambda: pytest.fail("no GR00T server is needed")
+        result = run(pipe, scene(CLEAN))
+        assert result.verdict == "PERCEIVED" and rehearsal.calls == [] and result.scene.perception > 0.9
+
     def test_a_clean_marker_scene_with_high_success_is_go(self, monkeypatch: pytest.MonkeyPatch) -> None:
         pipe, _, rehearsal = pipeline([True] * 32, monkeypatch)
         result = run(pipe, scene(CLEAN))

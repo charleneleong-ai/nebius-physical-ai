@@ -18,6 +18,8 @@ from nebius_physical_ai.capture.lift import HeightLifter, MatView
 from nebius_physical_ai.capture.markers import DPI, render_marker_sheet
 from nebius_physical_ai.capture.mat import ARUCO_DICT, DetectedObject, MatSpec, ScenePerceiver
 from nebius_physical_ai.capture.server import create_app
+from nebius_physical_ai.demo import demo as serve_demo
+from nebius_physical_ai.job import preflight_job
 from nebius_physical_ai.pipeline import add_pipeline_cli
 from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, LAYOUTS, Gr00tClient
 from nebius_physical_ai.tracking import Tracker
@@ -408,6 +410,8 @@ def evaluate(
 
 # Preflight pipeline CLI
 add_pipeline_cli(app)
+app.command("preflight-job")(preflight_job)
+app.command("demo")(serve_demo)
 
 
 def marker_alignment(twin: Twin, layout: TwinLayout, image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
