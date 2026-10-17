@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Protocol
 
 import numpy as np
 
@@ -33,7 +34,7 @@ class FailureWatch:
 
     FAILURES = ("no_contact", "pushed", "dropped", "fell_off", "holding", "knocked_place")
 
-    def __init__(self, twin: Twin, check: "StackCheck") -> None:
+    def __init__(self, twin: Twin, check: "Check") -> None:
         self.pick, self.place = check.top, check.bottom
         self.pick_start, self.place_start = twin.block_pos(self.pick), twin.block_pos(self.place)
         self.lifted = self.over_place = False
@@ -56,6 +57,15 @@ class FailureWatch:
         if np.linalg.norm(place[:2] - self.place_start[:2]) > MOVED_M:
             return "knocked_place"
         return "pushed" if np.linalg.norm(pick[:2] - self.pick_start[:2]) > MOVED_M else "no_contact"
+
+
+class Check(Protocol):
+    """A task's success test; `top` and `bottom` name the moved object and its target, for FailureWatch."""
+
+    top: str
+    bottom: str
+
+    def __call__(self, twin: Twin) -> bool: ...
 
 
 class StackCheck:
@@ -99,7 +109,7 @@ class BatchRollout:
         self.record, self.record_decisions = record, record_decisions
 
     def execute(
-        self, twin: Twin, chunk: np.ndarray, success: StackCheck, steps_left: int, watch: FailureWatch
+        self, twin: Twin, chunk: np.ndarray, success: Check, steps_left: int, watch: FailureWatch
     ) -> tuple[bool, int]:
         for n, target in enumerate(chunk[:steps_left], start=1):
             twin.step_towards(twin.from_lerobot(target), 1 / CONTROL_HZ)
@@ -108,8 +118,8 @@ class BatchRollout:
             watch.update(twin)
         return False, min(len(chunk), steps_left)
 
-    def run(self, success: StackCheck | list[StackCheck], max_steps: int = 480) -> list[RolloutResult]:
-        checks = [success] * len(self.twins) if isinstance(success, StackCheck) else success
+    def run(self, success: Check | list[Check], max_steps: int = 480) -> list[RolloutResult]:
+        checks = success if isinstance(success, list) else [success] * len(self.twins)
         results = [RolloutResult(False, 0) for _ in self.twins]
         watches = [FailureWatch(twin, check) for twin, check in zip(self.twins, checks)]
         active = list(range(len(self.twins)))
