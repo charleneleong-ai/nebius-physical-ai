@@ -460,6 +460,9 @@ Explain this verdict in 2-3 sentences for a human operator. Include:
 # ---------------------------------------------------------------------------
 
 
+PERCEIVED = "PERCEIVED"  # verdict when only the trust gate ran (`rehearse=False`)
+
+
 @dataclass
 class PipelineResult:
     scene: MarkerScene | None  # None when the mat could not be located or lacks a task block
@@ -476,6 +479,13 @@ class PipelineResult:
     ) -> PipelineResult:
         """The twin can't be trusted for this frame, so there is nothing to rehearse: don't guess."""
         return cls(scene, scene_graph, {}, None, f"ASK_HUMAN: {reason}", Verdict.ASK_HUMAN.value)
+
+    @classmethod
+    def perceived(cls, scene: MarkerScene, scene_graph: CosmosSceneGraph | None) -> PipelineResult:
+        """The twin passed the trust gate; rehearsal (and so a GO or RETRY) was not asked for."""
+        names = ", ".join(o.label for o in scene.objects)
+        return cls(scene, scene_graph, {}, None, f"The twin passed the trust gate ({names}); ready to rehearse.",
+                   PERCEIVED)  # fmt: skip
 
 
 class PreflightPipeline:
@@ -499,7 +509,9 @@ class PreflightPipeline:
         seed: int = SEED,
         markers_only: bool = False,
         task: TaskSpec | None = None,
+        rehearse: bool = True,
     ):
+        """`rehearse=False` stops after the trust gate: perception, vision and the gate run, no GR00T server needed."""
         self.task = task or DEFAULT_TASK
         self.layout = layout or TwinLayout()
         self.perceiver = ScenePerceiver(self.layout.mat)
@@ -518,7 +530,7 @@ class PreflightPipeline:
             perturbation=perturbation,
             batch_size=batch_size,
         )
-        self.n_rollouts, self.seed = n_rollouts, seed
+        self.n_rollouts, self.seed, self.rehearse = n_rollouts, seed, rehearse
         self.trust_policy = TrustPolicy()
 
     async def run(self, frame_b64: str) -> PipelineResult:
@@ -534,7 +546,7 @@ class PreflightPipeline:
             return PipelineResult.ask_human(str(err))
 
         # Fail fast on a dead GR00T server instead of after paying for perception.
-        if not await asyncio.to_thread(self.gr00t.ping):
+        if self.rehearse and not await asyncio.to_thread(self.gr00t.ping):
             raise RuntimeError(f"GR00T server at {self.gr00t.address} did not answer a ping")
 
         scene_graph = None
@@ -558,6 +570,8 @@ class PreflightPipeline:
                 + ")"
             )
             return PipelineResult.ask_human(reason, scene, scene_graph)
+        if not self.rehearse:
+            return PipelineResult.perceived(scene, scene_graph)
 
         # Rehearsal is blocking MuJoCo + ZeroMQ work. The twin names blocks by label, so check the resolved ones.
         self.rehearsal.success = StackCheck(top=scene.objects[0].label, bottom=scene.objects[1].label)

@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preflight</title>
+<style>
+:root {
+  --bg: #f7f6f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e3e1da;
+  --go: #1f7a4d; --retry: #b3581b; --ask: #5b4fc4; --perceived: #2f6f9f; --accent: #1d1d1b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #a09f98; --line: #34332f;
+    --go: #4fbf86; --retry: #e58a4e; --ask: #9d93ff; --perceived: #6db3e6; --accent: #ecebe6;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, sans-serif; }
+main { max-width: 1080px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 2rem; margin: 0 0 4px; }
+h2 { font-size: 1.25rem; margin: 40px 0 8px; }
+p.lede { color: var(--muted); margin: 0 0 24px; max-width: 760px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 16px 0 0; }
+.steps div { border-left: 3px solid var(--line); padding: 2px 10px; font-size: .9rem; color: var(--muted); }
+.steps b { color: var(--ink); display: block; }
+.upload { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+button, label.button { background: var(--accent); color: var(--bg); border: 0; border-radius: 8px; padding: 10px 16px;
+  font: inherit; cursor: pointer; }
+button:disabled { opacity: .5; cursor: wait; }
+.pill { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: .8rem; font-weight: 600;
+  color: #fff; letter-spacing: .02em; }
+.GO { background: var(--go); } .RETRY { background: var(--retry); } .ASK_HUMAN { background: var(--ask); }
+.PERCEIVED { background: var(--perceived); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex;
+  flex-direction: column; }
+.card img, .card video { width: 100%; display: block; background: #000; aspect-ratio: 4 / 3; object-fit: contain; }
+.card .body { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.card h3 { margin: 0; font-size: 1rem; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.stat { font-size: .85rem; color: var(--muted); }
+.explain { font-size: .9rem; }
+#result { margin-top: 16px; }
+#result:empty { display: none; }
+.error { color: var(--retry); }
+footer { margin-top: 48px; color: var(--muted); font-size: .85rem; }
+a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Preflight</h1>
+  <p class="lede">Know whether the robot will succeed before it moves. Preflight rebuilds the table in a physics twin from
+    one photo, rehearses the robot's own policy (NVIDIA GR00T N1.7) there dozens of times, and answers
+    <span class="pill GO">GO</span> <span class="pill RETRY">RETRY</span> or <span class="pill ASK_HUMAN">ASK_HUMAN</span>,
+    with the evidence and an explanation from Nemotron on Nebius Token Factory.</p>
+
+  <section class="panel">
+    <strong>Try the live check on your photo</strong>
+    <p class="stat">Upload a top-down photo of the printed A3 mat (four corner markers, a blue block and a red block).
+      Live, the demo runs perception and the trust gate: the markers place the twin, a Token Factory vision model reads
+      the scene, and the gate accepts the twin or says why it can't be trusted. Rehearsal needs a GPU, so it runs for the
+      scenes below. Uploads are limited per hour.</p>
+    <div class="upload">
+      <label class="button" for="photo">Choose a photo</label>
+      <input id="photo" type="file" accept="image/*" hidden>
+      <span id="chosen" class="stat">No photo chosen</span>
+      <button id="go" disabled>Check it</button>
+    </div>
+    <div id="result"></div>
+    <div class="steps">
+      <div><b>1. Markers</b>ArUco corners fix the mat in millimetres</div>
+      <div><b>2. Vision</b>a Token Factory VLM names the objects</div>
+      <div><b>3. Trust gate</b>low fidelity or a new task: ASK_HUMAN</div>
+      <div><b>4. Rehearsal</b>GR00T in the MuJoCo twin, randomised</div>
+      <div><b>5. Verdict</b>success rate, failure mode, Nemotron</div>
+    </div>
+  </section>
+
+  <h2>Rehearsed scenes</h2>
+  <p class="stat">Phone frames of the mat, each run through the full pipeline on a GPU with the same container a deployment
+    would use: synthetic frames laid out to show each verdict, and one real phone photo ("real photo") of real objects
+    the policy was never trained on, which the trust gate refuses to rehearse. Rehearsals per scene and the 95% interval
+    are shown with every verdict.</p>
+  <div id="gallery" class="grid"></div>
+
+  <h2>Across environments, objects and tasks</h2>
+  <p class="stat">The served policy's benchmark: each suite is 96 rehearsals in the randomised twin (12 scenes x 8
+    variants), scored before the policy was promoted. Twin rehearsals, not photos. The weak rows are the honest ones: new
+    objects are harder, and new tasks the policy was never trained on fail almost every time.</p>
+  <div id="suites" class="grid"></div>
+
+  <footer>Simulation only: the physical SO-101 has not arrived, so every rehearsal is in the twin.
+    Code and results: <a href="https://github.com/charleneleong-ai/nebius-physical-ai">github.com/charleneleong-ai/nebius-physical-ai</a>.</footer>
+</main>
+<script>
+const el = (tag, attrs = {}, ...kids) => {
+  const node = Object.assign(document.createElement(tag), attrs);
+  node.append(...kids.filter(k => k !== null && k !== undefined));
+  return node;
+};
+const title = s => s.replace(/_/g, " ");
+
+function evidence(r) {
+  const h = r.rehearsal || {};
+  if (h.n) return `${h.successes} of ${h.n} rehearsals succeeded (${Math.round(h.p * 100)}%, 95% CI ${Math.round(h.ci95[0] * 100)}-${Math.round(h.ci95[1] * 100)}%)`;
+  const s = r.scene;
+  return s ? `${s.markers_found.length} of 4 markers, fit ${s.residual_mm} mm, twin fidelity ${s.perception}` : "mat not located";
+}
+
+function card(r) {
+  const media = r.videos && r.videos.length
+    ? el("video", { src: `gallery/${r.name}/${r.videos[0]}`, controls: true, muted: true, loop: true, playsInline: true,
+        poster: `gallery/${r.frame}` })
+    : el("img", { src: `gallery/${r.frame}`, alt: `${title(r.name)} scene` });
+  return el("div", { className: "card" }, media,
+    el("div", { className: "body" },
+      el("h3", {}, title(r.name), el("span", { className: `pill ${r.verdict}`, textContent: title(r.verdict || "error") })),
+      el("div", { className: "stat", textContent: r.error || evidence(r) }),
+      el("div", { className: "explain", textContent: (r.explanation || "").replace(/^ASK_HUMAN: /, "") })));
+}
+
+fetch("api/gallery").then(r => r.json()).then(scenes => {
+  const order = { GO: 0, RETRY: 1, ASK_HUMAN: 2 };
+  scenes.sort((a, b) => (order[a.verdict] ?? 3) - (order[b.verdict] ?? 3));
+  document.getElementById("gallery").append(...scenes.map(card));
+});
+
+function suiteCard(c) {
+  const pct = Math.round(c.successes / c.n * 100);
+  const media = c.videos.length
+    ? el("video", { src: `gallery/suites/${c.suite}/${c.videos[0]}`, controls: true, muted: true, loop: true, playsInline: true, preload: "metadata" })
+    : null;
+  const top = Object.entries(c.failures || {}).sort((a, b) => b[1] - a[1])[0];
+  return el("div", { className: "card" }, media,
+    el("div", { className: "body" },
+      el("h3", {}, title(c.suite), el("span", { className: `pill ${pct >= 80 ? "GO" : pct >= 40 ? "RETRY" : "ASK_HUMAN"}`, textContent: `${pct}%` })),
+      el("div", { className: "stat", textContent: `${c.successes} of ${c.n} rehearsals succeeded` + (top ? `; most failures: ${title(top[0])}` : "") }),
+      el("div", { className: "explain", textContent: c.what })));
+}
+fetch("api/suites").then(r => r.json()).then(cards => document.getElementById("suites").append(...cards.map(suiteCard)));
+
+const photo = document.getElementById("photo"), go = document.getElementById("go"), out = document.getElementById("result");
+photo.addEventListener("change", () => {
+  document.getElementById("chosen").textContent = photo.files[0] ? photo.files[0].name : "No photo chosen";
+  go.disabled = !photo.files[0];
+});
+go.addEventListener("click", async () => {
+  go.disabled = true; out.replaceChildren(el("p", { className: "stat", textContent: "Checking (about 10-30 s)..." }));
+  try {
+    const reply = await fetch("api/check", { method: "POST", body: photo.files[0] });
+    const r = await reply.json();
+    if (!reply.ok) throw new Error(r.detail || reply.statusText);
+    out.replaceChildren(card({ ...r, name: "your_photo", frame: "", videos: [] }));
+    out.querySelector("img").src = URL.createObjectURL(photo.files[0]);
+  } catch (err) {
+    out.replaceChildren(el("p", { className: "error", textContent: err.message }));
+  } finally { go.disabled = false; }
+});
+</script>
+</body>
+</html>
