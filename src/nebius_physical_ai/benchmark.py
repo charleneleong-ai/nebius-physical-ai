@@ -243,56 +243,57 @@ DECOY_SIDE_MM = 30.0
 DECOY_GAP_MM = 48.0 + DECOY_SIDE_MM / 2 + 15.0  # the ring's outer radius plus the decoy's half side, plus margin
 
 
-def held_out_task_suites(layout: TwinLayout) -> list[Suite]:
-    """Tasks no checkpoint here was trained on, after ArmnetBench's eye_drops_to_basket and ring_insert, in its own
-    words: an object and a fixture placed apart in the arm's reach, plus one training-colour cube as a decoy. Variants
-    perturb the eye drops and the decoy; the basket, the peg and the ring stay put. Every case is one the scripted
-    expert solves (`TaskExpert`); the ring is grasped on the side along the reach, the only grasp it holds."""
-    camera = oblique_camera(layout, OBLIQUE_ELEVATION_DEG, 0.0)
+BASKET_PROMPT = "Put the eye drops into the basket"  # ArmnetBench's eye_drops_to_basket instruction
+RING_PROMPT = "Insert the colourful ring into the central wooden peg"  # ArmnetBench's ring_insert instruction
 
-    sampler = SceneSampler(layout)
 
-    def spots(rng: np.random.Generator) -> np.ndarray:
+class TaskScenes:
+    """Scenes for the twin's non-stacking tasks: an object and its fixture apart in the arm's reach, plus one
+    training-colour cube as a decoy. The basket, the peg and the ring stay put across variants."""
+
+    def __init__(self, layout: TwinLayout, rng: np.random.Generator, camera: dict[str, Any] | None) -> None:
+        self.sampler, self.rng, self.camera = SceneSampler(layout), rng, camera
+
+    def spots(self) -> np.ndarray:
         """Object, fixture and decoy positions (mat mm) inside reach: object and fixture TASK_GAP_MM apart."""
+        s = self.sampler
         while True:
-            xy = rng.uniform([sampler.x_range[0], sampler.y_range[0]], [sampler.x_range[1], sampler.y_range[1]], (3, 2))
+            xy = self.rng.uniform([s.x_range[0], s.y_range[0]], [s.x_range[1], s.y_range[1]], (3, 2))
             gaps = np.linalg.norm(xy[:, None] - xy[None], axis=-1)
             if gaps[0, 1] >= TASK_GAP_MM and min(gaps[2, 0], gaps[2, 1]) >= DECOY_GAP_MM:
                 return xy
 
-    def decoy(rng: np.random.Generator, xy: np.ndarray) -> DetectedObject:
-        return DetectedObject(str(rng.choice(TRAIN_COLOURS)), *np.round(xy, 1), DECOY_SIDE_MM**2)
+    def decoy(self, xy: np.ndarray) -> DetectedObject:
+        return DetectedObject(str(self.rng.choice(TRAIN_COLOURS)), *np.round(xy, 1), DECOY_SIDE_MM**2)
 
-    def basket_draw(rng: np.random.Generator) -> Callable[[], Case]:
-        def draw() -> Case:
-            (drops_xy, basket_xy, decoy_xy) = spots(rng)
-            dia, height = EYE_DROPS_MM
-            drops = DetectedObject("eye_drops", *np.round(drops_xy, 1), dia * dia, length_mm=dia, width_mm=dia,
-                                   height_mm=height, shape="cylinder", rgb=(0.92, 0.92, 0.95))  # fmt: skip
-            basket = Basket(*np.round(basket_xy, 1))
-            return Case(name="", objects=[drops, decoy(rng, decoy_xy)], pick="eye_drops", place=basket.name,
-                        prompt="Put the eye drops into the basket", camera=camera, fixtures=(basket,),
-                        check=BasketCheck("eye_drops", basket))  # fmt: skip
+    def basket(self, prompt: str = BASKET_PROMPT) -> Case:
+        drops_xy, basket_xy, decoy_xy = self.spots()
+        dia, height = EYE_DROPS_MM
+        drops = DetectedObject("eye_drops", *np.round(drops_xy, 1), dia * dia, length_mm=dia, width_mm=dia,
+                               height_mm=height, shape="cylinder", rgb=(0.92, 0.92, 0.95))  # fmt: skip
+        basket = Basket(*np.round(basket_xy, 1))
+        return Case(name="", objects=[drops, self.decoy(decoy_xy)], pick="eye_drops", place=basket.name,
+                    prompt=prompt, camera=self.camera, fixtures=(basket,), check=BasketCheck("eye_drops", basket))  # fmt: skip
 
-        return draw
+    def ring(self, prompt: str = RING_PROMPT) -> Case:
+        """The ring is grasped on the side along the reach, the only grasp it holds."""
+        ring_xy, peg_xy, decoy_xy = self.spots()
+        ring, peg = Ring(*np.round(ring_xy, 1), radius_mm=36.0, tube_mm=12.0), Peg(*np.round(peg_xy, 1))
+        check = PegCheck(ring, peg, float(self.rng.choice([0.0, np.pi])))
+        return Case(name="", objects=[self.decoy(decoy_xy)], pick=ring.name, place=peg.name, prompt=prompt,
+                    camera=self.camera, fixtures=(ring, peg), check=check)  # fmt: skip
 
-    def ring_draw(rng: np.random.Generator) -> Callable[[], Case]:
-        def draw() -> Case:
-            (ring_xy, peg_xy, decoy_xy) = spots(rng)
-            ring, peg = Ring(*np.round(ring_xy, 1), radius_mm=36.0, tube_mm=12.0), Peg(*np.round(peg_xy, 1))
-            check = PegCheck(ring, peg, float(rng.choice([0.0, np.pi])))
-            return Case(name="", objects=[decoy(rng, decoy_xy)], pick=ring.name, place=peg.name,
-                        prompt="Insert the colourful ring into the central wooden peg", camera=camera,
-                        fixtures=(ring, peg), check=check)  # fmt: skip
 
-        return draw
-
-    suites = []
-    for name, stream, draw, note in (
-        ("held_out_task_basket", 30, basket_draw, "eye drops into a basket (ArmnetBench eye_drops_to_basket)"),
-        ("held_out_task_ring", 31, ring_draw, "ring over a peg (ArmnetBench ring_insert)"),
+def held_out_task_suites(layout: TwinLayout) -> list[Suite]:
+    """Tasks no checkpoint here was trained on, after ArmnetBench's eye_drops_to_basket and ring_insert, in its own
+    words. Variants perturb the eye drops and the decoy; every case is one the scripted expert solves (`TaskExpert`)."""
+    camera, suites = oblique_camera(layout, OBLIQUE_ELEVATION_DEG, 0.0), []
+    for name, stream, kind, note in (
+        ("held_out_task_basket", 30, "basket", "eye drops into a basket (ArmnetBench eye_drops_to_basket)"),
+        ("held_out_task_ring", 31, "ring", "ring over a peg (ArmnetBench ring_insert)"),
     ):
-        cases, rejected = solvable_cases(name, draw(np.random.default_rng([SEED, stream])), layout, camera)
+        scenes = TaskScenes(layout, np.random.default_rng([SEED, stream]), camera)
+        cases, rejected = solvable_cases(name, getattr(scenes, kind), layout, camera)
         suites.append(Suite(name, "held_out_tasks", cases, note, rejected))
     return suites
 
