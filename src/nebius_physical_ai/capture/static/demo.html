@@ -42,8 +42,20 @@ button:disabled { opacity: .5; cursor: wait; }
 .stat { font-size: .85rem; color: var(--muted); }
 .explain { font-size: .9rem; }
 #result { margin-top: 16px; }
+.samples { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+.samples button { background: none; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+  color: var(--ink); font-size: .8rem; width: 120px; }
+.samples img { width: 100%; display: block; aspect-ratio: 4 / 3; object-fit: cover; }
+.samples span { display: block; padding: 4px; }
 #result:empty { display: none; }
 .error { color: var(--retry); }
+.links { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 24px; }
+.links a { border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: .85rem; text-decoration: none;
+  background: var(--panel); }
+.links a.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+.arch { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.arch div { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font-size: .9rem; }
+.arch b { display: block; } .arch .where { color: var(--muted); font-size: .8rem; margin-top: 6px; }
 footer { margin-top: 48px; color: var(--muted); font-size: .85rem; }
 a { color: inherit; }
 </style>
@@ -55,6 +67,12 @@ a { color: inherit; }
     one photo, rehearses the robot's own policy (NVIDIA GR00T N1.7) there dozens of times, and answers
     <span class="pill GO">GO</span> <span class="pill RETRY">RETRY</span> or <span class="pill ASK_HUMAN">ASK_HUMAN</span>,
     with the evidence and an explanation from Nemotron on Nebius Token Factory.</p>
+  <nav class="links">
+    <a class="primary" href="https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e">Hugging Face collection: models, data, paper</a>
+    <a href="https://github.com/charleneleong-ai/nebius-physical-ai">Code (GitHub)</a>
+    <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==">Experiments (W&amp;B report)</a>
+    <a href="#architecture">Architecture</a>
+  </nav>
 
   <section class="panel">
     <strong>Try the live check on your photo</strong>
@@ -68,6 +86,7 @@ a { color: inherit; }
       <span id="chosen" class="stat">No photo chosen</span>
       <button id="go" disabled>Check it</button>
     </div>
+    <div class="samples" id="samples"><span class="stat">No mat? Try a sample:</span></div>
     <div id="result"></div>
     <div class="steps">
       <div><b>1. Markers</b>ArUco corners fix the mat in millimetres</div>
@@ -90,6 +109,26 @@ a { color: inherit; }
     variants), scored before the policy was promoted. Twin rehearsals, not photos. The weak rows are the honest ones: new
     objects are harder, and new tasks the policy was never trained on fail almost every time.</p>
   <div id="suites" class="grid"></div>
+
+  <h2 id="architecture">Architecture: what runs where</h2>
+  <p class="stat">One photo in, one verdict out. Each stage names where it is hosted; the models are linked from the
+    <a href="https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e">Hugging Face collection</a>.</p>
+  <div class="arch">
+    <div><b>1. Phone photo</b>Top-down frame of the printed A3 mat with four ArUco corner markers.
+      <div class="where">Your browser, uploaded to this Space</div></div>
+    <div><b>2. Markers and twin</b>OpenCV fixes the mat in millimetres; objects become a MuJoCo twin of the SO-101 cell.
+      <div class="where">This Space (Hugging Face, CPU)</div></div>
+    <div><b>3. Vision</b>A vision-language model names each object; disagreement with the colour detector lowers trust.
+      <div class="where">Nebius Token Factory (Qwen3.8 VL)</div></div>
+    <div><b>4. Trust gate</b>Low twin fidelity or a task outside training: ASK_HUMAN before anything is rehearsed.
+      <div class="where">This Space</div></div>
+    <div><b>5. Rehearsal</b>The robot's own policy, GR00T N1.7 fine-tuned by DAgger, runs dozens of randomised rollouts in the twin.
+      <div class="where">GPU job: one container image (job.Dockerfile), A100 for the gallery</div></div>
+    <div><b>6. Verdict</b>GO / RETRY / ASK_HUMAN from the success rate and its 95% interval, explained in plain words.
+      <div class="where">Nemotron 3 Ultra on Nebius Token Factory</div></div>
+    <div><b>Training and benchmark</b>Scripted twin demos, DAgger rounds and a paired promotion gate on 6 x 96 rehearsals.
+      <div class="where">A100; runs and reports on <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==">W&amp;B</a>, code on <a href="https://github.com/charleneleong-ai/nebius-physical-ai">GitHub</a></div></div>
+  </div>
 
   <footer>Simulation only: the physical SO-101 has not arrived, so every rehearsal is in the twin.
     Code and results: <a href="https://github.com/charleneleong-ai/nebius-physical-ai">github.com/charleneleong-ai/nebius-physical-ai</a>.</footer>
@@ -146,18 +185,33 @@ photo.addEventListener("change", () => {
   document.getElementById("chosen").textContent = photo.files[0] ? photo.files[0].name : "No photo chosen";
   go.disabled = !photo.files[0];
 });
-go.addEventListener("click", async () => {
-  go.disabled = true; out.replaceChildren(el("p", { className: "stat", textContent: "Checking (about 10-30 s)..." }));
+async function check(image, src) {
+  go.disabled = true; samples.querySelectorAll("button").forEach(b => b.disabled = true);
+  out.replaceChildren(el("p", { className: "stat", textContent: "Checking (about 10-30 s)..." }));
   try {
-    const reply = await fetch("api/check", { method: "POST", body: photo.files[0] });
+    const reply = await fetch("api/check", { method: "POST", body: image });
     const r = await reply.json();
     if (!reply.ok) throw new Error(r.detail || reply.statusText);
     out.replaceChildren(card({ ...r, name: "your_photo", frame: "", videos: [] }));
-    out.querySelector("img").src = URL.createObjectURL(photo.files[0]);
+    out.querySelector("img").src = src;
   } catch (err) {
     out.replaceChildren(el("p", { className: "error", textContent: err.message }));
-  } finally { go.disabled = false; }
-});
+  } finally {
+    go.disabled = !photo.files[0]; samples.querySelectorAll("button").forEach(b => b.disabled = false);
+  }
+}
+go.addEventListener("click", () => check(photo.files[0], URL.createObjectURL(photo.files[0])));
+
+// Gallery frames as one-click samples: a clean mat, a hidden marker, clutter and the real photo cover each gate outcome
+const samples = document.getElementById("samples");
+for (const [name, label] of [["centre", "clean mat"], ["hidden_marker", "hidden marker"], ["cluttered", "cluttered"],
+                             ["real_photo", "real photo"]]) {
+  const src = `gallery/${name}.jpg`;
+  const button = el("button", { title: `Run the live check on the ${label} frame` },
+    el("img", { src, alt: label, loading: "lazy" }), el("span", { textContent: label }));
+  button.addEventListener("click", async () => check(await (await fetch(src)).blob(), src));
+  samples.append(button);
+}
 </script>
 </body>
 </html>
