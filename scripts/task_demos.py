@@ -62,11 +62,12 @@ def main(
     task: Annotated[str, typer.Option(help="basket or ring")] = "basket",
     episodes: int = 400,
     azimuth_deg: Annotated[float, typer.Option(help="Camera azimuth jitter around the benchmark's, either way")] = 20.0,
+    shard: Annotated[int, typer.Option(help="Seed offset, so parallel recordings draw different scenes")] = 0,
 ) -> None:
     """Record `episodes` successful demos of one task."""
     if task not in PHRASINGS:
         raise typer.BadParameter(f"--task must be one of {sorted(PHRASINGS)}")
-    layout, rng = TwinLayout(), np.random.default_rng(STREAMS[task])
+    layout, rng = TwinLayout(), np.random.default_rng([STREAMS[task], shard])
     writer, attempts, prompts = LeRobotWriter(out), 0, Counter()
     for _ in track(range(episodes), description=f"recording {task} demos"):
         while True:
