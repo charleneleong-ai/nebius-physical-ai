@@ -4,136 +4,169 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Preflight</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;700&family=JetBrains+Mono:wght@400;600&family=Public+Sans:wght@400;600&display=swap">
 <style>
+/* Flight deck: one dark instrument panel, avionics mint for the one accent, status colours only for verdicts. */
 :root {
-  --bg: #f7f6f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e3e1da;
-  --go: #1f7a4d; --retry: #b3581b; --ask: #5b4fc4; --perceived: #2f6f9f; --accent: #1d1d1b;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #a09f98; --line: #34332f;
-    --go: #4fbf86; --retry: #e58a4e; --ask: #9d93ff; --perceived: #6db3e6; --accent: #ecebe6;
-  }
+  --bg: #090a0f; --panel: #12141c; --raised: #1a1d28; --ink: #f3f4f6; --muted: #9aa1b1; --line: #2a2e3d;
+  --accent: #00ffaa; --go: #00ffaa; --retry: #f5a524; --ask: #8ab4ff; --perceived: #8ab4ff; --on: #05110b;
+  --display: "Archivo Narrow", "Arial Narrow", sans-serif; --body: "Public Sans", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace; --snap: all .15s cubic-bezier(.4, 0, .2, 1);
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, sans-serif; }
-main { max-width: 1080px; margin: 0 auto; padding: 32px 16px 64px; }
-h1 { font-size: 2rem; margin: 0 0 4px; }
-h2 { font-size: 1.25rem; margin: 40px 0 8px; }
-p.lede { color: var(--muted); margin: 0 0 24px; max-width: 760px; }
-.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
-.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 16px 0 0; }
-.steps div { border-left: 3px solid var(--line); padding: 2px 10px; font-size: .9rem; color: var(--muted); }
-.steps b { color: var(--ink); display: block; }
-.upload { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-button, label.button { background: var(--accent); color: var(--bg); border: 0; border-radius: 8px; padding: 10px 16px;
-  font: inherit; cursor: pointer; }
-button:disabled { opacity: .5; cursor: wait; }
-.pill { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: .8rem; font-weight: 600;
-  color: #fff; letter-spacing: .02em; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--body); }
+main { max-width: 1200px; margin: 0 auto; padding: 48px 24px 72px; display: grid; gap: 48px; }
+a { color: inherit; }
+h1, h2, h3 { font-family: var(--display); margin: 0; letter-spacing: .01em; }
+h1 { font-size: clamp(3rem, 9vw, 6rem); line-height: .9; text-transform: uppercase; }
+h2 { font-size: clamp(1.6rem, 3.2vw, 2.4rem); line-height: 1; }
+.tag { font: 600 11px/1 var(--mono); text-transform: uppercase; letter-spacing: .14em; color: var(--accent); }
+.stat { font-size: .85rem; color: var(--muted); }
+.split { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 3fr); gap: 32px; align-items: start; }
+.lede { font-size: 1.15rem; color: var(--muted); max-width: 62ch; margin: 20px 0 0; }
+.lede b { color: var(--ink); font-weight: 600; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 24px; }
+.readout { display: grid; gap: 16px; }
+.readout div { border-top: 1px solid var(--line); padding-top: 12px; }
+.readout b { display: block; font: 600 1.6rem/1.1 var(--mono); }
+.readout span { font: 11px/1.4 var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.links { display: grid; gap: 8px; margin-top: 8px; }
+.links a { font: 12px/1.3 var(--mono); text-decoration: none; padding: 10px 12px; border: 1px solid var(--line); border-radius: 2px;
+  transition: var(--snap); }
+.links a:hover { border-color: var(--accent); color: var(--accent); }
+.links a.primary { background: var(--accent); color: var(--on); border-color: var(--accent); font-weight: 600; }
+.links a.primary:hover { background: transparent; color: var(--accent); }
+.checklist { list-style: none; margin: 16px 0 0; padding: 0; counter-reset: step; }
+.checklist li { counter-increment: step; display: grid; grid-template-columns: 36px 1fr; gap: 4px 12px; padding: 14px 0;
+  border-top: 1px solid var(--line); font-size: .9rem; color: var(--muted); }
+.checklist li::before { content: counter(step, decimal-leading-zero); font: 600 12px/1.6 var(--mono); color: var(--accent); grid-row: span 2; }
+.checklist b { color: var(--ink); font-family: var(--display); font-size: 1.05rem; letter-spacing: .02em; }
+.upload { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 20px; }
+button, label.button { background: var(--ink); color: var(--bg); border: 1px solid var(--ink); border-radius: 2px; padding: 12px 18px;
+  font: 600 13px/1 var(--mono); text-transform: uppercase; letter-spacing: .08em; cursor: pointer; transition: var(--snap); }
+button:hover, label.button:hover { background: transparent; color: var(--ink); }
+button:disabled { opacity: .4; cursor: wait; }
+.pill { display: inline-block; border-radius: 2px; padding: 3px 8px; font: 600 11px/1.2 var(--mono); color: var(--on);
+  letter-spacing: .08em; text-transform: uppercase; }
 .GO { background: var(--go); } .RETRY { background: var(--retry); } .ASK_HUMAN { background: var(--ask); }
 .PERCEIVED { background: var(--perceived); }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex;
-  flex-direction: column; }
-.card img, .card video { width: 100%; display: block; background: #000; aspect-ratio: 4 / 3; object-fit: contain; }
-.card .body { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
-.card h3 { margin: 0; font-size: 1rem; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.stat { font-size: .85rem; color: var(--muted); }
-.explain { font-size: .9rem; }
-.handoff { font-size: .85rem; font-weight: 600; color: var(--perceived); text-decoration: none; }
-#result { margin-top: 16px; }
-.samples { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
-.samples button { background: none; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
-  color: var(--ink); font-size: .8rem; width: 120px; }
+.samples { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 20px; }
+.samples button { background: none; padding: 0; border: 1px solid var(--line); overflow: hidden; color: var(--ink); width: 128px;
+  text-transform: none; letter-spacing: 0; font: 12px/1.2 var(--mono); }
+.samples button:hover { border-color: var(--accent); }
 .samples img { width: 100%; display: block; aspect-ratio: 4 / 3; object-fit: cover; }
-.samples span { display: block; padding: 4px; }
-#result:empty { display: none; }
-.error { color: var(--retry); }
-.links { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 24px; }
-.links a { border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: .85rem; text-decoration: none;
-  background: var(--panel); }
-.links a.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
-.arch { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
-.arch div { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font-size: .9rem; }
-.arch b { display: block; } .arch .where { color: var(--muted); font-size: .8rem; margin-top: 6px; }
-footer { margin-top: 48px; color: var(--muted); font-size: .85rem; }
-a { color: inherit; }
+.samples span { display: block; padding: 6px 8px; }
+#result { margin-top: 24px; } #result:empty { display: none; }
+.error { color: var(--retry); font-family: var(--mono); font-size: .85rem; }
+.head { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 3fr); gap: 32px; align-items: end; margin-bottom: 24px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 24px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; display: flex; flex-direction: column;
+  transition: var(--snap); }
+.card:hover { border-color: #3d4356; }
+.card img, .card video { width: 100%; display: block; background: #000; aspect-ratio: 4 / 3; object-fit: contain; }
+.card .body { padding: 24px; display: flex; flex-direction: column; gap: 10px; }
+.card h3 { font-size: 1.35rem; display: flex; justify-content: space-between; align-items: center; gap: 8px; text-transform: capitalize; }
+.card .stat { font-family: var(--mono); font-size: .78rem; }
+.explain { font-size: .9rem; color: #c9ced9; }
+.handoff { font: 600 12px/1.3 var(--mono); color: var(--accent); text-decoration: none; }
+.handoff:hover { text-decoration: underline; }
+table.stages { width: 100%; border-collapse: collapse; font-size: .9rem; }
+table.stages th { text-align: left; font: 600 11px/1 var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--muted);
+  padding: 0 16px 12px 0; }
+table.stages td { border-top: 1px solid var(--line); padding: 16px 16px 16px 0; vertical-align: top; }
+table.stages td:first-child { font: 600 12px/1.5 var(--mono); color: var(--accent); white-space: nowrap; }
+table.stages td b { font-family: var(--display); font-size: 1.05rem; display: block; }
+table.stages td.where { font: 12px/1.5 var(--mono); color: var(--muted); }
+footer { border-top: 1px solid var(--line); padding-top: 24px; color: var(--muted); font: 12px/1.6 var(--mono); }
+@media (max-width: 860px) {
+  .split, .head { grid-template-columns: 1fr; }
+  main { padding: 32px 16px 56px; gap: 40px; }
+  table.stages td.where { display: none; }
+}
 </style>
 </head>
 <body>
 <main>
-  <h1>Preflight</h1>
-  <p class="lede">Know whether the robot will succeed before it moves. Preflight rebuilds the table in a physics twin from
-    one photo, rehearses the robot's own policy (NVIDIA GR00T N1.7) there dozens of times, and answers
-    <span class="pill GO">GO</span> <span class="pill RETRY">RETRY</span> or <span class="pill ASK_HUMAN">ASK_HUMAN</span>,
-    with the evidence and an explanation from Nemotron on Nebius Token Factory.</p>
-  <nav class="links">
-    <a class="primary" href="https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e">Hugging Face collection: models, data, paper</a>
-    <a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot: the loop that retrains it</a>
-    <a href="https://huggingface.co/spaces/chaleong/preflight-experiments">All experiments</a>
-    <a href="https://github.com/charleneleong-ai/nebius-physical-ai">Code (GitHub)</a>
-    <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==">Experiments (W&amp;B report)</a>
-    <a href="#architecture">Architecture</a>
-  </nav>
+  <header class="split">
+    <div>
+      <div class="tag">SO-101 · GR00T N1.7 · MuJoCo twin</div>
+      <h1>Preflight</h1>
+      <p class="lede">Know whether the robot will succeed <b>before it moves</b>. One photo of the table becomes a physics twin;
+        the robot's own policy rehearses there dozens of times; Preflight signs off
+        <span class="pill GO">GO</span> <span class="pill RETRY">RETRY</span> or <span class="pill ASK_HUMAN">ASK_HUMAN</span>
+        with the evidence, explained by Nemotron on Nebius Token Factory.</p>
+    </div>
+    <aside class="readout">
+      <div><b>483 / 576</b><span>served policy, six benchmark suites</span></div>
+      <div><b>32×</b><span>rehearsals per scene before a verdict</span></div>
+      <nav class="links">
+        <a class="primary" href="https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e">Hugging Face collection</a>
+        <a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot: the loop that retrains it</a>
+        <a href="https://huggingface.co/spaces/chaleong/preflight-experiments">All experiments</a>
+        <a href="https://github.com/charleneleong-ai/nebius-physical-ai">Code (GitHub)</a>
+        <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==">W&amp;B report</a>
+      </nav>
+    </aside>
+  </header>
 
-  <section class="panel">
-    <strong>Try the live check on your photo</strong>
-    <p class="stat">Upload a top-down photo of the printed A3 mat (four corner markers, a blue block and a red block).
-      Live, the demo runs perception and the trust gate: the markers place the twin, a Token Factory vision model reads
-      the scene, and the gate accepts the twin or says why it can't be trusted. Rehearsal needs a GPU, so it runs for the
-      scenes below. Uploads are limited per hour.</p>
-    <div class="upload">
-      <label class="button" for="photo">Choose a photo</label>
-      <input id="photo" type="file" accept="image/*" hidden>
-      <span id="chosen" class="stat">No photo chosen</span>
-      <button id="go" disabled>Check it</button>
+  <section class="split">
+    <div class="panel">
+      <div class="tag">01 · Live check</div>
+      <h2 style="margin-top:10px">Check a photo of the mat</h2>
+      <p class="stat">Upload a top-down photo of the printed A3 mat (four corner markers, a blue block and a red block). Live,
+        the demo runs perception and the trust gate; rehearsal needs a GPU, so it runs for the scenes below. Uploads are
+        limited per hour.</p>
+      <div class="upload">
+        <label class="button" for="photo">Choose a photo</label>
+        <input id="photo" type="file" accept="image/*" hidden>
+        <span id="chosen" class="stat">No photo chosen</span>
+        <button id="go" disabled>Check it</button>
+      </div>
+      <div class="samples" id="samples"><span class="stat">No mat? Try a sample:</span></div>
+      <div id="result"></div>
     </div>
-    <div class="samples" id="samples"><span class="stat">No mat? Try a sample:</span></div>
-    <div id="result"></div>
-    <div class="steps">
-      <div><b>1. Markers</b>ArUco corners fix the mat in millimetres</div>
-      <div><b>2. Vision</b>a Token Factory VLM names the objects</div>
-      <div><b>3. Trust gate</b>low fidelity or a new task: ASK_HUMAN</div>
-      <div><b>4. Rehearsal</b>GR00T in the MuJoCo twin, randomised</div>
-      <div><b>5. Verdict</b>success rate, failure mode, Nemotron</div>
-    </div>
+    <aside>
+      <div class="tag">Preflight checklist</div>
+      <ol class="checklist">
+        <li><b>Markers</b>ArUco corners fix the mat in millimetres</li>
+        <li><b>Vision</b>a Token Factory VLM names the objects</li>
+        <li><b>Trust gate</b>low fidelity or a new task: ASK_HUMAN</li>
+        <li><b>Rehearsal</b>GR00T in the MuJoCo twin, randomised</li>
+        <li><b>Verdict</b>success rate, failure mode, Nemotron</li>
+      </ol>
+    </aside>
   </section>
 
-  <h2>Rehearsed scenes</h2>
-  <p class="stat">Phone frames of the mat, each run through the full pipeline on a GPU with the same container a deployment
-    would use: synthetic frames laid out to show each verdict, and one real phone photo ("real photo") of real objects
-    the policy was never trained on, which the trust gate refuses to rehearse. Rehearsals per scene and the 95% interval
-    are shown with every verdict.</p>
-  <div id="gallery" class="grid"></div>
+  <section>
+    <div class="head"><div><div class="tag">02 · Rehearsed scenes</div><h2 style="margin-top:10px">Every verdict, with its rollout</h2></div>
+      <p class="stat">Synthetic frames laid out to show each verdict, and one real phone photo of objects the policy never
+        saw, which the gate refuses to rehearse. Refused scenes are filed to Autopilot.</p></div>
+    <div id="gallery" class="grid"></div>
+  </section>
 
-  <h2>Across environments, objects and tasks</h2>
-  <p class="stat">The served policy's benchmark: each suite is 96 rehearsals in the randomised twin (12 scenes x 8
-    variants), scored before the policy was promoted. Twin rehearsals, not photos. The weak rows are the honest ones: new
-    objects are harder, and new tasks the policy was never trained on fail almost every time.</p>
-  <div id="suites" class="grid"></div>
+  <section>
+    <div class="head"><div><div class="tag">03 · Benchmark</div><h2 style="margin-top:10px">Across environments, objects and tasks</h2></div>
+      <p class="stat">96 rehearsals per suite (12 scenes × 8 variants) in the randomised twin. The weak rows are the honest
+        ones: new objects are harder, and tasks it was never trained on fail almost every time.</p></div>
+    <div id="suites" class="grid"></div>
+  </section>
 
-  <h2 id="architecture">Architecture: what runs where</h2>
-  <p class="stat">One photo in, one verdict out. Each stage names where it is hosted; the models are linked from the
-    <a href="https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e">Hugging Face collection</a>.</p>
-  <div class="arch">
-    <div><b>1. Phone photo</b>Top-down frame of the printed A3 mat with four ArUco corner markers.
-      <div class="where">Your browser, uploaded to this Space</div></div>
-    <div><b>2. Markers and twin</b>OpenCV fixes the mat in millimetres; objects become a MuJoCo twin of the SO-101 cell.
-      <div class="where">This Space (Hugging Face, CPU)</div></div>
-    <div><b>3. Vision</b>A vision-language model names each object; disagreement with the colour detector lowers trust.
-      <div class="where">Nebius Token Factory (Qwen3.8 VL)</div></div>
-    <div><b>4. Trust gate</b>Low twin fidelity or a task outside training: ASK_HUMAN before anything is rehearsed.
-      <div class="where">This Space</div></div>
-    <div><b>5. Rehearsal</b>The robot's own policy, GR00T N1.7 fine-tuned by DAgger, runs dozens of randomised rollouts in the twin.
-      <div class="where">GPU job: one container image (job.Dockerfile), A100 for the gallery</div></div>
-    <div><b>6. Verdict</b>GO / RETRY / ASK_HUMAN from the success rate and its 95% interval, explained in plain words.
-      <div class="where">Nemotron 3 Ultra on Nebius Token Factory</div></div>
-    <div><b>Autopilot</b>What fails here becomes the next training cycle: diagnose, propose one tested recipe, train, gate, a human approves.
-      <div class="where"><a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot Space</a>; Nemotron proposes, A100 trains</div></div>
-    <div><b>Training and benchmark</b>Scripted twin demos, DAgger rounds and a paired promotion gate on 6 x 96 rehearsals.
-      <div class="where">A100; runs and reports on <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==">W&amp;B</a>, code on <a href="https://github.com/charleneleong-ai/nebius-physical-ai">GitHub</a></div></div>
-  </div>
+  <section id="architecture">
+    <div class="head"><div><div class="tag">04 · Architecture</div><h2 style="margin-top:10px">What runs where</h2></div>
+      <p class="stat">One photo in, one verdict out. Models are linked from the <a href="https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e">collection</a>.</p></div>
+    <table class="stages">
+      <tr><th>Stage</th><th>What happens</th><th>Where it runs</th></tr>
+      <tr><td>01</td><td><b>Phone photo</b>Top-down frame of the A3 mat with four ArUco corner markers.</td><td class="where">your browser, uploaded to this Space</td></tr>
+      <tr><td>02</td><td><b>Markers and twin</b>OpenCV fixes the mat in millimetres; objects become a MuJoCo twin of the SO-101 cell.</td><td class="where">this Space (Hugging Face, CPU)</td></tr>
+      <tr><td>03</td><td><b>Vision</b>A vision-language model names each object; disagreement with the colour detector lowers trust.</td><td class="where">Nebius Token Factory (Qwen3.8 VL)</td></tr>
+      <tr><td>04</td><td><b>Trust gate</b>Low twin fidelity or a task outside training: ASK_HUMAN before anything is rehearsed.</td><td class="where">this Space</td></tr>
+      <tr><td>05</td><td><b>Rehearsal</b>The robot's own policy, GR00T N1.7 fine-tuned by DAgger, runs randomised rollouts in the twin.</td><td class="where">GPU job (job.Dockerfile); A100 for the gallery</td></tr>
+      <tr><td>06</td><td><b>Verdict</b>GO / RETRY / ASK_HUMAN from the success rate and its 95% interval, in plain words.</td><td class="where">Nemotron 3 Ultra, Nebius Token Factory</td></tr>
+      <tr><td>&rarr;</td><td><b>Autopilot</b>What fails here becomes the next training cycle; a paired gate decides, a human approves.</td><td class="where"><a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot Space</a>; A100 trains</td></tr>
+    </table>
+  </section>
 
   <footer>Simulation only: the physical SO-101 has not arrived, so every rehearsal is in the twin.
     Code and results: <a href="https://github.com/charleneleong-ai/nebius-physical-ai">github.com/charleneleong-ai/nebius-physical-ai</a>.</footer>
