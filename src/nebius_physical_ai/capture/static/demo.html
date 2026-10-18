@@ -146,6 +146,18 @@ const el = (tag, attrs = {}, ...kids) => {
 };
 const title = s => s.replace(/_/g, " ");
 
+// Rollouts autoplay muted while on screen and pause off it, so twenty videos don't all decode at once
+const onScreen = new IntersectionObserver(entries => entries.forEach(({ target, isIntersecting }) => {
+  if (isIntersecting) target.play().catch(() => {}); else target.pause();
+}), { threshold: 0.4 });
+function rollout(src, poster) {
+  const video = el("video", { src, controls: true, muted: true, defaultMuted: true, loop: true, playsInline: true,
+    autoplay: true, preload: "metadata", ...(poster ? { poster } : {}) });
+  video.setAttribute("muted", "");
+  onScreen.observe(video);
+  return video;
+}
+
 function evidence(r) {
   const h = r.rehearsal || {};
   if (h.n) return `${h.successes} of ${h.n} rehearsals succeeded (${Math.round(h.p * 100)}%, 95% CI ${Math.round(h.ci95[0] * 100)}-${Math.round(h.ci95[1] * 100)}%)`;
@@ -155,8 +167,7 @@ function evidence(r) {
 
 function card(r) {
   const media = r.videos && r.videos.length
-    ? el("video", { src: `gallery/${r.name}/${r.videos[0]}`, controls: true, muted: true, loop: true, playsInline: true,
-        poster: `gallery/${r.frame}` })
+    ? rollout(`gallery/${r.name}/${r.videos[0]}`, `gallery/${r.frame}`)
     : el("img", { src: `gallery/${r.frame}`, alt: `${title(r.name)} scene` });
   return el("div", { className: "card" }, media,
     el("div", { className: "body" },
@@ -184,7 +195,7 @@ fetch("api/gallery").then(r => r.json()).then(scenes => {
 function suiteCard(c) {
   const pct = Math.round(c.successes / c.n * 100);
   const media = c.videos.length
-    ? el("video", { src: `gallery/suites/${c.suite}/${c.videos[0]}`, controls: true, muted: true, loop: true, playsInline: true, preload: "metadata" })
+    ? rollout(`gallery/suites/${c.suite}/${c.videos[0]}`)
     : null;
   const top = Object.entries(c.failures || {}).sort((a, b) => b[1] - a[1])[0];
   return el("div", { className: "card" }, media,
