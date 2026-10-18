@@ -14,4 +14,5 @@ for frame in "$out"/*.jpg; do
   docker run --rm --gpus all -v "$ckpt":/models/policy:ro "${vlm[@]}" -v "$out":/work -e NEBIUS_API_KEY -e NEBIUS_PROJECT_ID \
     preflight-job:dev "/work/$name.jpg" "/work/$name" --n "$n" --pick "$pick" --place "$place" 2>&1 | tail -1
 done
+bash "$(dirname "$0")/hold_clips.sh" "$out"  # short successes loop before the outcome shows
 echo "GALLERY_DONE"
