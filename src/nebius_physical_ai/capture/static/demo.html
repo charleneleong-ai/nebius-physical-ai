@@ -41,6 +41,7 @@ button:disabled { opacity: .5; cursor: wait; }
 .card h3 { margin: 0; font-size: 1rem; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .stat { font-size: .85rem; color: var(--muted); }
 .explain { font-size: .9rem; }
+.handoff { font-size: .85rem; font-weight: 600; color: var(--perceived); text-decoration: none; }
 #result { margin-top: 16px; }
 .samples { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
 .samples button { background: none; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
@@ -160,7 +161,17 @@ function card(r) {
     el("div", { className: "body" },
       el("h3", {}, title(r.name), el("span", { className: `pill ${r.verdict}`, textContent: title(r.verdict || "error") })),
       el("div", { className: "stat", textContent: r.error || evidence(r) }),
-      el("div", { className: "explain", textContent: (r.explanation || "").replace(/^ASK_HUMAN: /, "") })));
+      el("div", { className: "explain", textContent: (r.explanation || "").replace(/^ASK_HUMAN: /, "") }),
+      handoff(r)));
+}
+
+// A scene Preflight won't clear is what Autopilot trains on next (npai autopilot intake)
+function handoff(r) {
+  if (r.verdict !== "RETRY" && r.verdict !== "ASK_HUMAN") return null;
+  const text = r.name === "your_photo" ? "In a deployment, this refusal is filed to Autopilot as a learning request"
+    : "Filed to Autopilot as a learning request";
+  return el("a", { className: "handoff", href: "https://huggingface.co/spaces/chaleong/autopilot#requests",
+    target: "_blank", textContent: `${text} \u2192` });
 }
 
 fetch("api/gallery").then(r => r.json()).then(scenes => {
