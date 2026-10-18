@@ -18,10 +18,12 @@ be trusted: a perception problem) is recorded as unmet rather than turned into a
     npai autopilot judge 1 logs/multitask-basket/bench_tasks.json logs/multitask-basket/bench_stack.json
     npai autopilot approve 1                        # a human promotes it
     npai autopilot status
+    npai autopilot run --bench ... --bench ...       # unattended: judge, launch, plan; stops at a PROMOTE
 """
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -100,12 +102,12 @@ CONTACT_FAILURES = RECOVERY_FAILURES | {"no_contact"}
 HELD_OUT_TASKS = ("basket", "ring")
 MENU = (
     Action("dagger_round", "dagger", frozenset({"objects", "environments"}), RECOVERY_FAILURES,
-           f"TRAIN_WHEN='{GPU_GATE}' bash scripts/dagger_round.sh", hours=6.0),
+           f"AUTOPILOT=1 TRAIN_WHEN='{GPU_GATE}' bash scripts/dagger_round.sh", hours=6.0),
     *(Action(f"task_round:{task}", "multitask", frozenset({"tasks"}), CONTACT_FAILURES,
              f"TASK={task} bash scripts/task_round.sh", hours=5.0, trains=f"held_out_task_{task}")
       for task in HELD_OUT_TASKS),
     Action("failure_synthesis", "synthesis", frozenset({"objects"}), RECOVERY_FAILURES,
-           f"STAGE=recover TRAIN_WHEN='{GPU_GATE}' bash scripts/dagger_round.sh", hours=6.0),
+           f"STAGE=recover AUTOPILOT=1 TRAIN_WHEN='{GPU_GATE}' bash scripts/dagger_round.sh", hours=6.0),
     Action("real_cotrain", "cotrain", frozenset({"environments"}), CONTACT_FAILURES,
            f"WAIT_FOR='{GPU_GATE}' bash scripts/cotrain.sh", hours=6.0),
 )  # fmt: skip
@@ -305,6 +307,10 @@ def judge(action: Action, ref: dict[str, Cell], new: dict[str, Cell]) -> Judgeme
     return Judgement("PROMOTE" if gained else "KEEP", f"target {', '.join(target)}: {why}", suites)
 
 
+def utc_now(fmt: str = "%Y-%m-%dT%H:%M:%SZ") -> str:
+    return time.strftime(fmt, time.gmtime())
+
+
 class CycleLog:
     """Append-only events; a cycle is the fold of its events, its state the latest event (planned, launched, judged,
     approved)."""
@@ -313,7 +319,7 @@ class CycleLog:
         self.path = path
 
     def append(self, event: str, cycle: int, **data: Any) -> None:
-        row = {"event": event, "cycle": cycle, "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **data}
+        row = {"event": event, "cycle": cycle, "time": utc_now(), **data}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a") as f:
             f.write(json.dumps(row) + "\n")
@@ -339,6 +345,68 @@ def require(cycles: dict[int, dict[str, Any]], cycle: int, event: str) -> dict[s
     if (state := cycles.get(cycle, {}).get("event")) != event:
         raise typer.BadParameter(f"cycle {cycle} is {state or 'unknown'}, not {event}")
     return cycles[cycle]
+
+
+DONE = re.compile(r"(?:TASK|DAGGER)_ROUND_DONE[:;]([^\n]*)")
+STALL_S = 3 * 3600  # a run whose log stays silent this long counts as dead (GPU waits check in every 30 min)
+TAIL_BYTES = 65536
+
+
+def cycle_pattern(cycle: int) -> str:
+    return f"[c]ycle_{cycle}.sh"  # the bracket keeps pgrep from matching its own command line
+
+
+def results_from_log(text: str) -> list[str] | None:
+    """The candidate's result files once its run has finished, from the run's own last line; None while it runs.
+
+    DAgger rounds started before the done line carried a path print none: their file follows from the round number."""
+    if not (match := DONE.search(text)):
+        return None
+    if paths := re.findall(r"\S+\.json", match.group(1)):
+        return paths
+    rounds = re.findall(r"round (\d+):", text)
+    return [f"logs/dagger/r{rounds[-1]}/bench.json"] if rounds else None
+
+
+def read_tail(log: Path) -> str:
+    """The end of a run's log, where its done line is; the whole file only when an old DAgger line needs its round."""
+    with log.open("rb") as f:
+        f.seek(max(0, log.stat().st_size - TAIL_BYTES))
+        tail = f.read().decode(errors="replace")
+    return log.read_text(errors="replace") if "DAGGER_ROUND_DONE;" in tail else tail
+
+
+def observe(cycles: dict[int, dict[str, Any]]) -> tuple[int, str, list[str]] | None:
+    """The cycle in flight, if any, as (cycle, "finished" | "dead" | "running", result files)."""
+    if not (busy := in_flight(cycles)):
+        return None
+    n, log = busy[0], Path(cycles[busy[0]]["log"])
+    if not log.exists():
+        return n, "dead", []
+    if results := results_from_log(read_tail(log)):
+        return n, "finished", results
+    silent = time.time() - log.stat().st_mtime > STALL_S
+    running = (
+        cycles[n].get("adopted")
+        or subprocess.run(["pgrep", "-f", cycle_pattern(n)], capture_output=True, check=False).returncode == 0
+    )
+    return n, "dead" if silent or not running else "running", []
+
+
+def next_step(
+    cycles: dict[int, dict[str, Any]], flight: tuple[int, str, list[str]] | None, launched: int, max_cycles: int
+) -> tuple[str, int | None]:
+    """The loop's one move: judge, fail, wait, stop at a PROMOTE for a human, launch what is planned, or plan."""
+    if flight is not None:
+        n, state, _ = flight
+        return {"finished": "judge", "dead": "fail", "running": "wait"}[state], n
+    if promoted := [n for n, c in cycles.items() if c["event"] == "judged" and c.get("verdict") == "PROMOTE"]:
+        return "await_approval", promoted[0]
+    if launched >= max_cycles:
+        return "stop", None
+    if planned := sorted(n for n, c in cycles.items() if c["event"] == "planned"):
+        return "launch", planned[0]
+    return "plan", None
 
 
 def detach(command: list[str], log: Path) -> None:
@@ -418,7 +486,7 @@ def launch(
         console.print(f"cycle {cycle}: adopted the running job logging to {adopt}")
         return
     script = LOG.parent / f"cycle_{cycle}.sh"
-    out = LOG.parent / f"cycle_{cycle}_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.log"
+    out = LOG.parent / f"cycle_{cycle}_{utc_now('%Y%m%dT%H%M%SZ')}.log"
     script.write_text(
         f"#!/usr/bin/env bash\n# autopilot cycle {cycle}: {action.name}\ncd {Path.cwd()}\n{action.command}\n"
     )
@@ -429,7 +497,7 @@ def launch(
     if heartbeat := shutil.which("autoresearch-heartbeat") or shutil.which(
         "autoresearch-heartbeat", path=str(Path.home() / ".local/bin")
     ):
-        detach([heartbeat, "--label", f"autopilot-{cycle}", "--pattern", f"[c]ycle_{cycle}.sh", "--log", str(out),
+        detach([heartbeat, "--label", f"autopilot-{cycle}", "--pattern", cycle_pattern(cycle), "--log", str(out),
                 "--stall-after", "3600"], LOG.parent / "heartbeat.log")  # fmt: skip
     else:
         console.print("[yellow]autoresearch-heartbeat not found: the run has no check-ins[/yellow]")
@@ -489,6 +557,51 @@ def intake(
     for r in new:
         console.print(f"{r.source} ({r.verdict}): axes {r.axes or '-'}; unmet {r.unmet or '-'}; {'; '.join(r.reasons)}")
     console.print(f"{len(new)} new learning requests -> {REQUESTS}")
+
+
+@app.command()
+def fail(cycle: int, why: Annotated[str, typer.Option(help="Why the run is over without a result")]) -> None:
+    """Close a launched cycle whose run died or stalled without a result; the log keeps it and the reason."""
+    log = CycleLog()
+    require(log.cycles(), cycle, "launched")
+    log.append("failed", cycle, why=why)
+    console.print(f"cycle {cycle}: failed ({why})")
+
+
+@app.command()
+def run(
+    bench: BenchOpt,
+    every_min: Annotated[float, typer.Option(help="Minutes between checks while a cycle runs")] = 10.0,
+    max_cycles: Annotated[int, typer.Option(help="Most cycles this run may launch")] = 2,
+    budget_hours: float = 8.0,
+    verdicts: Path = VERDICTS,
+) -> None:
+    """Drive the loop unattended: judge finished cycles, launch planned ones, plan the next. It stops when a cycle is
+    judged PROMOTE (a human approves, then restarts it against the new reference), after max_cycles launches, or when
+    nothing on the menu is eligible."""
+    launched = 0
+    while True:
+        cycles = CycleLog().cycles()
+        flight = observe(cycles)
+        step, n = next_step(cycles, flight, launched, max_cycles)
+        console.print(f"[{utc_now()}] autopilot: {step} {n or ''}".rstrip())
+        match step:
+            case "judge":
+                judge_cycle(n, [Path(p) for p in flight[2]])
+            case "fail":
+                fail(n, why="the run ended or fell silent without a result; see its log")
+            case "launch":
+                launch(n)
+                launched += 1
+            case "plan":
+                try:
+                    plan(bench, budget_hours=budget_hours, verdicts=verdicts)
+                except typer.Exit:
+                    return
+            case "await_approval" | "stop":
+                return
+            case _:
+                time.sleep(every_min * 60)
 
 
 @app.command()

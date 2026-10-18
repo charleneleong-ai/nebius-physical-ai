@@ -31,6 +31,9 @@ BASE=${BASE:-} RECOVERIES=${RECOVERIES:-} UPWEIGHT=${UPWEIGHT:-8}
 # RL recoveries get their own weight: at x8 alongside the scripted ones (round 4) the policy got worse, no_contact 18 -> 39.
 RL_RECOVERIES=${RL_RECOVERIES:-} RL_UPWEIGHT=${RL_UPWEIGHT:-$UPWEIGHT}
 TRAIN_WHEN=${TRAIN_WHEN:-true}  # shell condition polled before training, e.g. to wait for another job's GPU
+# AUTOPILOT=1: the gate result is recorded but never acted on (npai autopilot approve decides), and nothing the served
+# policy depends on (its checkpoint, data or recoveries) is deleted; a failed candidate still is
+AUTOPILOT=${AUTOPILOT:-}
 # RL_POLICY: a residual RL expert (scripts/rl_expert.py --residual) records the recoveries instead of the script; it
 # recovers about 74% of held-out failure states against the script's 46%.
 RL_POLICY=${RL_POLICY:-}
@@ -164,7 +167,7 @@ kill $SERVER; SERVER=""
 uv run python scripts/benchmark.py failures "$DIR/bench.json"
 
 OLD_POLICY=$POLICY OLD_DATA=$DATA
-if uv run python scripts/benchmark.py gate "$REF_BENCH" "$DIR/bench.json" | tee "$DIR/gate.txt"; then
+if uv run python scripts/benchmark.py gate "$REF_BENCH" "$DIR/bench.json" | tee "$DIR/gate.txt" && [ -z "$AUTOPILOT" ]; then
   POLICY=$NEW REF_BENCH=$DIR/bench.json
 fi
 # The state is written before anything is deleted, so it never points at a removed checkpoint.
@@ -175,8 +178,11 @@ if [ "$POLICY" = "$NEW" ]; then
 elif ! grep -q KEEP "$DIR/gate.txt"; then
   rm -rf "$CAND"  # a KEEP is kept: it can win a suite without passing the pooled gate
 fi
+if [ -z "$AUTOPILOT" ]; then  # the served policy's lineage stays intact until a human approves the candidate
 [[ "$OLD_DATA" == *dagger_agg_r* ]] && rm -rf "$OLD_DATA"  # the new aggregate contains it
 [[ -n "$BASE" && "$RECOVERIES" == *dagger_recoveries_r* && "$RECOVERIES" != "$NEXT_RECOVERIES" ]] && rm -rf "$RECOVERIES"
 [[ "$RL_RECOVERIES" == *dagger_rl_recoveries_r* && "$RL_RECOVERIES" != "$NEXT_RL_RECOVERIES" ]] && rm -rf "$RL_RECOVERIES"
+fi
 [ -n "$BASE" ] && rm -rf "$NEXT_DATA"  # upweighted training copy: rebuilt from BASE and RECOVERIES every round
-say "DAGGER_ROUND_DONE; serving next: $POLICY"
+say "serving next: $POLICY"
+say "DAGGER_ROUND_DONE: $DIR/bench.json"

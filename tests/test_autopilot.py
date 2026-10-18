@@ -18,7 +18,9 @@ from nebius_physical_ai.autopilot import (
     in_flight,
     judge,
     learning_request,
+    next_step,
     read_jsonl,
+    results_from_log,
     tried,
 )
 from nebius_physical_ai.benchmark import Cell
@@ -230,3 +232,40 @@ class TestLearningRequests:
         for _ in range(2):
             assert CliRunner().invoke(app, ["intake", "gallery", "--scenes", str(scenes)]).exit_code == 0
         assert sorted(r["source"] for r in read_jsonl(REQUESTS)) == ["new_task", "real_photo"]
+
+
+class TestRunLoop:
+    @pytest.mark.parametrize(
+        ("log", "results"),
+        [("[07:24] task round basket: TASK_ROUND_DONE: logs/a/bench_tasks.json logs/a/bench_stack.json",
+          ["logs/a/bench_tasks.json", "logs/a/bench_stack.json"]),
+         ("[08:30] round 7: serving next: /ckpt\n[08:30] round 7: DAGGER_ROUND_DONE: logs/dagger/r7/bench.json",
+          ["logs/dagger/r7/bench.json"]),
+         ("[05:08] round 7: fine-tuning\n[08:30] round 7: DAGGER_ROUND_DONE; serving next: x", ["logs/dagger/r7/bench.json"]),
+         ("[05:08] round 7: fine-tuning", None)],
+    )  # fmt: skip
+    def test_results_come_from_the_runs_last_line(self, log: str, results: list[str] | None) -> None:
+        assert results_from_log(log) == results
+
+    @pytest.mark.parametrize(
+        ("events", "flight", "launched", "step"),
+        [([("planned", 1), ("launched", 1)], (1, "finished", ["b.json"]), 0, ("judge", 1)),
+         ([("planned", 1), ("launched", 1)], (1, "dead", []), 0, ("fail", 1)),
+         ([("planned", 1), ("launched", 1)], (1, "running", []), 0, ("wait", 1)),
+         ([("planned", 1), ("judged", 1, "PROMOTE"), ("planned", 2)], None, 0, ("await_approval", 1)),
+         ([("planned", 1), ("judged", 1, "KEEP"), ("planned", 2)], None, 0, ("launch", 2)),
+         ([("planned", 1), ("judged", 1, "KEEP"), ("planned", 2), ("dropped", 2)], None, 0, ("plan", None)),
+         ([("planned", 1), ("judged", 1, "DISCARD")], None, 2, ("stop", None))],
+    )  # fmt: skip
+    def test_next_step(
+        self,
+        tmp_path: Path,
+        events: list[tuple[str, ...]],
+        flight: tuple[int, str, list[str]] | None,
+        launched: int,
+        step: tuple[str, int | None],
+    ) -> None:
+        log = CycleLog(tmp_path / "cycles.jsonl")
+        for event, cycle, *verdict in events:
+            log.append(event, cycle, action="dagger_round", **({"verdict": verdict[0]} if verdict else {}))
+        assert next_step(log.cycles(), flight, launched, max_cycles=2) == step
