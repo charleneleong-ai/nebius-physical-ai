@@ -15,10 +15,12 @@ Success is judged on the *named* pair of blocks, so stacking the wrong object co
 
 import fnmatch
 import itertools
+import json
 import math
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, fields, replace
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -482,6 +484,13 @@ def run_suite(
     return cell
 
 
+def load_cells(path: Path) -> tuple[str, dict[str, Cell]]:
+    """A result file's label and its cells by suite (scripts/benchmark.py run writes them)."""
+    data = json.loads(path.read_text())
+    keep = Cell.__dataclass_fields__
+    return data["label"], {c["suite"]: Cell(**{k: v for k, v in c.items() if k in keep}) for c in data["cells"]}
+
+
 def mcnemar(a: Cell, b: Cell) -> tuple[int, int, float] | None:
     """Exact McNemar test on the scenes both cells rehearsed: (a wins, b wins, two-sided p), or None if unpaired.
 
@@ -496,22 +505,36 @@ def mcnemar(a: Cell, b: Cell) -> tuple[int, int, float] | None:
     return wins, losses, p
 
 
-def promotion(new: dict[str, Cell], ref: dict[str, Cell]) -> tuple[bool, str]:
-    """Whether `new` should replace `ref`: better on every rehearsal pooled across their shared suites (paired), and
-    worse on none of them. A round that only moves within noise is not promoted, so the served policy never drifts."""
+def promotion(new: dict[str, Cell], ref: dict[str, Cell], pool: list[str] | None = None) -> tuple[bool, str]:
+    """Whether `new` should replace `ref`: better on every rehearsal pooled across `pool` (their shared suites by
+    default; paired), and worse on none of the shared suites. A round that only moves within noise is not promoted, so
+    the served policy never drifts."""
     shared = [suite for suite in ref if suite in new]
     if not shared:
         return False, "no suites in common"
     if worse := [suite for suite in shared if verdict(new[suite], ref[suite]) == "worse"]:
         return False, f"worse on {', '.join(worse)}"
-    pool = [
-        Cell("pooled", "pooled", sum(c.successes for c in cells), sum(c.n for c in cells), 0, 0.0,
-             outcomes=[o for c in cells for o in c.outcomes])
-        for cells in ([new[s] for s in shared], [ref[s] for s in shared])
+    if not (pooled_suites := [s for s in (pool or shared) if s in shared]):
+        return False, "no pooled suites in common"
+    cells = [
+        Cell("pooled", "pooled", sum(c.successes for c in group), sum(c.n for c in group), 0, 0.0,
+             outcomes=[o for c in group for o in c.outcomes])
+        for group in ([new[s] for s in pooled_suites], [ref[s] for s in pooled_suites])
     ]  # fmt: skip
-    pooled = verdict(*pool)
-    gained = f"{pool[0].successes - pool[1].successes:+d} rehearsals over {len(shared)} suites, pooled {pooled}"
+    pooled = verdict(*cells)
+    gained = (
+        f"{cells[0].successes - cells[1].successes:+d} rehearsals over {len(pooled_suites)} suites, pooled {pooled}"
+    )
     return pooled == "better", gained
+
+
+def describe(cell: Cell, base: Cell) -> str:
+    """Score and verdict against the reference, with the paired evidence when there is any."""
+    text = f"{cell.successes}/{cell.n} ({cell.p:.0%}) {verdict(cell, base)}"
+    if (paired := mcnemar(cell, base)) is None:
+        return text + " (unpaired)"
+    wins, losses, p = paired
+    return text + f" (+{wins}/-{losses}, p={p:.3f})"
 
 
 def verdict(a: Cell, b: Cell, alpha: float = 0.05) -> str:

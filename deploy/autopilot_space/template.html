@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot</title>
+<style>
+:root {
+  --bg: #f7f6f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e3e1da; --fill: #2f6f9f;
+  --go: #1f7a4d; --retry: #b3581b; --ask: #5b4fc4; --run: #2f6f9f; --accent: #1d1d1b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #a09f98; --line: #34332f; --fill: #6db3e6;
+    --go: #4fbf86; --retry: #e58a4e; --ask: #9d93ff; --run: #6db3e6; --accent: #ecebe6;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, sans-serif; }
+main { max-width: 1080px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 2rem; margin: 0 0 4px; }
+h2 { font-size: 1.25rem; margin: 40px 0 8px; }
+p.lede, .stat { color: var(--muted); }
+p.lede { margin: 0 0 16px; max-width: 780px; }
+.stat { font-size: .85rem; }
+a { color: inherit; }
+.links { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 24px; }
+.links a { border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: .85rem;
+  text-decoration: none; background: var(--panel); }
+.links a.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+.loop { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.loop div { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px;
+  font-size: .85rem; color: var(--muted); }
+.loop b { display: block; color: var(--ink); }
+.bar { display: grid; grid-template-columns: 210px 1fr 110px; gap: 4px 12px; align-items: center; margin: 10px 0; }
+.bar .label span { display: block; font-size: .8rem; color: var(--muted); }
+.track { height: 14px; background: var(--line); border-radius: 7px; overflow: hidden; }
+.fill { height: 100%; background: var(--fill); }
+.num { font-variant-numeric: tabular-nums; font-size: .9rem; }
+.mix { grid-column: 2 / 4; font-size: .8rem; color: var(--muted); }
+.demos { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+video { width: 100%; display: block; background: #000; aspect-ratio: 4 / 3; object-fit: contain; }
+figcaption { padding: 10px 12px; font-size: .85rem; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 10px 0; }
+.card h3 { margin: 0 0 4px; font-size: 1rem; display: flex; justify-content: space-between; gap: 8px; }
+.card p { margin: 8px 0 0; font-size: .92rem; }
+.moved { margin: 4px 0 0; padding-left: 20px; font-size: .85rem; }
+.DROPPED { background: var(--muted); }
+.pill { display: inline-block; border-radius: 999px; padding: 1px 10px; font-size: .75rem; font-weight: 600; color: #fff;
+  background: var(--muted); white-space: nowrap; }
+.PROMOTE { background: var(--go); } .KEEP { background: var(--ask); } .DISCARD { background: var(--retry); }
+.RUNNING, .QUEUED { background: var(--run); }
+.RETRY { background: var(--retry); } .ASK_HUMAN { background: var(--ask); }
+.request { display: grid; grid-template-columns: 160px 1fr; gap: 14px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; padding: 12px; margin: 10px 0; }
+.request img { width: 100%; border-radius: 8px; aspect-ratio: 4 / 3; object-fit: cover; }
+.request h3 { margin: 0 0 4px; font-size: 1rem; display: flex; gap: 8px; align-items: center; }
+.request p { margin: 6px 0; font-size: .9rem; }
+@media (max-width: 640px) { .request { grid-template-columns: 1fr; } }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .85rem; background: var(--panel); }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+ul.rules { padding-left: 20px; }
+footer { margin-top: 48px; color: var(--muted); font-size: .85rem; }
+@media (max-width: 640px) { .bar { grid-template-columns: 1fr 90px; } .bar .label { grid-column: 1 / 3; } .mix { grid-column: 1 / 3; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Autopilot</h1>
+  <p class="lede">The self-improving half of Preflight. Preflight decides whether the SO-101 robot should act; Autopilot
+    learns from what fails. Each cycle reads the served GR00T N1.7 policy's benchmark, finds the generalisation axis
+    (new objects, tasks or environments) with the most failures a tested recipe could fix, trains it, and lets a paired
+    gate decide. Nemotron on Nebius Token Factory proposes; it never scores its own result.</p>
+  <nav class="links">{{LINKS}}</nav>
+
+  <div class="loop">{{STEPS}}</div>
+
+  <h2>Where the policy fails now</h2>
+  <p class="stat">The reference the latest cycle was planned against: 96 paired rehearsals per suite in the randomised
+    twin. New tasks are the gap; seen scenes are the guard.</p>
+  {{BARS}}
+
+  <h2>What the loop is targeting</h2>
+  <div class="demos">{{DEMOS}}</div>
+
+  <h2 id="requests">Requests from Preflight</h2>
+  <p class="stat">Every scene <a href="https://huggingface.co/spaces/chaleong/preflight">Preflight</a> would not clear
+    is filed here as a learning request (<code>npai autopilot intake</code>). Recipes that answer one rank first. A refusal
+    caused by an untrustworthy twin is a perception problem: it is recorded as unmet, not turned into training.</p>
+  {{REQUESTS}}
+
+  <h2>Cycles</h2>
+  {{CYCLES}}
+
+  <h2>The menu, ranked</h2>
+  <p class="stat">Reach: failed rehearsals on a recipe's axes that fail the way it addresses. Nemotron chooses among the
+    top three eligible; families every past attempt of which was discarded are closed.</p>
+  <div class="scroll">{{MENU}}</div>
+
+  <h2>Rules the loop can't break</h2>
+  <ul class="rules">
+    <li>One change per cycle, so every gain is attributable.</li>
+    <li>A fixed menu of tested scripts; the agent can't write or run anything else.</li>
+    <li>The gate is code (paired McNemar on the same scenes), not the agent. G3 counts gains on suites the recipe did
+      not train on, and fails if any suite gets worse.</li>
+    <li>Closed families are never revisited: {{CLOSED}}.</li>
+    <li>Promotion needs a human. GPU use waits for free memory, so other jobs on the host are never displaced.</li>
+  </ul>
+
+  <h2>Every experiment so far</h2>
+  <div class="scroll">{{LEDGER}}</div>
+
+  <footer>Built {{STATUS}} from the loop's own log. Simulation only: the physical SO-101 has not arrived, so every
+    rehearsal is in the MuJoCo twin.</footer>
+</main>
+</body>
+</html>

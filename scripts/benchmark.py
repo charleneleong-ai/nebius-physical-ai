@@ -21,7 +21,15 @@ from rich.console import Console
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.table import Table
 
-from nebius_physical_ai.benchmark import Cell, Suite, build_suites, mcnemar, promotion, run_suite, verdict
+from nebius_physical_ai.benchmark import (
+    Cell,
+    Suite,
+    build_suites,
+    describe,
+    load_cells,
+    promotion,
+    run_suite,
+)
 from nebius_physical_ai.capture.camera import CameraPose
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, Gr00tClient
@@ -160,12 +168,6 @@ class CaseProgress:
         self.tracker.log_progress(self.suite.name, successes, done)
 
 
-def load_cells(path: Path) -> tuple[str, dict[str, Cell]]:
-    data = json.loads(path.read_text())
-    keep = Cell.__dataclass_fields__
-    return data["label"], {c["suite"]: Cell(**{k: v for k, v in c.items() if k in keep}) for c in data["cells"]}
-
-
 @app.command()
 def upload(
     result: Annotated[Path, typer.Argument(help="Result file from `run`")],
@@ -187,15 +189,6 @@ def upload(
             {"cells": (["suite", "group", "successes", "n", "p", "ci_lo", "ci_hi"], rows)},
         )
     print(f"logged {len(cells)} cells for {label}")
-
-
-def describe(cell: Cell, base: Cell) -> str:
-    """Score and verdict against the reference, with the paired evidence when there is any."""
-    text = f"{cell.successes}/{cell.n} ({cell.p:.0%}) {verdict(cell, base)}"
-    if (paired := mcnemar(cell, base)) is None:
-        return text + " (unpaired)"
-    wins, losses, p = paired
-    return text + f" (+{wins}/-{losses}, p={p:.3f})"
 
 
 @app.command()

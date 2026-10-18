@@ -1199,6 +1199,7 @@ dependencies = [
     { name = "opencv-python-headless" },
     { name = "pillow" },
     { name = "pyarrow" },
+    { name = "pyyaml" },
     { name = "pyzmq" },
     { name = "rich" },
     { name = "typer" },
@@ -1215,7 +1216,6 @@ dev = [
 ]
 report = [
     { name = "autoresearch", extra = ["wandb"] },
-    { name = "pyyaml" },
 ]
 rl = [
     { name = "gymnasium" },
@@ -1239,7 +1239,7 @@ requires-dist = [
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4" },
     { name = "pyarrow", specifier = ">=25.0.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
-    { name = "pyyaml", marker = "extra == 'report'", specifier = ">=6" },
+    { name = "pyyaml", specifier = ">=6" },
     { name = "pyzmq", specifier = ">=27.2.0" },
     { name = "rich", specifier = ">=14" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16" },
