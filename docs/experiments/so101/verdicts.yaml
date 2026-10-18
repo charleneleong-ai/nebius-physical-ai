@@ -183,6 +183,14 @@ experiments:
     result: basket 6 -> 86/96 (+82/-2), the trained task learnt; ring 0 -> 0/96, no transfer to the held-out task. Stacking paid for it - clean_many 88 -> 76 (p=0.004), real_1_pomade_tin 87 -> 68 (p<0.001), the rest within noise.
     verdict: DISCARD
     pr: 34
+  - label: "Autopilot cycle 4: DAgger round 7, chosen by Nemotron to answer four Preflight refusals"
+    family: dagger
+    runs: {f3eucpcw: train, tsetza86: bench}
+    baseline: round 3 483
+    gate: G3
+    result: 461/576. 800 rollouts, 123 failure states kept, 32 recovered (26%); held_out_objects 59 (+11/-9, within noise) but real_1_pomade_tin 87 -> 77 (p=0.013) and in_path_pomade_tin 88 -> 79 (p=0.049) worse. DAgger is near saturation on these failure modes.
+    verdict: DISCARD
+    pr: 35
 superseded:  # killed, crashed on launch, or relaunched; tagged `superseded`
   [te8xslg6, uf547kdi, 5vzuj6cz, 9mq1zp6u, 7wdlq67i, cl3ltozz, z0etzlli, 15i8w2eg, rhicuin5, 9p93rb37, 30r7i00q, ap8n1409,
    r83f86xc, kog76yhz, 2duwptwy, 9xe5clfu, 3fysf7vw, ypcoha4l, 6njr9qet]

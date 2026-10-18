@@ -57,7 +57,7 @@ footer { font-size: 13px; color: var(--muted); }
 <main>
 <header>
   <div class="eyebrow">Preflight · SO-101 · MuJoCo twin · updated 18 Oct 2026, 15:30 AEDT</div>
-  <h1>Fourteen attempts to make a GR00T arm policy generalise. Two passed the gate; a new task can be taught, but not for free.</h1>
+  <h1>Fifteen attempts to make a GR00T arm policy generalise. Two passed the gate; a new task can be taught, but not for free.</h1>
   <p class="lede">Every candidate runs the same six suites (12 scenes × 8 perturbed rehearsals, seed 42) and is compared with v5 scene by scene (paired McNemar). It is promoted only with a pooled gain and no suite significantly worse, a gate fixed before the first round was scored. Everything is simulation; the physical arm has not arrived.</p>
   <div class="headline">
     <div><b>483 / 576</b><span>DAgger round 3, promoted (served)</span></div>
@@ -128,7 +128,7 @@ flowchart LR
 <section>
   <h2>Autopilot: the loop that trains on what Preflight refuses</h2>
   <p class="takeaway">The first cycle taught a task the policy had never seen, 6 → 86 of 96, and transferred nothing to the task it held out (ring, 0 → 0). It also cost stacking (clean_many 88 → 76, real_1_pomade_tin 87 → 68), so the gate discarded it.</p>
-  <p>Every scene Preflight won't clear becomes a learning request. Autopilot ranks a fixed menu of tested recipes by the failures each could win back. Requests from real refusals rank first. Nemotron on Token Factory picks one of the top three; it never scores the result. The paired gate G3 judges it, and a human approves promotion. After cycle 1, Nemotron's proposed ring round was dropped as overtaken by the evidence. Cycle 4, a DAgger round answering four Preflight refusals, is training now. Live on the <a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot Space</a>.</p>
+  <p>Every scene Preflight won't clear becomes a learning request. Autopilot ranks a fixed menu of tested recipes by the failures each could win back. Requests from real refusals rank first. Nemotron on Token Factory picks one of the top three; it never scores the result. The paired gate G3 judges it, and a human approves promotion. After cycle 1, Nemotron's proposed ring round was dropped as overtaken by the evidence. Cycle 4, a DAgger round answering four Preflight refusals, was discarded: no gain on new objects and both real-object suites worse. Live on the <a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot Space</a>.</p>
   <pre class="mermaid">
 flowchart LR
   PF["Preflight: RETRY / ASK_HUMAN"] -->|learning request| AP["Autopilot: rank menu"]
@@ -162,7 +162,7 @@ flowchart LR
     <div class="row"><span class="pill flat">Kept</span><div><strong>Calibrated co-training (v11)</strong>Joint offsets fitted to the twin cut real frames under the table from 99.7% to 4.2%. Round 3 with 87 calibrated block-stacking episodes at 9%: 472 vs 483, every suite within noise. Neutral in the twin; kept for the real arm.</div></div>
     <div class="row"><span class="pill rejected">Rejected</span><div><strong>Failure-state synthesis (round 6)</strong>Expert recoveries recorded from jittered failure states: 437 vs 483, worse on held_out_objects (43), clean_many (76) and real_1_pomade_tin (75). The policy does not need recoveries from states it never reaches.</div></div>
     <div class="row"><span class="pill rejected">Rejected</span><div><strong>Autopilot cycle 1: multi-task round, ring held out</strong>400 basket demos in 5 phrasings: basket 6 → 86/96 (+82/−2), ring 0 → 0. Stacking 441 vs 483, clean_many and real_1_pomade_tin significantly worse. Gate G3 discarded it.</div></div>
-    <div class="row"><span class="pill running">Running</span><div><strong>Autopilot cycle 4: DAgger round answering Preflight's refusals</strong>Proposed by Nemotron for the objects and environments axes. It answers the new-colour task, the real photo and two hard layouts.</div></div>
+    <div class="row"><span class="pill rejected">Rejected</span><div><strong>Autopilot cycle 4: DAgger round 7, answering Preflight's refusals</strong>Chosen by Nemotron for the objects and environments axes: 32 of 123 kept failure states recovered (26%). 461 vs 483; held_out_objects 59 (within noise) but both pomade-tin suites significantly worse. DAgger is near saturation on these failure modes.</div></div>
   </div>
 </section>
 

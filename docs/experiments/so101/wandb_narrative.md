@@ -1,6 +1,6 @@
 ## Highlights
 
-**Status, 18 Oct 2026 16:00 AEDT.** DAgger round 3 (retrained) is still the served policy, now published as [chaleong/preflight-gr00t-so101-dagger-r3](https://huggingface.co/chaleong/preflight-gr00t-so101-dagger-r3). Experiments now run through **Autopilot**, a closed loop that turns Preflight's refusals and the benchmark's failures into one training cycle at a time: Nemotron on Token Factory chooses the recipe, and a paired gate (G3) judges it. Cycle 1 (multi-task, basket trained, ring held out) taught the new task, 6 → 86 of 96, transferred nothing to ring (0 → 0) and cost stacking (441 vs 483), so it was discarded. Cycle 4, a DAgger round answering four Preflight refusals, is training. Failure-state synthesis was discarded (437). Everything is simulation; the physical SO-101 has not arrived. Live: [Preflight](https://huggingface.co/spaces/chaleong/preflight) · [Autopilot](https://huggingface.co/spaces/chaleong/autopilot) · [Preflight Experiments](https://huggingface.co/spaces/chaleong/preflight-experiments).
+**Status, 18 Oct 2026 19:30 AEDT.** DAgger round 3 (retrained) is still the served policy, now published as [chaleong/preflight-gr00t-so101-dagger-r3](https://huggingface.co/chaleong/preflight-gr00t-so101-dagger-r3). Experiments now run through **Autopilot**, a closed loop that turns Preflight's refusals and the benchmark's failures into one training cycle at a time: Nemotron on Token Factory chooses the recipe, and a paired gate (G3) judges it. Cycle 1 (multi-task, basket trained, ring held out) taught the new task, 6 → 86 of 96, transferred nothing to ring (0 → 0) and cost stacking (441 vs 483), so it was discarded. Cycle 4, a DAgger round Nemotron chose to answer four Preflight refusals, was discarded (461 vs 483; both real-object suites worse): DAgger is near saturation. Failure-state synthesis was discarded (437). Everything is simulation; the physical SO-101 has not arrived. Live: [Preflight](https://huggingface.co/spaces/chaleong/preflight) · [Autopilot](https://huggingface.co/spaces/chaleong/autopilot) · [Preflight Experiments](https://huggingface.co/spaces/chaleong/preflight-experiments).
 
 | | Pooled (of 576) | held_out_objects (of 96) | so101-benchmark (of 50) |
 |---|---|---|---|
@@ -31,6 +31,7 @@
 | 14 Oct | v11 | r3 + 87 calibrated real block-stacking episodes (9%) | 472 | 57 |
 | 17 Oct | synthesis (r6) | expert recoveries from jittered failure states | 437 | 43 |
 | 18 Oct | Autopilot cycle 1 | multi-task: + 400 basket demos, ring held out (basket 6 → 86) | 441 | 47 |
+| 18 Oct | Autopilot cycle 4 | DAgger round 7: 32 new recoveries answering Preflight refusals | 461 | 59 |
 
 Companion page: [Preflight Generalisation Ledger](https://claude.ai/artifact/JUihdgT9xtqYc8a4ieJPQU). Report and experiment card: [docs/report.pdf](https://github.com/charleneleong-ai/nebius-physical-ai/blob/main/docs/report.pdf), [docs/experiment-card.md](https://github.com/charleneleong-ai/nebius-physical-ai/blob/main/docs/experiment-card.md).
 
@@ -67,7 +68,7 @@ The served policy is GR00T N1.7 (`hqfang/groot-so100_101`) fine-tuned with LeRob
 
 ## Next
 
-- Running: Autopilot cycle 4, a DAgger round (round 7) chosen by Nemotron. It answers four Preflight refusals: the new-colour task, the real photo and two hard layouts. Judged by G3 on the objects and environments suites.
+- Done: Autopilot cycle 4 (DAgger round 7) discarded: 32 of 123 kept failure states recovered, no gain on new objects, both pomade-tin suites worse. `npai autopilot run` now drives the loop unattended and stops at a PROMOTE for a human.
 - Closed by the ledger (Autopilot reopens one only for refusals it was never tried on, ranked after open recipes): failure synthesis, multi-task at this mix, best-of-N, FLUX, v6, v7, RL-expert recoveries.
 - Candidates for the menu: a gentler multi-task mix, wider camera jitter on the stacking data, a wrist camera.
 - Freeze model work around 20 Oct. Submission deadline: 30 Oct 2026 17:00 UTC. The physical arm has not arrived; the repo will be updated with live results when it does.
