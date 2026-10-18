@@ -98,7 +98,7 @@ def menu_table(cycles: dict[int, dict[str, Any]]) -> str:
     latest = cycles[max(cycles)]["candidates"] if cycles else []
     rows = "".join(
         f"<tr><td>{e(c['action'])}</td><td>{c['reach']}</td><td>{c['hours']:.0f}</td>"
-        f"<td>{c['reach'] / c['hours']:.1f}</td><td>{e(c['excluded'] or 'eligible')}</td></tr>"
+        f"<td>{c['reach'] / c['hours']:.1f}</td><td>{e(c['excluded'] or ('reopened, closed by: ' + c['reopened'] if c.get('reopened') else 'eligible'))}</td></tr>"
         for c in latest
     )
     return f"<table><tr><th>recipe</th><th>reach</th><th>GPU h</th><th>reach / h</th><th>status</th></tr>{rows}</table>"

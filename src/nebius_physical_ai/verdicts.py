@@ -13,9 +13,10 @@ def load_verdicts(path: Path = VERDICTS) -> dict[str, Any]:
     return yaml.safe_load(path.read_text())
 
 
-def closed_families(path: Path = VERDICTS) -> set[str]:
-    """Families every recorded attempt of which was discarded: proposing them again would rediscover a known loss."""
-    by_family: dict[str, set[str]] = {}
+def closed_families(path: Path = VERDICTS) -> dict[str, str]:
+    """Families every recorded attempt of which was discarded, with the last result that closed them. Autopilot reopens
+    one only for failures it hasn't been tried on, so the reason travels with the family."""
+    rows: dict[str, list[dict[str, Any]]] = {}
     for row in load_verdicts(path)["experiments"]:
-        by_family.setdefault(row["family"], set()).add(row["verdict"])
-    return {family for family, seen in by_family.items() if seen == {"DISCARD"}}
+        rows.setdefault(row["family"], []).append(row)
+    return {f: str(r[-1]["result"]) for f, r in rows.items() if {row["verdict"] for row in r} == {"DISCARD"}}

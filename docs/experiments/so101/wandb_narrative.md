@@ -68,6 +68,6 @@ The served policy is GR00T N1.7 (`hqfang/groot-so100_101`) fine-tuned with LeRob
 ## Next
 
 - Running: Autopilot cycle 4, a DAgger round (round 7) chosen by Nemotron. It answers four Preflight refusals: the new-colour task, the real photo and two hard layouts. Judged by G3 on the objects and environments suites.
-- Closed by the ledger, so Autopilot won't propose them: failure synthesis, multi-task at this mix, best-of-N, FLUX, v6, v7, RL-expert recoveries.
+- Closed by the ledger (Autopilot reopens one only for refusals it was never tried on, ranked after open recipes): failure synthesis, multi-task at this mix, best-of-N, FLUX, v6, v7, RL-expert recoveries.
 - Candidates for the menu: a gentler multi-task mix, wider camera jitter on the stacking data, a wrist camera.
 - Freeze model work around 20 Oct. Submission deadline: 30 Oct 2026 17:00 UTC. The physical arm has not arrived; the repo will be updated with live results when it does.

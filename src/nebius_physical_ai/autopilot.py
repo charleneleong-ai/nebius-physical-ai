@@ -5,8 +5,8 @@ environments) and failure mode, and proposes one training recipe from a fixed me
 Token Factory chooses among the eligible candidates and writes why; it can't leave the menu and it never scores a
 result. The run launches detached with a heartbeat (each script gates its own GPU stage on `autoresearch-wait`), the
 candidate is judged by the paired gate on the cycle's target suites with no suite allowed to get worse (G3), and
-promotion still needs a human. Families verdicts.yaml has closed are never proposed again, and every step is an event
-in logs/autopilot/cycles.jsonl.
+promotion still needs a human. A family verdicts.yaml has closed comes back only for open requests it was never tried
+on, ranked after open recipes. Every step is an event in logs/autopilot/cycles.jsonl.
 
 Preflight feeds it: every scene it doesn't clear (RETRY or ASK_HUMAN) becomes a learning request naming the axis
 training could fix, and recipes that answer open requests rank first. A refusal training can't fix (the twin could not
@@ -150,11 +150,18 @@ def learning_request(source: str, record: dict[str, Any], task: TaskSpec) -> Lea
         reasons.append(f"asked {task.instruction!r}, outside the one task it was trained on")
     if scene is None or scene["perception"] < TrustPolicy.min_fidelity:
         unmet.append("perception")
-        why = (
-            f"no twin was built ({record.get('explanation', '').removeprefix(f'{verdict}: ') or 'perception failed'})"
-            if scene is None else f"twin fidelity {scene['perception']:.2f}"
-        )  # fmt: skip
-        reasons.append(f"{why}: the twin can't be trusted, which a better photo fixes, not training")
+        if scene is None:
+            why = record.get("explanation", "").removeprefix(f"{verdict}: ") or "perception failed"
+            reasons.append(f"no twin was built ({why}); recognising the objects fixes that, not policy training")
+        else:
+            doubts = [w for w in scene.get("warnings", []) if "outside what it was trained on" not in w]
+            reasons.append(
+                f"a twin was built from the photo, but its perception scores {scene['perception']:.2f}, below "
+                f"{TrustPolicy.min_fidelity:.2f}"
+                + (f" ({'; '.join(doubts)})" if doubts else "")
+                + ", so a rehearsal on it isn't trusted; better recognition or measured object models fix that, not "
+                "policy training"
+            )
     elif rehearsal.get("n") and task.in_distribution:
         axes.append("environments")  # the trained task, failing in this arrangement
         reasons.append(f"only {rehearsal['successes']} of {rehearsal['n']} rehearsals succeeded in this layout")
@@ -179,6 +186,7 @@ class Candidate:
     reach: int
     excluded: str | None = None  # why it may not be chosen, if it may not
     answers: list[str] = field(default_factory=list)  # open learning requests on its axes
+    reopened: str | None = None  # a closed family's last result, when open requests bring it back
 
     @property
     def score(self) -> float:
@@ -186,7 +194,7 @@ class Candidate:
 
     def record(self) -> dict[str, Any]:
         return {"action": self.action.name, "reach": self.reach, "hours": self.action.hours, "excluded": self.excluded,
-                "answers": self.answers}  # fmt: skip
+                "answers": self.answers, "reopened": self.reopened}  # fmt: skip
 
 
 class Chooser:
@@ -196,7 +204,7 @@ class Chooser:
         self.api_key, self.model = api_key, TOKEN_FACTORY_MODELS[model]["model_id"]
 
     def choose(
-        self, diag: dict[str, Any], eligible: list[Candidate], closed: list[str], requests: list[LearningRequest]
+        self, diag: dict[str, Any], eligible: list[Candidate], closed: dict[str, str], requests: list[LearningRequest]
     ) -> tuple[str, str]:
         menu = [
             {**c.record(), "axes": sorted(c.action.axes), "fixes": sorted(c.action.fixes),
@@ -208,7 +216,9 @@ class Chooser:
             "You run the training loop of a robot policy (GR00T N1.7 on an SO-101 arm, rehearsed in a MuJoCo twin). "
             "The goal is generalisation to new objects, new tasks and new environments without losing seen ones.\n"
             f"Benchmark of the served policy, by axis: {json.dumps(diag)}\n"
-            f"Experiment families already closed (do not revisit): {closed}\n"
+            f"Closed experiment families and the result that closed each: {json.dumps(closed)}\n"
+            "An action marked `reopened` belongs to a closed family and is back only because it answers open requests; "
+            "choose it only if those failures differ from the ones that closed it, and say why.\n"
             f"Learning requests, scenes Preflight refused to clear for real users: {json.dumps(asked)}\n"
             f"Eligible actions, ranked by failed rehearsals they could win back per GPU hour: {json.dumps(menu)}\n"
             "Each action is judged only on its `judged_on` suites (paired gain, and no suite anywhere may get worse), "
@@ -232,7 +242,7 @@ class Chooser:
 class Planner:
     """Ranks the menu against the served policy's failures, then lets Nemotron choose among the top eligible few."""
 
-    closed: set[str]
+    closed: dict[str, str]  # family -> the result that closed it
     tried: set[str]
     budget_hours: float
     chooser: Chooser | None
@@ -242,17 +252,19 @@ class Planner:
         ranked = []
         for action in MENU:
             reach = action.reach(cells)
+            answers = [r.source for r in self.requests if action.axes & set(r.axes)]
+            # a closed family comes back only for refusals it was never tried on, and ranks after open recipes
+            reopened = self.closed.get(action.family) if answers else None
             why = (
-                f"family '{action.family}' closed in verdicts.yaml" if action.family in self.closed
+                f"family '{action.family}' closed in verdicts.yaml" if action.family in self.closed and not answers
                 else "already judged against this reference" if action.name in self.tried
                 else f"{action.hours:.0f} h is over the {self.budget_hours:.0f} h budget" if action.hours > self.budget_hours
                 else "no failures it addresses" if not reach
                 else None
             )  # fmt: skip
-            answers = [r.source for r in self.requests if action.axes & set(r.axes)]
-            ranked.append(Candidate(action, reach, why, answers))
+            ranked.append(Candidate(action, reach, why, answers, reopened))
         # demand first: a recipe that answers a real refusal outranks one that only moves the benchmark
-        return sorted(ranked, key=lambda c: (c.excluded is not None, not c.answers, -c.score))
+        return sorted(ranked, key=lambda c: (c.excluded is not None, not c.answers, c.reopened is not None, -c.score))
 
     def choose(self, cells: dict[str, Cell], diag: dict[str, Any]) -> tuple[list[Candidate], Candidate | None, str]:
         ranked = self.candidates(cells)
@@ -263,7 +275,7 @@ class Planner:
             rationale = "the top-ranked candidate (Nemotron not asked)"
         else:
             try:
-                name, rationale = self.chooser.choose(diag, eligible, sorted(self.closed), self.requests)
+                name, rationale = self.chooser.choose(diag, eligible, self.closed, self.requests)
                 if (pick := next((c for c in eligible if c.action.name == name), None)) is not None:
                     return ranked, pick, rationale
                 rationale = f"Nemotron chose '{name}', which is not an eligible candidate; taking the top-ranked one"

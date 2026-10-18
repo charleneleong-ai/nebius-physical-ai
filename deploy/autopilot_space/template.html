@@ -216,7 +216,8 @@ flowchart LR
     <li>A fixed menu of tested scripts; the agent can't write or run anything else.</li>
     <li>The gate is code (paired McNemar on the same scenes), not the agent. G3 counts gains on suites the recipe did
       not train on, and fails if any suite gets worse.</li>
-    <li>Closed families are never revisited: {{CLOSED}}.</li>
+    <li>Closed families ({{CLOSED}}) are reopened only for refusals they were never tried on, rank after open
+      recipes, and Nemotron is shown what closed them.</li>
     <li>Promotion needs a human. GPU use waits for free memory, so other jobs on the host are never displaced.</li>
   </ul>
 

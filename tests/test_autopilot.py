@@ -69,13 +69,13 @@ def test_closed_families_needs_every_row_discarded(tmp_path: Path) -> None:
     rows = [("v7", "DISCARD"), ("synthesis", "DISCARD"), ("synthesis", "DISCARD"), ("dagger", "DISCARD"),
             ("dagger", "PROMOTE")]  # fmt: skip
     path = tmp_path / "verdicts.yaml"
-    path.write_text(json.dumps({"experiments": [{"family": f, "verdict": v} for f, v in rows]}))
-    assert closed_families(path) == {"v7", "synthesis"}
+    path.write_text(json.dumps({"experiments": [{"family": f, "verdict": v, "result": "x"} for f, v in rows]}))
+    assert set(closed_families(path)) == {"v7", "synthesis"}
 
 
 class TestPlanner:
     def test_ranks_by_reach_per_hour_and_explains_exclusions(self, ref: dict[str, Cell]) -> None:
-        ranked = Planner({"synthesis"}, {"task_round:ring"}, budget_hours=5.5, chooser=None).candidates(ref)
+        ranked = Planner({"synthesis": "437"}, {"task_round:ring"}, budget_hours=5.5, chooser=None).candidates(ref)
         by_name = {c.action.name: c for c in ranked}
         assert ranked[0].action.name == "task_round:basket" and by_name["task_round:basket"].reach == 177
         assert "closed" in by_name["failure_synthesis"].excluded
@@ -91,11 +91,11 @@ class TestPlanner:
     def test_chooser_cannot_leave_the_eligible_set(
         self, ref: dict[str, Cell], answer: str | Exception, picked: str
     ) -> None:
-        _, pick, _ = Planner({"synthesis"}, set(), 8.0, FixedChooser(answer)).choose(ref, diagnosis(ref))
+        _, pick, _ = Planner({"synthesis": "437"}, set(), 8.0, FixedChooser(answer)).choose(ref, diagnosis(ref))
         assert pick.action.name == picked
 
     def test_nothing_eligible(self, ref: dict[str, Cell]) -> None:
-        families = {a.family for a in ACTIONS.values()}
+        families = {a.family: "closed" for a in ACTIONS.values()}
         _, pick, why = Planner(families, set(), 8.0, None).choose(ref, diagnosis(ref))
         assert pick is None and "nothing" in why
 
@@ -156,7 +156,7 @@ class TestPlanCommand:
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("NEBIUS_API_KEY", raising=False)
         (tmp_path / "verdicts.yaml").write_text(
-            json.dumps({"experiments": [{"family": "synthesis", "verdict": "DISCARD"}]})
+            json.dumps({"experiments": [{"family": "synthesis", "verdict": "DISCARD", "result": "437"}]})
         )
         path = tmp_path / "bench.json"
         path.write_text(json.dumps({"label": "r3", "cells": [vars(c) for c in ref.values()]}))
@@ -204,9 +204,20 @@ class TestLearningRequests:
 
     def test_a_recipe_answering_a_request_ranks_first(self, ref: dict[str, Cell]) -> None:
         tight_gap = learning_request("tight_gap", record("RETRY", successes=25, n=32), TaskSpec())
-        ranked = Planner(set(), set(), 8.0, None, [tight_gap]).candidates(ref)
+        ranked = Planner({}, set(), 8.0, None, [tight_gap]).candidates(ref)
         assert [c.action.name for c in ranked[:2]] == ["dagger_round", "real_cotrain"]
         assert ranked[0].answers == ["tight_gap"] and not ranked[2].answers
+
+    def test_a_closed_family_reopens_only_for_requests_and_ranks_after_open_ones(self, ref: dict[str, Cell]) -> None:
+        new_colour = learning_request("new_task", record("RETRY", successes=8, n=32), TaskSpec("yellow", "red"))
+        closed = {"synthesis": "437/576, worse on three suites"}
+        quiet = {c.action.name: c for c in Planner(closed, set(), 8.0, None).candidates(ref)}
+        assert "closed" in quiet["failure_synthesis"].excluded
+        ranked = Planner(closed, set(), 8.0, None, [new_colour]).candidates(ref)
+        names = [c.action.name for c in ranked]
+        assert names.index("dagger_round") < names.index("failure_synthesis")
+        synthesis = ranked[names.index("failure_synthesis")]
+        assert synthesis.excluded is None and synthesis.reopened == closed["synthesis"]
 
     def test_intake_files_each_refused_scene_once(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(tmp_path)
