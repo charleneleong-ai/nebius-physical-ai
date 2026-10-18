@@ -36,7 +36,8 @@ a { color: inherit; }
 .links a.primary:hover { background: transparent; color: var(--accent); }
 .loop { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0; margin-top: 40px;
   border-top: 1px solid var(--line); }
-.loop div { padding: 16px 16px 0 0; font-size: .85rem; color: var(--muted); }
+.loop .step { padding: 16px 16px 16px 0; font-size: .85rem; color: var(--muted); }
+.loop .step p { margin: 10px 0 0; color: #c9ced9; font-size: .82rem; }
 .loop b { display: block; color: var(--ink); font-family: var(--display); font-size: 1.05rem; margin-bottom: 4px; }
 .bar { display: grid; grid-template-columns: 210px 1fr 110px; gap: 4px 12px; align-items: center; margin: 10px 0; }
 .bar .label span { display: block; font-size: .8rem; color: var(--muted); }
@@ -83,6 +84,15 @@ ul.rules { padding-left: 20px; }
 .gatebox table { font-size: .82rem; }
 .gatebox td.win { color: var(--go); font-weight: 600; } .gatebox td.loss { color: var(--retry); font-weight: 600; }
 @media (max-width: 760px) { .gatebox { grid-template-columns: 1fr; } }
+details > summary { list-style: none; cursor: pointer; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary b::after { content: " +"; font: 600 12px var(--mono); color: var(--accent); }
+details[open] > summary b::after { content: " \2212"; }
+details[data-pinned] > summary b::after { content: " \2212  pinned"; }
+details[open] { border-color: #3d4356; }
+.arch details { color: var(--muted); }
+.arch details[open] { color: #c9ced9; }
+.expand-hint { font: 11px/1 var(--mono); color: var(--muted); margin: 8px 0 0; }
 footer { margin-top: 64px; border-top: 1px solid var(--line); padding-top: 24px; color: var(--muted); font: 12px/1.6 var(--mono); }
 @media (max-width: 640px) { .bar { grid-template-columns: 1fr 90px; } .bar .label { grid-column: 1 / 3; } .mix { grid-column: 1 / 3; } }
 </style>
@@ -102,6 +112,7 @@ footer { margin-top: 64px; border-top: 1px solid var(--line); padding-top: 24px;
   </header>
 
   <div class="loop">{{STEPS}}</div>
+  <p class="expand-hint">Hover a step or component for detail; click to pin it open.</p>
 
   <h2 id="architecture">Architecture: the agentic loop</h2>
   <p class="stat">An agent proposes; code decides. The only free choice the agent makes is which tested recipe runs
@@ -150,25 +161,25 @@ flowchart LR
     <span class="tf">Nebius Token Factory (agent)</span><span class="gate">gate: code, not the agent</span>
     <span class="human">human</span><span class="mem">memory</span></div>
   <div class="arch">
-    <div class="hf"><b>Preflight</b>Rehearses the robot's policy in a twin of the scene; files every scene it won't clear.
-      <div class="where">Hugging Face Space (CPU) + GPU job image</div></div>
-    <div class="gpu"><b>Intake</b>Sorts each refusal into the axis training could fix, or marks it unmet (perception).
-      <div class="where">A100 · <code>npai autopilot intake</code></div></div>
-    <div class="gpu"><b>Planner</b>Ranks 5 tested recipes by failures they could win back per GPU hour; refusals first; closed
+    <details class="hf"><summary><b>Preflight</b></summary>Rehearses the robot's policy in a twin of the scene; files every scene it won't clear.
+      <div class="where">Hugging Face Space (CPU) + GPU job image</details>
+    <details class="gpu"><summary><b>Intake</b></summary>Sorts each refusal into the axis training could fix, or marks it unmet (perception).
+      <div class="where">A100 · <code>npai autopilot intake</code></details>
+    <details class="gpu"><summary><b>Planner</b></summary>Ranks 5 tested recipes by failures they could win back per GPU hour; refusals first; closed
       families out. <div class="rule">Can't run anything off the menu.</div>
-      <div class="where">A100 · <code>npai autopilot plan</code></div></div>
-    <div class="tf"><b>Nemotron 3 Ultra</b>Chooses one of the top three and says what would count as success.
+      <div class="where">A100 · <code>npai autopilot plan</code></details>
+    <details class="tf"><summary><b>Nemotron 3 Ultra</b></summary>Chooses one of the top three and says what would count as success.
       <div class="rule">Never scores a result; a choice off the eligible list falls back to the ranking.</div>
-      <div class="where">Nebius Token Factory</div></div>
-    <div class="gpu"><b>Runner</b>Launches detached, waits for free GPU memory, checks in every 30 min.
+      <div class="where">Nebius Token Factory</details>
+    <details class="gpu"><summary><b>Runner</b></summary>Launches detached, waits for free GPU memory, checks in every 30 min.
       <div class="rule">Never displaces another job on the host.</div>
-      <div class="where">A100 · autoresearch-wait + heartbeat</div></div>
-    <div class="gate"><b>Benchmark + gate G3</b>Same 96 scenes per suite at seed 42; paired gain on the target suites, no suite
-      worse. <div class="where">A100 · MuJoCo twin, LeRobot GR00T N1.7</div></div>
-    <div class="human"><b>Human</b>Approves promotion; the new policy becomes Preflight's and the next reference.
-      <div class="where"><code>npai autopilot approve</code></div></div>
-    <div class="mem"><b>Memory</b>Every event in <code>cycles.jsonl</code>; verdicts in <code>verdicts.yaml</code>, which closes
-      families until a new refusal reopens them. <div class="where">GitHub · W&amp;B · this page</div></div>
+      <div class="where">A100 · autoresearch-wait + heartbeat</details>
+    <details class="gate"><summary><b>Benchmark + gate G3</b></summary>Same 96 scenes per suite at seed 42; paired gain on the target suites, no suite
+      worse. <div class="where">A100 · MuJoCo twin, LeRobot GR00T N1.7</details>
+    <details class="human"><summary><b>Human</b></summary>Approves promotion; the new policy becomes Preflight's and the next reference.
+      <div class="where"><code>npai autopilot approve</code></details>
+    <details class="mem"><summary><b>Memory</b></summary>Every event in <code>cycles.jsonl</code>; verdicts in <code>verdicts.yaml</code>, which closes
+      families until a new refusal reopens them. <div class="where">GitHub · W&amp;B · this page</details>
   </div>
 
   <div class="gatebox">
@@ -236,6 +247,23 @@ flowchart LR
   <footer>Built {{STATUS}} from the loop's own log. Simulation only: the physical SO-101 has not arrived, so every
     rehearsal is in the MuJoCo twin.</footer>
 </main>
+<script>
+// Steps and components open on hover; a click pins one open (click again to unpin). Touch: a tap toggles.
+const hover = matchMedia("(hover: hover)").matches;
+document.querySelectorAll(".loop details, .arch details").forEach(d => {
+  const summary = d.querySelector("summary");
+  summary.addEventListener("click", ev => {
+    if (!hover) return;
+    ev.preventDefault();
+    if (d.hasAttribute("data-pinned")) { d.removeAttribute("data-pinned"); d.open = false; }
+    else { d.setAttribute("data-pinned", ""); d.open = true; }
+  });
+  if (hover) {
+    d.addEventListener("mouseenter", () => { d.open = true; });
+    d.addEventListener("mouseleave", () => { if (!d.hasAttribute("data-pinned")) d.open = false; });
+  }
+});
+</script>
 <script type="module">
 import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
 mermaid.initialize({ startOnLoad: true, theme: "dark" });

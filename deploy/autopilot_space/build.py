@@ -32,13 +32,60 @@ DEMOS = (  # (suite, video, caption): what the first cycles target
 )
 AXIS_NOTE = {"objects": "colours and sizes never seen", "tasks": "tasks never trained", "seen": "regression guard",
              "environments": "cameras and real objects"}  # fmt: skip
-STEPS = (
-    ("Diagnose", "failures by axis and mode, from the served policy's benchmark"),
-    ("Propose", "rank a fixed menu of tested recipes; Nemotron picks one of the top three"),
-    ("Train", "detached on the A100, gated on free GPU memory, heartbeat every 30 min"),
-    ("Benchmark", "the same 96 paired scenes per suite, seed 42"),
-    ("Gate (G3)", "paired gain on the target suites, no suite worse"),
-    ("Human", "approves promotion; the new policy becomes the next reference"),
+STEPS = (  # title, one line, the detail a hover or click reveals
+    (
+        "Diagnose",
+        "failures by axis and mode, from the served policy's benchmark",
+        (
+            "Reads the served policy's result files (8 suites x 96 paired rehearsals), puts each suite on an axis (objects, "
+            "tasks, environments, or seen scenes as the guard) and counts failures by mode: no_contact, pushed, dropped, "
+            "holding, fell_off. It also reads the learning requests intake filed from Preflight's refusals."
+        ),
+    ),
+    (
+        "Propose",
+        "rank a fixed menu of tested recipes; Nemotron picks one of the top three",
+        (
+            "Five tested recipes are ranked by failed rehearsals each could win back per GPU hour. Recipes that answer a "
+            "Preflight refusal rank first; a closed family stays out unless a refusal reopens it. The top three eligible go to "
+            "Nemotron 3 Ultra on Nebius Token Factory, which picks one and says what result would count as success. A choice "
+            "off the list falls back to the ranking."
+        ),
+    ),
+    (
+        "Train",
+        "detached on the A100, gated on free GPU memory, heartbeat every 30 min",
+        (
+            "The chosen script starts detached (PPID 1) behind autoresearch-wait, which holds until 70 GB of GPU memory and "
+            "20 GB of RAM have stayed free for two minutes, so other jobs on the host are never displaced. A heartbeat checks "
+            "in every 30 minutes and flags a run whose log has stopped growing."
+        ),
+    ),
+    (
+        "Benchmark",
+        "the same 96 paired scenes per suite, seed 42",
+        (
+            "The candidate rehearses exactly the scenes the reference did: 12 scenes x 8 perturbations per suite at seed 42. "
+            "Every rehearsal therefore pairs with the reference's on the identical scene, which is what makes the gate paired."
+        ),
+    ),
+    (
+        "Gate (G3)",
+        "paired gain on the target suites, no suite worse",
+        (
+            "McNemar's test on the scenes where the two policies disagree. The target suites pooled must be better and no suite "
+            "anywhere significantly worse (p < 0.05); a gain on the suite a recipe trains on directly doesn't count. The "
+            "verdict (PROMOTE, KEEP or DISCARD) goes into the cycle log and verdicts.yaml."
+        ),
+    ),
+    (
+        "Human",
+        "approves promotion; the new policy becomes the next reference",
+        (
+            "Only npai autopilot approve promotes a candidate. Until then Preflight keeps serving the current policy and the "
+            "next cycle plans against the same reference, so nothing the agent does reaches the robot unreviewed."
+        ),
+    ),
 )
 e = html.escape
 
@@ -139,7 +186,8 @@ def main(
     page = (HERE / "template.html").read_text()
     fills = {
         "LINKS": "".join(f'<a href="{u}"{" class=primary" if i == 0 else ""}>{e(k)}</a>' for i, (k, u) in enumerate(LINKS.items())),
-        "STEPS": "".join(f"<div><b>{i}. {e(t)}</b>{e(d)}</div>" for i, (t, d) in enumerate(STEPS, 1)),
+        "STEPS": "".join(f'<details class="step"><summary><b>{i}. {e(t)}</b>{e(d)}</summary><p>{e(more)}</p></details>'
+                         for i, (t, d, more) in enumerate(STEPS, 1)),
         "BARS": bars(diag), "DEMOS": "".join(demos), "CYCLES": cycle_cards(cycles), "REQUESTS": request_cards(requests, cycles, frames), "MENU": menu_table(cycles),
         "CLOSED": ", ".join(sorted(closed_families())) or "none", "LEDGER": ledger(load_verdicts()),
         "STATUS": time.strftime("%d %b %Y %H:%M UTC", time.gmtime()),
