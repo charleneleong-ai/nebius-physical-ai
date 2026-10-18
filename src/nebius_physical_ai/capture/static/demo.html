@@ -245,9 +245,11 @@ function handoff(r) {
     target: "_blank", textContent: `${text} \u2192` });
 }
 
+const rehearsals = {};  // scene -> its GPU rehearsal, so an example can end on a verdict and the rollout behind it
 fetch("api/gallery").then(r => r.json()).then(scenes => {
   const order = { GO: 0, RETRY: 1, ASK_HUMAN: 2 };
   scenes.sort((a, b) => (order[a.verdict] ?? 3) - (order[b.verdict] ?? 3));
+  for (const s of scenes) rehearsals[s.name] = s;
   document.getElementById("gallery").append(...scenes.map(card));
 });
 
@@ -276,7 +278,7 @@ photo.addEventListener("change", () => {
   document.getElementById("chosen").textContent = photo.files[0] ? photo.files[0].name : "No photo chosen";
   syncGo();
 });
-async function check(image, src) {
+async function check(image, src, scene) {
   go.disabled = true; samples.querySelectorAll("button").forEach(b => b.disabled = true);
   out.replaceChildren(el("p", { className: "stat", textContent: "Checking (about 10-30 s)..." }));
   try {
@@ -286,6 +288,14 @@ async function check(image, src) {
     if (!reply.ok) throw new Error(r.detail || reply.statusText);
     out.replaceChildren(card({ ...r, name: "your_photo", frame: "", videos: [] }));
     out.querySelector("img").src = src;
+    // A free CPU cannot rehearse, so the live card stops at the gate. When the frame is one of the examples, the
+    // gallery already holds that scene rehearsed 32 times on a GPU: show it, so the example ends on a verdict with
+    // the rollout that earned it rather than on "ready to rehearse".
+    const rehearsed = scene && rehearsals[scene];
+    if (rehearsed) {
+      out.append(el("p", { className: "stat", textContent: `Rehearsed earlier on a GPU, 32 rollouts in the twin:` }),
+                 card(rehearsed));
+    }
   } catch (err) {
     out.replaceChildren(el("p", { className: "error", textContent: err.message }));
   } finally {
@@ -319,23 +329,25 @@ fetch("api/task").then(r => r.json()).then(task => {
 
 // One click per environment-and-instruction pair. The first six vary the environment on the trained instruction, from
 // a clean mat to blocks touching, a block at the edge of reach, an occluded marker and a real phone photo. The last
-// two keep a workable environment and vary the task instead: the same two blocks in the opposite order, and a yellow
-// block the policy was never trained to pick. Both frames really hold the objects named, so both resolve and carry the
-// out-of-distribution warning; naming something that is not in the picture fails at perception, a different story.
+// three keep a workable environment and vary the instruction instead, one half at a time: the trained blocks in the
+// opposite order, a trained object onto a target it was never trained to use, and an object it was never trained to
+// pick. Every frame really holds the objects named, so they resolve and carry the out-of-distribution warning, and
+// the rollouts measure the instruction; naming something absent fails at perception instead, a different story.
 // The buttons wait for /api/task, which is where the trained instruction the first six of them fill in comes from.
 const samples = document.getElementById("samples");
-for (const [name, label, task] of [["centre", "clean mat"], ["cluttered", "cluttered"],
+for (const [name, label, task, rehearsed = true] of [["centre", "clean mat"], ["cluttered", "cluttered"],
                                    ["too_close", "blocks touching"], ["edge_of_reach", "edge of reach"],
                                    ["hidden_marker", "hidden marker"], ["real_photo", "real photo"],
-                                   ["centre", "swapped task", { pick: "red", place: "blue" }],
-                                   ["new_task", "untrained task", { pick: "yellow", place: "red" }]]) {
+                                   ["swapped_task", "swapped task", { pick: "red", place: "blue" }],
+                                   ["new_place", "unseen target", { pick: "blue", place: "yellow" }],
+                                   ["new_task", "unseen object", { pick: "yellow", place: "red" }]]) {
   const src = `gallery/${name}.jpg`;
   const button = el("button", { title: `Run the live check on the ${label} frame`, disabled: true },
     el("img", { src, alt: label, loading: "lazy" }), el("span", { textContent: label }));
   button.addEventListener("click", async () => {
     [pick.value, place.value] = task ? [task.pick, task.place] : [trained.pick, trained.place];
     describeTask();  // the fields stay editable: a preset only fills them in
-    check(await (await fetch(src)).blob(), src);
+    check(await (await fetch(src)).blob(), src, rehearsed ? name : null);
   });
   samples.append(button);
 }

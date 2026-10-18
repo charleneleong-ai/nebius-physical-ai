@@ -38,6 +38,11 @@ SCENES = {
     ),
     "hidden_marker": ((Block("blue", 150, 85), Block("red", 220, 85, 20)), "blue", "red", {"markers": (0, 1, 2)}),
     "new_task": ((Block("yellow", 150, 85, 20), Block("red", 220, 85, 20)), "yellow", "red", {}),
+    # The trained blocks in the trained places, asked for in the opposite order: the one scene where the instruction
+    # is the only thing outside training, so its rollouts measure the task rather than the objects or the layout.
+    "swapped_task": ((Block("blue", 150, 85), Block("red", 220, 85, 20)), "red", "blue", {}),
+    # The trained object to pick, put somewhere it was never trained to put it: the place half of the instruction.
+    "new_place": ((Block("blue", 150, 85), Block("yellow", 220, 85, 20)), "blue", "yellow", {}),
 }
 app = typer.Typer(add_completion=False)
 
