@@ -7,6 +7,7 @@ latest cycle was planned against, verdicts.yaml, and rollout videos of the suite
 import html
 import shutil
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -88,6 +89,30 @@ STEPS = (  # title, one line, the detail a hover or click reveals
     ),
 )
 e = html.escape
+
+
+def so_far(cycles: dict[int, dict[str, Any]], requests: list[dict[str, Any]]) -> tuple[str, ...]:
+    """What each step has actually done, in the same order as STEPS, so the diagram reports rather than describes."""
+    judged = [c for c in cycles.values() if "verdict" in c]
+    tally = Counter(c["verdict"] for c in judged)
+    running = [n for n, c in cycles.items() if c["event"] == "launched"]
+    answered = {request for c in cycles.values() for request in c.get("answers") or []}
+    chosen = [f"cycle {n}: {c['action']} ({c.get('chosen_by', 'ranking')})" for n, c in sorted(cycles.items())]
+    flight = (
+        f"cycle {running[0]} ({cycles[running[0]]['action']}) started {cycles[running[0]]['planned_at']}"
+        if running
+        else "nothing running"
+    )
+    return (
+        f"{len(requests)} learning requests filed from Preflight's refusals, {len(answered)} picked up by a cycle.",
+        f"{len(cycles)} cycles planned - {'; '.join(chosen)}.",
+        f"{len(cycles) - len(running)} runs finished, {flight}.",
+        f"{len(judged)} candidates benchmarked on the same 576 paired rehearsals as the served policy.",
+        f"{len(judged)} judged: " + (", ".join(f"{n} {v}" for v, n in sorted(tally.items())) or "none yet")
+        + f". Closed families: {', '.join(sorted(closed_families())) or 'none'}.",
+        (f"{tally.get('PROMOTE', 0)} promotions approved, so the policy Preflight serves is still the one a human "
+         "last signed off."),
+    )  # fmt: skip
 
 
 def bars(diag: dict[str, dict[str, Any]]) -> str:
@@ -186,8 +211,9 @@ def main(
     page = (HERE / "template.html").read_text()
     fills = {
         "LINKS": "".join(f'<a href="{u}"{" class=primary" if i == 0 else ""}>{e(k)}</a>' for i, (k, u) in enumerate(LINKS.items())),
-        "STEPS": "".join(f'<details class="step"><summary><b>{i}. {e(t)}</b>{e(d)}</summary><p>{e(more)}</p></details>'
-                         for i, (t, d, more) in enumerate(STEPS, 1)),
+        "STEPS": "".join(f'<details class="step"><summary><b>{i}. {e(t)}</b>{e(d)}</summary><p>{e(more)}</p>'
+                         f'<p class="sofar"><b>So far</b> {e(s)}</p></details>'
+                         for i, ((t, d, more), s) in enumerate(zip(STEPS, so_far(cycles, requests), strict=True), 1)),
         "BARS": bars(diag), "DEMOS": "".join(demos), "CYCLES": cycle_cards(cycles), "REQUESTS": request_cards(requests, cycles, frames), "MENU": menu_table(cycles),
         "CLOSED": ", ".join(sorted(closed_families())) or "none", "LEDGER": ledger(load_verdicts()),
         "STATUS": time.strftime("%d %b %Y %H:%M UTC", time.gmtime()),

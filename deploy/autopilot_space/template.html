@@ -38,6 +38,9 @@ a { color: inherit; }
   border-top: 1px solid var(--line); }
 .loop .step { padding: 16px 16px 16px 0; font-size: .85rem; color: var(--muted); }
 .loop .step p { margin: 10px 0 0; color: #c9ced9; font-size: .82rem; }
+.loop .step .sofar { color: #00ffaa; }  /* what this step has actually done, not what it is for */
+.loop .step .sofar b { color: #8b93a7; font-weight: 600; text-transform: uppercase; font-size: .72rem;
+  letter-spacing: .08em; margin-right: 6px; }
 .loop b { display: block; color: var(--ink); font-family: var(--display); font-size: 1.05rem; margin-bottom: 4px; }
 .bar { display: grid; grid-template-columns: 210px 1fr 110px; gap: 4px 12px; align-items: center; margin: 10px 0; }
 .bar .label span { display: block; font-size: .8rem; color: var(--muted); }
