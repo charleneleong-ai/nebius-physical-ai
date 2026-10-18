@@ -7,6 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from nebius_physical_ai.demo import HourlyCap, create_demo
+from nebius_physical_ai.job import result_record
+from nebius_physical_ai.pipeline import PipelineResult
+from nebius_physical_ai.task import TaskSpec
 
 
 def test_hourly_cap_refuses_past_the_limit_and_frees_after_an_hour(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,3 +55,21 @@ class TestDemo:
         app = create_demo(gallery, cap_per_hour=1)
         assert TestClient(app).post("/api/check", content=body).status_code == status
         assert app.state.admission.cap.take() is None  # the slot is still there
+
+    def test_an_impossible_instruction_is_refused_before_spending_a_slot(self, gallery: Path, jpeg: bytes) -> None:
+        app = create_demo(gallery, cap_per_hour=1)
+        answer = TestClient(app).post("/api/check?pick=red cube&place=red cube", content=jpeg)
+        assert answer.status_code == 400 and "same object" in answer.json()["detail"]
+        assert app.state.admission.cap.take() is None
+
+
+def test_the_record_carries_the_instruction_it_judged() -> None:
+    """What a verdict was asked to do travels with it; the wording itself is test_task.py's."""
+    task = TaskSpec(pick="pomade tin", place="red cube")
+    assert result_record(PipelineResult.ask_human("no markers"), 1.0, task)["task"] == {
+        "instruction": task.instruction,
+        "pick": task.pick,
+        "place": task.place,
+        "in_distribution": False,
+        "note": task.out_of_distribution_note(),
+    }

@@ -53,6 +53,15 @@ button:disabled { opacity: .4; cursor: wait; }
 .GO { background: var(--go); } .RETRY { background: var(--retry); } .ASK_HUMAN { background: var(--ask); }
 .PERCEIVED { background: var(--perceived); }
 .samples { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 20px; }
+.samples > .stat { flex-basis: 100%; }  /* the buttons form one row under the label, not around it */
+.instruction { margin-top: 20px; padding: 16px; border: 1px solid var(--line); border-radius: 4px;
+  background: var(--raised); }
+.task { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; margin: 10px 0 8px;
+  font-family: var(--mono); font-size: .9rem; }
+.task input { background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 2px;
+  padding: 6px 8px; font-family: var(--mono); font-size: .9rem; }
+.task input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.unseen { color: var(--ask); }
 .samples button { background: none; padding: 0; border: 1px solid var(--line); overflow: hidden; color: var(--ink); width: 128px;
   text-transform: none; letter-spacing: 0; font: 12px/1.2 var(--mono); }
 .samples button:hover { border-color: var(--accent); }
@@ -124,7 +133,15 @@ footer { border-top: 1px solid var(--line); padding-top: 24px; color: var(--mute
         <span id="chosen" class="stat">No photo chosen</span>
         <button id="go" disabled>Check it</button>
       </div>
-      <div class="samples" id="samples"><span class="stat">No mat? Try a sample:</span></div>
+      <div class="instruction">
+        <label class="stat" for="pick">Instruction given to the robot</label>
+        <div class="task">
+          <span>Pick</span><input id="pick" size="11" aria-label="object to pick">
+          <span>and place on</span><input id="place" size="11" aria-label="object to place it on">
+        </div>
+        <div class="stat" id="distribution"></div>
+      </div>
+      <div class="samples" id="samples"><span class="stat">No mat? Try an example environment and instruction:</span></div>
       <div id="result"></div>
     </div>
     <aside>
@@ -132,7 +149,7 @@ footer { border-top: 1px solid var(--line); padding-top: 24px; color: var(--mute
       <ol class="checklist">
         <li><b>Markers</b>ArUco corners fix the mat in millimetres</li>
         <li><b>Vision</b>a Token Factory VLM names the objects</li>
-        <li><b>Trust gate</b>low fidelity or a new task: ASK_HUMAN</li>
+        <li><b>Trust gate</b>low fidelity: ASK_HUMAN; a new task is flagged, then tried</li>
         <li><b>Rehearsal</b>GR00T in the MuJoCo twin, randomised</li>
         <li><b>Verdict</b>success rate, failure mode, Nemotron</li>
       </ol>
@@ -141,8 +158,8 @@ footer { border-top: 1px solid var(--line); padding-top: 24px; color: var(--mute
 
   <section>
     <div class="head"><div><div class="tag">02 · Rehearsed scenes</div><h2 style="margin-top:10px">Every verdict, with its rollout</h2></div>
-      <p class="stat">Synthetic frames laid out to show each verdict, and one real phone photo of objects the policy never
-        saw, which the gate refuses to rehearse. Refused scenes are filed to Autopilot.</p></div>
+      <p class="stat">Synthetic frames laid out to show each verdict, and one real phone photo of objects the twin cannot
+        place, which the gate refuses to rehearse. Refused scenes are filed to Autopilot.</p></div>
     <div id="gallery" class="grid"></div>
   </section>
 
@@ -161,7 +178,7 @@ footer { border-top: 1px solid var(--line); padding-top: 24px; color: var(--mute
       <tr><td>01</td><td><b>Phone photo</b>Top-down frame of the A3 mat with four ArUco corner markers.</td><td class="where">your browser, uploaded to this Space</td></tr>
       <tr><td>02</td><td><b>Markers and twin</b>OpenCV fixes the mat in millimetres; objects become a MuJoCo twin of the SO-101 cell.</td><td class="where">this Space (Hugging Face, CPU)</td></tr>
       <tr><td>03</td><td><b>Vision</b>A vision-language model names each object; disagreement with the colour detector lowers trust.</td><td class="where">Nebius Token Factory (Qwen3.8 VL)</td></tr>
-      <tr><td>04</td><td><b>Trust gate</b>Low twin fidelity or a task outside training: ASK_HUMAN before anything is rehearsed.</td><td class="where">this Space</td></tr>
+      <tr><td>04</td><td><b>Trust gate</b>Low twin fidelity: ASK_HUMAN before anything is rehearsed, because a rehearsal in a twin that does not match the table measures nothing. A task outside training is flagged and still rehearsed - the success rate is the answer to whether it works.</td><td class="where">this Space</td></tr>
       <tr><td>05</td><td><b>Rehearsal</b>The robot's own policy, GR00T N1.7 fine-tuned by DAgger, runs randomised rollouts in the twin.</td><td class="where">GPU job (job.Dockerfile); A100 for the gallery</td></tr>
       <tr><td>06</td><td><b>Verdict</b>GO / RETRY / ASK_HUMAN from the success rate and its 95% interval, in plain words.</td><td class="where">Nemotron 3 Ultra, Nebius Token Factory</td></tr>
       <tr><td>&rarr;</td><td><b>Autopilot</b>What fails here becomes the next training cycle; a paired gate decides, a human approves.</td><td class="where"><a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot Space</a>; A100 trains</td></tr>
@@ -198,6 +215,14 @@ function evidence(r) {
   return s ? `${s.markers_found.length} of 4 markers, fit ${s.residual_mm} mm, twin fidelity ${s.perception}` : "mat not located";
 }
 
+// The instruction the verdict judged; the server's note names what was trained and what was asked. Older gallery
+// scenes were rehearsed before the record carried a task, so they simply have no line.
+function taskLine(r) {
+  if (!r.task) return null;
+  const text = r.task.note ? `"${r.task.instruction}" - ${r.task.note}` : `"${r.task.instruction}"`;
+  return el("div", { className: r.task.in_distribution ? "stat" : "stat unseen", textContent: text });
+}
+
 function card(r) {
   const media = r.videos && r.videos.length
     ? rollout(`gallery/${r.name}/${r.videos[0]}`, `gallery/${r.frame}`)
@@ -205,6 +230,7 @@ function card(r) {
   return el("div", { className: "card" }, media,
     el("div", { className: "body" },
       el("h3", {}, title(r.name), el("span", { className: `pill ${r.verdict}`, textContent: title(r.verdict || "error") })),
+      taskLine(r),
       el("div", { className: "stat", textContent: r.error || evidence(r) }),
       el("div", { className: "explain", textContent: (r.explanation || "").replace(/^ASK_HUMAN: /, "") }),
       handoff(r)));
@@ -240,15 +266,22 @@ function suiteCard(c) {
 fetch("api/suites").then(r => r.json()).then(cards => document.getElementById("suites").append(...cards.map(suiteCard)));
 
 const photo = document.getElementById("photo"), go = document.getElementById("go"), out = document.getElementById("result");
+// One owner for "may this check be sent": a photo, and two object names. The server is the real validator (it
+// compares word sets, so "red cube" and "cube red" are one object); this only catches the obvious cases early.
+function syncGo() {
+  const [p, q] = [pick.value.trim().toLowerCase(), place.value.trim().toLowerCase()];
+  go.disabled = !photo.files[0] || !p || !q || p === q;
+}
 photo.addEventListener("change", () => {
   document.getElementById("chosen").textContent = photo.files[0] ? photo.files[0].name : "No photo chosen";
-  go.disabled = !photo.files[0];
+  syncGo();
 });
 async function check(image, src) {
   go.disabled = true; samples.querySelectorAll("button").forEach(b => b.disabled = true);
   out.replaceChildren(el("p", { className: "stat", textContent: "Checking (about 10-30 s)..." }));
   try {
-    const reply = await fetch("api/check", { method: "POST", body: image });
+    const task = new URLSearchParams({ pick: pick.value.trim(), place: place.value.trim() });
+    const reply = await fetch(`api/check?${task}`, { method: "POST", body: image });
     const r = await reply.json();
     if (!reply.ok) throw new Error(r.detail || reply.statusText);
     out.replaceChildren(card({ ...r, name: "your_photo", frame: "", videos: [] }));
@@ -256,19 +289,54 @@ async function check(image, src) {
   } catch (err) {
     out.replaceChildren(el("p", { className: "error", textContent: err.message }));
   } finally {
-    go.disabled = !photo.files[0]; samples.querySelectorAll("button").forEach(b => b.disabled = false);
+    syncGo(); samples.querySelectorAll("button").forEach(b => b.disabled = false);
   }
 }
 go.addEventListener("click", () => check(photo.files[0], URL.createObjectURL(photo.files[0])));
 
-// Gallery frames as one-click samples: a clean mat, a hidden marker, clutter and the real photo cover each gate outcome
+// The checkpoint was fine-tuned on one instruction; naming anything else is a scene it has never been trained for,
+// which is what the gate is for. Say so before the visitor spends a check, not only in the verdict. What counts as
+// trained comes from the server (the names are selectors, `blue` not `blue cube`), so the page cannot contradict it.
+const pick = document.getElementById("pick"), place = document.getElementById("place");
+const distribution = document.getElementById("distribution");
+let trained = null;
+function describeTask() {
+  const [p, q] = [pick.value.trim().toLowerCase(), place.value.trim().toLowerCase()];
+  const known = trained !== null && p === trained.pick && q === trained.place;
+  distribution.classList.toggle("unseen", !known);
+  distribution.textContent = known
+    ? "This is the instruction the checkpoint was fine-tuned on."
+    : "Not what the checkpoint was trained on - Preflight flags it and rehearses it anyway, so the success rate answers it.";
+  syncGo();
+}
+[pick, place].forEach(field => field.addEventListener("input", describeTask));
+fetch("api/task").then(r => r.json()).then(task => {
+  trained = task;
+  [pick.value, place.value] = [task.pick, task.place];
+  describeTask();
+  samples.querySelectorAll("button").forEach(b => b.disabled = false);  // they fill in `trained`, so they wait for it
+});
+
+// One click per environment-and-instruction pair. The first six vary the environment on the trained instruction, from
+// a clean mat to blocks touching, a block at the edge of reach, an occluded marker and a real phone photo. The last
+// two keep a workable environment and vary the task instead: the same two blocks in the opposite order, and a yellow
+// block the policy was never trained to pick. Both frames really hold the objects named, so both resolve and carry the
+// out-of-distribution warning; naming something that is not in the picture fails at perception, a different story.
+// The buttons wait for /api/task, which is where the trained instruction the first six of them fill in comes from.
 const samples = document.getElementById("samples");
-for (const [name, label] of [["centre", "clean mat"], ["hidden_marker", "hidden marker"], ["cluttered", "cluttered"],
-                             ["real_photo", "real photo"]]) {
+for (const [name, label, task] of [["centre", "clean mat"], ["cluttered", "cluttered"],
+                                   ["too_close", "blocks touching"], ["edge_of_reach", "edge of reach"],
+                                   ["hidden_marker", "hidden marker"], ["real_photo", "real photo"],
+                                   ["centre", "swapped task", { pick: "red", place: "blue" }],
+                                   ["new_task", "untrained task", { pick: "yellow", place: "red" }]]) {
   const src = `gallery/${name}.jpg`;
-  const button = el("button", { title: `Run the live check on the ${label} frame` },
+  const button = el("button", { title: `Run the live check on the ${label} frame`, disabled: true },
     el("img", { src, alt: label, loading: "lazy" }), el("span", { textContent: label }));
-  button.addEventListener("click", async () => check(await (await fetch(src)).blob(), src));
+  button.addEventListener("click", async () => {
+    [pick.value, place.value] = task ? [task.pick, task.place] : [trained.pick, trained.place];
+    describeTask();  // the fields stay editable: a preset only fills them in
+    check(await (await fetch(src)).blob(), src);
+  });
   samples.append(button);
 }
 </script>

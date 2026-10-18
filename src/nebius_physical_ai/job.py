@@ -26,10 +26,18 @@ from nebius_physical_ai.twin.dataset import LeRobotWriter
 ROLLOUT_FPS = 4  # one recorded frame per action chunk
 
 
-def result_record(result: PipelineResult, seconds: float) -> dict[str, Any]:
-    """Everything the demo page shows, JSON-ready."""
+def result_record(result: PipelineResult, seconds: float, task: TaskSpec) -> dict[str, Any]:
+    """Everything the demo page shows, JSON-ready.
+
+    `task` is carried so a verdict is never shown without the instruction it judged: the same scene is a GO for the
+    task the checkpoint was fine-tuned on and an ASK_HUMAN for one naming an object it has never seen."""
     scene = result.scene
     return {
+        "task": {
+            "instruction": task.instruction, "pick": task.pick, "place": task.place,
+            "in_distribution": task.in_distribution,
+            "note": None if task.in_distribution else task.out_of_distribution_note(),
+        },
         "verdict": result.verdict,
         "explanation": result.explanation,
         "rehearsal": result.rehearsal_summary,
@@ -50,7 +58,7 @@ async def run(frame: Path, out: Path, n: int, port: int, markers_only: bool, tas
         result = await pipeline.run(base64.b64encode(frame.read_bytes()).decode())
     finally:
         await pipeline.close()
-    record = result_record(result, round(time.time() - started, 1))
+    record = result_record(result, round(time.time() - started, 1), task)
     examples = result.rehearsal.examples if result.rehearsal else {}
     record["videos"] = sorted(f"{kind}.mp4" for kind, (_, frames) in examples.items() if frames)
     for kind, (_, frames) in examples.items():

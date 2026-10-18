@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from nebius_physical_ai.job import result_record
 from nebius_physical_ai.perception import decode_frame
 from nebius_physical_ai.pipeline import PreflightPipeline
+from nebius_physical_ai.task import DEFAULT_TASK, TaskSpec
 
 STATIC = Path(__file__).parent / "capture/static"
 MAX_UPLOAD_BYTES = 8_000_000
@@ -113,6 +114,12 @@ def create_demo(gallery: Path, cap_per_hour: int = 30) -> FastAPI:
     def scenes() -> list[dict[str, Any]]:
         return gallery_index(gallery)
 
+    @app.get("/api/task")
+    def trained_task() -> dict[str, str]:
+        """The one instruction the checkpoint was fine-tuned on, so the page never has to guess what counts as
+        in-distribution: `pick`/`place` are selectors (`blue`, not `blue cube`) and only they make `standard_names`."""
+        return {"pick": DEFAULT_TASK.pick, "place": DEFAULT_TASK.place, "instruction": DEFAULT_TASK.instruction}
+
     @app.get("/api/suites")
     def suites() -> list[dict[str, Any]]:
         """Benchmark suites with their scores and rollouts (deploy/suite_cards.py), empty when not rendered."""
@@ -120,7 +127,11 @@ def create_demo(gallery: Path, cap_per_hour: int = 30) -> FastAPI:
         return json.loads(path.read_text()) if path.exists() else []
 
     @app.post("/api/check")
-    async def check(request: Request) -> dict[str, Any]:
+    async def check(request: Request, pick: str = DEFAULT_TASK.pick, place: str = DEFAULT_TASK.place) -> dict[str, Any]:
+        try:  # naming an object the checkpoint never trained on is allowed: the gate is what reports that
+            task = TaskSpec(pick=pick, place=place)
+        except ValueError as err:
+            raise HTTPException(400, str(err)) from err
         body = await read_upload(request)
         frame_b64 = base64.b64encode(body).decode()
         try:
@@ -130,7 +141,7 @@ def create_demo(gallery: Path, cap_per_hour: int = 30) -> FastAPI:
         visitor = (request.headers.get("x-forwarded-for") or request.client.host).split(",")[0].strip()
         admission.take(visitor)
         async with admission.lock:  # one vision call at a time keeps the spend predictable
-            started, pipeline = time.time(), PreflightPipeline(rehearse=False)
+            started, pipeline = time.time(), PreflightPipeline(rehearse=False, task=task)
             try:
                 result = await asyncio.wait_for(pipeline.run(frame_b64), CHECK_TIMEOUT_S)
             except Exception as err:
@@ -141,7 +152,7 @@ def create_demo(gallery: Path, cap_per_hour: int = 30) -> FastAPI:
                 await pipeline.close()
         if result.scene_graph is None:  # stopped at the markers, before the vision call: nothing was spent
             admission.refund(visitor)
-        return result_record(result, round(time.time() - started, 1))
+        return result_record(result, round(time.time() - started, 1), task)
 
     return app
 
