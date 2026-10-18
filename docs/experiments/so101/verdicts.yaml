@@ -2,6 +2,9 @@
 # Gates:
 #   G1  promotion: pooled paired gain over the reference on the six gate suites (6 x 96, seed 42) and no suite
 #       significantly worse (scripts/benchmark.py gate). Fixed before DAgger round 1 was scored.
+#   G3  autopilot cycle (src/nebius_physical_ai/autopilot.py `judge`): pooled paired gain on the cycle's target-axis
+#       suites, excluding the suite the action trains on directly, and no shared suite significantly worse. Fixed
+#       18 Oct 2026, before the first cycle (multi-task basket, ring held out) was scored.
 #   S1  screen: paired McNemar per suite against the reference on the suites run; adopted only on a significant gain.
 pr_base: https://github.com/charleneleong-ai/nebius-physical-ai/pull
 experiments:
@@ -165,6 +168,21 @@ experiments:
     result: calibrate fits offsets of -6.0, -6.0, -5.1 (LeRobot units) on shoulder lift, elbow flex and wrist flex, cutting real frames under the twin's table from 99.7% to 4.2%. Round 3 fine-tuned 4k steps at lr 1e-5 with 87 block-stacking episodes (50 teleop, 37 successful rollouts) at 9% of samples - 472/576 vs 483, every suite within noise (lowest p=0.18, held_out_objects 57 vs 57). Calibrated real data no longer costs the twin anything (v9 lost 65); whether it helps on the real arm is untested. v10, the workspace filter tried first, kept 11 of 400 demos and was superseded.
     verdict: KEEP
     pr: 29
+  - label: Failure-state synthesis (expert recoveries from jittered failure states, round 6)
+    family: synthesis
+    runs: {fep5u5ej: train, ihxnls2k: bench}
+    baseline: round 3 483
+    gate: G1
+    result: 437/576; worse on held_out_objects (43), clean_many (76) and real_1_pomade_tin_many (75). Synthesised states teach recoveries the policy does not need.
+    verdict: DISCARD
+  - label: "Autopilot cycle 1: multi-task round, basket trained, ring held out (400 demos, 5 phrasings)"
+    family: multitask
+    runs: {5so5vvmz: train, 54gkyz95: bench, fg6i9ekr: bench}
+    baseline: round 3 (basket 6, ring 0; 483/576)
+    gate: G3
+    result: basket 6 -> 86/96 (+82/-2), the trained task learnt; ring 0 -> 0/96, no transfer to the held-out task. Stacking paid for it - clean_many 88 -> 76 (p=0.004), real_1_pomade_tin 87 -> 68 (p<0.001), the rest within noise.
+    verdict: DISCARD
+    pr: 34
 superseded:  # killed, crashed on launch, or relaunched; tagged `superseded`
   [te8xslg6, uf547kdi, 5vzuj6cz, 9mq1zp6u, 7wdlq67i, cl3ltozz, z0etzlli, 15i8w2eg, rhicuin5, 9p93rb37, 30r7i00q, ap8n1409,
    r83f86xc, kog76yhz, 2duwptwy, 9xe5clfu, 3fysf7vw, ypcoha4l, 6njr9qet]

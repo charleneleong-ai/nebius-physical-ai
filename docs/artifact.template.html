@@ -60,24 +60,34 @@ svg .ref { stroke: var(--fg); stroke-dasharray: 4 3; opacity: 0.6; }
 ul.plain { margin: 0; padding-left: 1.1rem; max-width: 68ch; } ul.plain li { margin-bottom: 6px; }
 a { color: var(--accent); } a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 footer { font-size: 13px; color: var(--muted); }
+.links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.links a { font: 600 12px/1 var(--mono); padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; background: var(--surface); }
 </style>
 
 <main>
 <header>
-  <div class="eyebrow">Preflight · SO-101 · MuJoCo twin · updated 13 Oct 2026, 21:30 AEDT</div>
-  <h1>Nine attempts to make a GR00T arm policy generalise. One passed the gate; one moved new objects.</h1>
+  <div class="eyebrow">Preflight · SO-101 · MuJoCo twin · updated 18 Oct 2026, 15:30 AEDT</div>
+  <h1>Fourteen attempts to make a GR00T arm policy generalise. Two passed the gate; a new task can be taught, but not for free.</h1>
   <p class="lede">Every candidate runs the same six suites (12 scenes × 8 perturbed rehearsals, seed 42) and is compared with v5 scene by scene (paired McNemar). It is promoted only with a pooled gain and no suite significantly worse, a gate fixed before the first round was scored. Everything is simulation; the physical arm has not arrived.</p>
   <div class="headline">
     <div><b>483 / 576</b><span>DAgger round 3, promoted (served)</span></div>
     <div><b>438 / 576</b><span>v5 baseline</span></div>
     <div><b>61 / 96</b><span>held-out objects, DAgger r3 (was 47–54)</span></div>
+    <div><b>6 → 86 / 96</b><span>new task (basket) after 400 demos; the held-out ring stayed 0</span></div>
     <div><b>0–1 / 50</b><span>so101-benchmark, every policy</span></div>
   </div>
+  <nav class="links">
+    <a href="https://huggingface.co/spaces/chaleong/preflight">Preflight Space: the live gate</a>
+    <a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot Space: the training loop</a>
+    <a href="https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e">Hugging Face collection</a>
+    <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==">W&amp;B report</a>
+    <a href="https://github.com/charleneleong-ai/nebius-physical-ai">Code</a>
+  </nav>
 </header>
 
 <section>
   <h2>Scoreboard</h2>
-  <p class="takeaway">DAgger rounds 2 and 3 each cleared the gate: 464, then 483 on the retrain (the first round-3 run scored 481). Rounds 4 and 5, with RL-expert recoveries at ×8 and ×2, dropped back to 471 and 455. Real co-training (v9) loses 65; FLUX, trained on the same demos for the same volume, collapses.</p>
+  <p class="takeaway">DAgger rounds 2 and 3 each cleared the gate: 464, then 483 on the retrain (the first round-3 run scored 481). Rounds 4 and 5, with RL-expert recoveries at ×8 and ×2, dropped back to 471 and 455. Real co-training (v9) loses 65; FLUX, trained on the same demos for the same volume, collapses. Since then, calibrated co-training (v11) is neutral at 472, failure-state synthesis falls to 437, and Autopilot's first cycle (441) traded stacking for a new task. Colours compare with v5; only the gate decides promotion.</p>
   <div class="chart"><!--POOLED--></div>
 </section>
 
@@ -126,6 +136,22 @@ flowchart LR
 </section>
 
 <section>
+  <h2>Autopilot: the loop that trains on what Preflight refuses</h2>
+  <p class="takeaway">The first cycle taught a task the policy had never seen, 6 → 86 of 96, and transferred nothing to the task it held out (ring, 0 → 0). It also cost stacking (clean_many 88 → 76, real_1_pomade_tin 87 → 68), so the gate discarded it.</p>
+  <p>Every scene Preflight won't clear becomes a learning request. Autopilot ranks a fixed menu of tested recipes by the failures each could win back. Requests from real refusals rank first. Nemotron on Token Factory picks one of the top three; it never scores the result. The paired gate G3 judges it, and a human approves promotion. After cycle 1, Nemotron's proposed ring round was dropped as overtaken by the evidence. Cycle 4, a DAgger round answering four Preflight refusals, is training now. Live on the <a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot Space</a>.</p>
+  <pre class="mermaid">
+flowchart LR
+  PF["Preflight: RETRY / ASK_HUMAN"] -->|learning request| AP["Autopilot: rank menu"]
+  BM["benchmark of served policy"] --> AP
+  AP -->|top 3 eligible| N["Nemotron picks one"]
+  N --> T["train on the A100"]
+  T --> G{"G3: target gain, no suite worse"}
+  G -->|pass| H["human approves"] --> PF
+  G -->|fail| L["ledger: DISCARD / KEEP"]
+  </pre>
+</section>
+
+<section>
   <h2>Every experiment, with its verdict</h2>
   <div class="ledger">
     <div class="row"><span class="pill promoted">Promoted</span><div><strong>DAgger round 2, recoveries ×8</strong>Pooled 464 vs 438, no suite worse. Served until round 3.</div></div>
@@ -144,6 +170,9 @@ flowchart LR
     <div class="row"><span class="pill flat">Flat</span><div><strong>DiVeR with real ArmnetBench outcomes</strong>Plus 305 calibrated real block-stacking episodes (87 successful, 218 failed): AUC 0.77, held_out_objects 52 vs 57, clean_many 83 vs 88.</div></div>
     <div class="row"><span class="pill rejected">Rejected</span><div><strong>Real-data co-training (v9)</strong>400 ArmnetBench SO-101 teleop demos of new objects at 23% of samples: 373 vs 438, held_out_objects 48 vs 52 (no gain), significantly worse on three suites, 0/50 externally.</div></div>
     <div class="row"><span class="pill flat">Kept</span><div><strong>Calibrated co-training (v11)</strong>Joint offsets fitted to the twin cut real frames under the table from 99.7% to 4.2%. Round 3 with 87 calibrated block-stacking episodes at 9%: 472 vs 483, every suite within noise. Neutral in the twin; kept for the real arm.</div></div>
+    <div class="row"><span class="pill rejected">Rejected</span><div><strong>Failure-state synthesis (round 6)</strong>Expert recoveries recorded from jittered failure states: 437 vs 483, worse on held_out_objects (43), clean_many (76) and real_1_pomade_tin (75). The policy does not need recoveries from states it never reaches.</div></div>
+    <div class="row"><span class="pill rejected">Rejected</span><div><strong>Autopilot cycle 1: multi-task round, ring held out</strong>400 basket demos in 5 phrasings: basket 6 → 86/96 (+82/−2), ring 0 → 0. Stacking 441 vs 483, clean_many and real_1_pomade_tin significantly worse. Gate G3 discarded it.</div></div>
+    <div class="row"><span class="pill running">Running</span><div><strong>Autopilot cycle 4: DAgger round answering Preflight's refusals</strong>Proposed by Nemotron for the objects and environments axes. It answers the new-colour task, the real photo and two hard layouts.</div></div>
   </div>
 </section>
 
@@ -155,6 +184,8 @@ flowchart LR
     <li>No single suite gain from round 3's retrain is significant on its own; the pooled gain passed a gate fixed in advance, twice in a row for rounds 2 and 3.</li>
     <li>Which of FLUX's two changes (current-frame conditioning, absolute targets) carries its 21-vs-3 gain; they were tested together.</li>
     <li>The RL expert is measured on recovering failure snapshots, not yet as a source of DAgger data.</li>
+    <li>Whether a smaller share of new-task demos keeps the basket gain without the stacking loss; cycle 1 tried one mix (demos ×2, about 20% of episodes).</li>
+    <li>Nemotron's choices are logged, not validated: the gate judges each cycle's result, not whether another recipe would have done better.</li>
     <li>One benchmark seed and one training seed per checkpoint.</li>
   </ul>
 </section>
