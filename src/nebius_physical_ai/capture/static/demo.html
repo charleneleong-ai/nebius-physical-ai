@@ -69,6 +69,7 @@ a { color: inherit; }
     with the evidence and an explanation from Nemotron on Nebius Token Factory.</p>
   <nav class="links">
     <a class="primary" href="https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e">Hugging Face collection: models, data, paper</a>
+    <a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot: the loop that retrains it</a>
     <a href="https://github.com/charleneleong-ai/nebius-physical-ai">Code (GitHub)</a>
     <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==">Experiments (W&amp;B report)</a>
     <a href="#architecture">Architecture</a>
@@ -126,6 +127,8 @@ a { color: inherit; }
       <div class="where">GPU job: one container image (job.Dockerfile), A100 for the gallery</div></div>
     <div><b>6. Verdict</b>GO / RETRY / ASK_HUMAN from the success rate and its 95% interval, explained in plain words.
       <div class="where">Nemotron 3 Ultra on Nebius Token Factory</div></div>
+    <div><b>Autopilot</b>What fails here becomes the next training cycle: diagnose, propose one tested recipe, train, gate, a human approves.
+      <div class="where"><a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot Space</a>; Nemotron proposes, A100 trains</div></div>
     <div><b>Training and benchmark</b>Scripted twin demos, DAgger rounds and a paired promotion gate on 6 x 96 rehearsals.
       <div class="where">A100; runs and reports on <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==">W&amp;B</a>, code on <a href="https://github.com/charleneleong-ai/nebius-physical-ai">GitHub</a></div></div>
   </div>
