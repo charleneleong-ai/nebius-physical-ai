@@ -52,7 +52,7 @@ The served policy is GR00T N1.7 (`hqfang/groot-so100_101`) fine-tuned with LeRob
 
 - FLUX 3 Action LoRA: predicts well open-loop (2.71 vs 8.24 hold-pose error at 32 steps) but 50/576 closed-loop; 16-step chunks did not fix it.
 - Best-of-8 chunk medoid: within noise at 8× inference.
-- DiVeR verifier best-of-8 on round 3: step AUC 0.79 on held-out episodes, but 54 vs 57 and 85 vs 88.
+- DiVeR verifier best-of-8 on round 3: step AUC 0.79 on held-out episodes, but 54 vs 57 and 85 vs 88. On the action expert's per-candidate state: 48 vs 57 (worse, p=0.049). With 305 real ArmnetBench outcomes: 52 vs 57.
 - Targeted demos (v6): staged mistakes and decoys did not move any suite.
 - Visual domain randomisation (v7): fixes the wrist-mount scenes but costs clean_many 23 successes.
 - Plain PPO from scratch on privileged state: reward paid hovering; 1% recovery.

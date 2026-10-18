@@ -122,6 +122,8 @@ clean\_many 87 vs 86; within noise at $8\times$ inference.
 \item \textbf{DiVeR verifier} (best-of-8 on round 3, after arXiv 2610.04933): an MLP on pooled backbone features, joints and
 the chunk, trained on 300 round-3 rollouts (226 succeeded) with disagreement-weighted BCE, ranks held-out steps at AUC 0.79;
 picking with it scores held\_out\_objects 54 vs 57 ($p=0.66$) and clean\_many 85 vs 88 ($p=0.51$).
+Scoring each candidate by the action expert's own state (AUC 0.77) is worse on held\_out\_objects (48, $p=0.049$); adding 305 real
+ArmnetBench outcomes (87 successful) leaves it within noise (52, $p=0.33$).
 \item \textbf{RL expert} (to replace the scripted expert): plain PPO on privileged state reached 1\% held-out recovery
 by 4.4M steps and was stopped; the reward paid hovering more than stacking. A residual PPO policy on the scripted
 expert, with potential-based shaping, recovers 74.0\% of held-out failure snapshots against the expert's 45.9\%.
