@@ -4,93 +4,102 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Autopilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;700&family=JetBrains+Mono:wght@400;600&family=Public+Sans:wght@400;600&display=swap">
 <style>
 :root {
-  --bg: #f7f6f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e3e1da; --fill: #2f6f9f;
-  --go: #1f7a4d; --retry: #b3581b; --ask: #5b4fc4; --run: #2f6f9f; --accent: #1d1d1b;
-  --hf: #d99a00; --gpu: #2e7d4f; --tf: #6a4fc4; --gate: #b3362b; --human: #6b6a64; --mem: #2f6f9f;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #a09f98; --line: #34332f; --fill: #6db3e6;
-    --go: #4fbf86; --retry: #e58a4e; --ask: #9d93ff; --run: #6db3e6; --accent: #ecebe6;
-    --hf: #f2c14e; --gpu: #5cc28f; --tf: #a497ec; --gate: #f07a6c; --human: #a09f98; --mem: #6db3e6;
-  }
+  --bg: #090a0f; --panel: #12141c; --raised: #1a1d28; --ink: #f3f4f6; --muted: #9aa1b1; --line: #2a2e3d; --fill: #00ffaa;
+  --go: #00ffaa; --retry: #f5a524; --ask: #8ab4ff; --run: #8ab4ff; --accent: #00ffaa; --on: #05110b;
+  --hf: #f2c14e; --gpu: #00ffaa; --tf: #a497ec; --gate: #ff6b5e; --human: #9aa1b1; --mem: #8ab4ff;
+  --display: "Archivo Narrow", "Arial Narrow", sans-serif; --body: "Public Sans", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace; --snap: all .15s cubic-bezier(.4, 0, .2, 1);
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, sans-serif; }
-main { max-width: 1080px; margin: 0 auto; padding: 32px 16px 64px; }
-h1 { font-size: 2rem; margin: 0 0 4px; }
-h2 { font-size: 1.25rem; margin: 40px 0 8px; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--body); }
+main { max-width: 1200px; margin: 0 auto; padding: 48px 24px 72px; }
+h1, h2, h3 { font-family: var(--display); letter-spacing: .01em; }
+.tag { font: 600 11px/1 var(--mono); text-transform: uppercase; letter-spacing: .14em; color: var(--accent); }
+.split { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 3fr); gap: 32px; align-items: start; }
+@media (max-width: 860px) { .split { grid-template-columns: 1fr; } main { padding: 32px 16px 56px; } }
+h1 { font-size: clamp(3rem, 9vw, 6rem); line-height: .9; margin: 10px 0 0; text-transform: uppercase; }
+h2 { font-size: clamp(1.6rem, 3.2vw, 2.4rem); line-height: 1; margin: 56px 0 12px; }
 p.lede, .stat { color: var(--muted); }
-p.lede { margin: 0 0 16px; max-width: 780px; }
+p.lede { margin: 20px 0 0; max-width: 62ch; font-size: 1.15rem; }
 .stat { font-size: .85rem; }
 a { color: inherit; }
-.links { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 24px; }
-.links a { border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: .85rem;
-  text-decoration: none; background: var(--panel); }
-.links a.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
-.loop { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-.loop div { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px;
-  font-size: .85rem; color: var(--muted); }
-.loop b { display: block; color: var(--ink); }
+.links { display: grid; gap: 8px; }
+.links a { font: 12px/1.3 var(--mono); text-decoration: none; padding: 10px 12px; border: 1px solid var(--line); border-radius: 2px;
+  transition: var(--snap); }
+.links a:hover { border-color: var(--accent); color: var(--accent); }
+.links a.primary { background: var(--accent); color: var(--on); border-color: var(--accent); font-weight: 600; }
+.links a.primary:hover { background: transparent; color: var(--accent); }
+.loop { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0; margin-top: 40px;
+  border-top: 1px solid var(--line); }
+.loop div { padding: 16px 16px 0 0; font-size: .85rem; color: var(--muted); }
+.loop b { display: block; color: var(--ink); font-family: var(--display); font-size: 1.05rem; margin-bottom: 4px; }
 .bar { display: grid; grid-template-columns: 210px 1fr 110px; gap: 4px 12px; align-items: center; margin: 10px 0; }
 .bar .label span { display: block; font-size: .8rem; color: var(--muted); }
-.track { height: 14px; background: var(--line); border-radius: 7px; overflow: hidden; }
+.track { height: 10px; background: var(--line); border-radius: 0; overflow: hidden; }
 .fill { height: 100%; background: var(--fill); }
 .num { font-variant-numeric: tabular-nums; font-size: .9rem; }
 .mix { grid-column: 2 / 4; font-size: .8rem; color: var(--muted); }
 .demos { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
-figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
 video { width: 100%; display: block; background: #000; aspect-ratio: 4 / 3; object-fit: contain; }
-figcaption { padding: 10px 12px; font-size: .85rem; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 10px 0; }
-.card h3 { margin: 0 0 4px; font-size: 1rem; display: flex; justify-content: space-between; gap: 8px; }
+figcaption { padding: 16px 24px 24px; font-size: .85rem; color: var(--muted); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 24px; margin: 12px 0; }
+.card h3 { margin: 0 0 6px; font-size: 1.3rem; display: flex; justify-content: space-between; gap: 8px; }
 .card p { margin: 8px 0 0; font-size: .92rem; }
 .moved { margin: 4px 0 0; padding-left: 20px; font-size: .85rem; }
 .DROPPED { background: var(--muted); }
-.pill { display: inline-block; border-radius: 999px; padding: 1px 10px; font-size: .75rem; font-weight: 600; color: #fff;
+.pill { display: inline-block; border-radius: 2px; padding: 3px 8px; font: 600 11px/1.2 var(--mono); letter-spacing: .08em; color: var(--on);
   background: var(--muted); white-space: nowrap; }
 .PROMOTE { background: var(--go); } .KEEP { background: var(--ask); } .DISCARD { background: var(--retry); }
 .RUNNING, .QUEUED { background: var(--run); }
 .RETRY { background: var(--retry); } .ASK_HUMAN { background: var(--ask); }
 .request { display: grid; grid-template-columns: 160px 1fr; gap: 14px; background: var(--panel); border: 1px solid var(--line);
-  border-radius: 12px; padding: 12px; margin: 10px 0; }
-.request img { width: 100%; border-radius: 8px; aspect-ratio: 4 / 3; object-fit: cover; }
+  border-radius: 4px; padding: 24px; margin: 12px 0; }
+.request img { width: 100%; border-radius: 2px; aspect-ratio: 4 / 3; object-fit: cover; }
 .request h3 { margin: 0 0 4px; font-size: 1rem; display: flex; gap: 8px; align-items: center; }
 .request p { margin: 6px 0; font-size: .9rem; }
 @media (max-width: 640px) { .request { grid-template-columns: 1fr; } }
 .scroll { overflow-x: auto; }
-table { border-collapse: collapse; width: 100%; font-size: .85rem; background: var(--panel); }
-th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
 ul.rules { padding-left: 20px; }
 .arch { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 14px; }
-.arch > div { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--c); border-radius: 12px; padding: 12px 14px; font-size: .88rem; }
+.arch > div { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--c); border-radius: 4px; padding: 24px; font-size: .88rem; }
 .hf { --c: var(--hf); } .gpu { --c: var(--gpu); } .tf { --c: var(--tf); } .gate { --c: var(--gate); } .human { --c: var(--human); } .mem { --c: var(--mem); }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 0; font-size: .82rem; color: var(--muted); }
 .legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; background: var(--c); }
 .arch b { display: block; } .arch .where { color: var(--muted); font-size: .8rem; margin-top: 6px; }
 .arch .rule { font-size: .8rem; margin-top: 4px; }
-.diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; overflow-x: auto; }
-.gatebox { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--gate); border-radius: 12px;
-  padding: 14px 16px; margin-top: 14px; display: grid; grid-template-columns: minmax(260px, 1fr) 1.3fr; gap: 18px; }
+.diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 24px; overflow-x: auto; }
+.gatebox { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--gate); border-radius: 4px;
+  padding: 24px; margin-top: 16px; display: grid; grid-template-columns: minmax(260px, 1fr) 1.3fr; gap: 18px; }
 .gatebox h3 { margin: 0 0 6px; font-size: 1rem; }
 .gatebox p { margin: 6px 0; font-size: .88rem; }
 .gatebox table { font-size: .82rem; }
 .gatebox td.win { color: var(--go); font-weight: 600; } .gatebox td.loss { color: var(--retry); font-weight: 600; }
 @media (max-width: 760px) { .gatebox { grid-template-columns: 1fr; } }
-footer { margin-top: 48px; color: var(--muted); font-size: .85rem; }
+footer { margin-top: 64px; border-top: 1px solid var(--line); padding-top: 24px; color: var(--muted); font: 12px/1.6 var(--mono); }
 @media (max-width: 640px) { .bar { grid-template-columns: 1fr 90px; } .bar .label { grid-column: 1 / 3; } .mix { grid-column: 1 / 3; } }
 </style>
 </head>
 <body>
 <main>
-  <h1>Autopilot</h1>
-  <p class="lede">The self-improving half of Preflight. Preflight decides whether the SO-101 robot should act; Autopilot
+  <header class="split">
+    <div>
+      <div class="tag">Preflight · the training loop</div>
+      <h1>Autopilot</h1>
+      <p class="lede">The self-improving half of Preflight. Preflight decides whether the SO-101 robot should act; Autopilot
     learns from what fails. Each cycle reads the served GR00T N1.7 policy's benchmark, finds the generalisation axis
     (new objects, tasks or environments) with the most failures a tested recipe could fix, trains it, and lets a paired
     gate decide. Nemotron on Nebius Token Factory proposes; it never scores its own result.</p>
-  <nav class="links">{{LINKS}}</nav>
+    </div>
+    <nav class="links">{{LINKS}}</nav>
+  </header>
 
   <div class="loop">{{STEPS}}</div>
 
@@ -121,21 +130,21 @@ flowchart LR
   PL --> RUN --> BM --> G3
   G3 -->|pass| HU -->|new served policy| PF
   G3 -->|"DISCARD / KEEP"| LED
-  classDef hf fill:#fdf0c8,stroke:#d99a00,color:#3d2c00
-  classDef gpu fill:#d8f0e2,stroke:#2e7d4f,color:#123d25
-  classDef tf fill:#e6defb,stroke:#6a4fc4,color:#2a1d5c
-  classDef gate fill:#fbdcd8,stroke:#b3362b,color:#5a1510
-  classDef human fill:#ecebe6,stroke:#6b6a64,color:#1d1d1b
-  classDef mem fill:#dbe9f5,stroke:#2f6f9f,color:#12324a
+  classDef hf fill:#12141c,stroke:#f2c14e,stroke-width:2px,color:#f3f4f6
+  classDef gpu fill:#12141c,stroke:#00ffaa,stroke-width:2px,color:#f3f4f6
+  classDef tf fill:#12141c,stroke:#a497ec,stroke-width:2px,color:#f3f4f6
+  classDef gate fill:#12141c,stroke:#ff6b5e,stroke-width:2px,color:#f3f4f6
+  classDef human fill:#12141c,stroke:#9aa1b1,stroke-width:2px,color:#f3f4f6
+  classDef mem fill:#12141c,stroke:#8ab4ff,stroke-width:2px,color:#f3f4f6
   class PF hf
   class IN,PL,RUN,BM gpu
   class NM tf
   class G3 gate
   class HU human
   class LED mem
-  style HF fill:transparent,stroke:#d99a00
-  style A100 fill:transparent,stroke:#2e7d4f
-  style TF fill:transparent,stroke:#6a4fc4
+  style HF fill:transparent,stroke:#f2c14e
+  style A100 fill:transparent,stroke:#00ffaa
+  style TF fill:transparent,stroke:#a497ec
 </pre></div>
   <div class="legend"><span class="hf">Hugging Face Space</span><span class="gpu">GPU host (A100)</span>
     <span class="tf">Nebius Token Factory (agent)</span><span class="gate">gate: code, not the agent</span>
@@ -159,7 +168,7 @@ flowchart LR
     <div class="human"><b>Human</b>Approves promotion; the new policy becomes Preflight's and the next reference.
       <div class="where"><code>npai autopilot approve</code></div></div>
     <div class="mem"><b>Memory</b>Every event in <code>cycles.jsonl</code>; verdicts in <code>verdicts.yaml</code>, which closes
-      families for good. <div class="where">GitHub · W&amp;B · this page</div></div>
+      families until a new refusal reopens them. <div class="where">GitHub · W&amp;B · this page</div></div>
   </div>
 
   <div class="gatebox">
@@ -229,7 +238,7 @@ flowchart LR
 </main>
 <script type="module">
 import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
-mermaid.initialize({ startOnLoad: true, theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "neutral" });
+mermaid.initialize({ startOnLoad: true, theme: "dark" });
 </script>
 </body>
 </html>
