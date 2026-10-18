@@ -82,6 +82,11 @@ ul.rules { padding-left: 20px; }
 .diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 24px; overflow-x: auto; }
 .gatebox { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--gate); border-radius: 4px;
   padding: 24px; margin-top: 16px; display: grid; grid-template-columns: minmax(260px, 1fr) 1.3fr; gap: 18px; }
+/* The worked gate example belongs to the gate component, but it is two columns wide, so rather than nest it in that
+   narrow card it stays a sibling and follows the card's own open state (hover to preview, click to pin). This has to
+   come after the rule above, which sets display at the same specificity. */
+.gatebox { display: none; }
+.arch:has(details.gate[open]) + .gatebox { display: grid; }
 .gatebox h3 { margin: 0 0 6px; font-size: 1rem; }
 .gatebox p { margin: 6px 0; font-size: .88rem; }
 .gatebox table { font-size: .82rem; }
@@ -178,7 +183,7 @@ flowchart LR
       <div class="rule">Never displaces another job on the host.</div>
       <div class="where">A100 · autoresearch-wait + heartbeat</details>
     <details class="gate"><summary><b>Benchmark + gate G3</b></summary>Same 96 scenes per suite at seed 42; paired gain on the target suites, no suite
-      worse. <div class="where">A100 · MuJoCo twin, LeRobot GR00T N1.7</details>
+      worse. The worked example below opens with this card. <div class="where">A100 · MuJoCo twin, LeRobot GR00T N1.7</details>
     <details class="human"><summary><b>Human</b></summary>Approves promotion; the new policy becomes Preflight's and the next reference.
       <div class="where"><code>npai autopilot approve</code></details>
     <details class="mem"><summary><b>Memory</b></summary>Every event in <code>cycles.jsonl</code>; verdicts in <code>verdicts.yaml</code>, which closes
