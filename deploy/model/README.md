@@ -1,7 +1,7 @@
 ---
 license: other
 license_name: nvidia-license
-license_link: LICENSE
+license_link: https://huggingface.co/chaleong/preflight-gr00t-so101-dagger-r3/blob/main/LICENSE
 base_model: hqfang/groot-so100_101
 library_name: lerobot
 pipeline_tag: robotics
@@ -70,5 +70,5 @@ uv run python scripts/benchmark.py run dagger-r3 --port 5559 --out bench.json
 
 ## Licence
 
-A derivative of NVIDIA GR00T N1.7, distributed under the [NVIDIA License](LICENSE) that comes with it: **research
+A derivative of NVIDIA GR00T N1.7, distributed under the [NVIDIA License](https://huggingface.co/chaleong/preflight-gr00t-so101-dagger-r3/blob/main/LICENSE) that comes with it: **research
 and evaluation use only** (non-commercial). The code in the GitHub repository is Apache-2.0; these weights are not.
