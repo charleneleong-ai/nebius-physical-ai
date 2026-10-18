@@ -11,7 +11,7 @@ trap 'rm -rf "$out"' EXIT
   printf '<meta name="viewport" content="width=device-width, initial-scale=1">\n</head>\n<body>\n'
   cat docs/artifact.html
   printf '\n<script type="module">\nimport mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";\n'
-  printf 'mermaid.initialize({ startOnLoad: true, theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "neutral" });\n</script>\n</body>\n</html>\n'
+  printf 'mermaid.initialize({ startOnLoad: true, theme: "dark" });\n</script>\n</body>\n</html>\n'
 } > "$out/index.html"
 cp deploy/experiments_space/README.md "$out/"
 [ -f deploy/experiments_space/thumbnail.png ] && cp deploy/experiments_space/thumbnail.png "$out/"
