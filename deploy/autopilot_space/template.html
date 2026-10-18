@@ -8,11 +8,13 @@
 :root {
   --bg: #f7f6f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e3e1da; --fill: #2f6f9f;
   --go: #1f7a4d; --retry: #b3581b; --ask: #5b4fc4; --run: #2f6f9f; --accent: #1d1d1b;
+  --hf: #d99a00; --gpu: #2e7d4f; --tf: #6a4fc4; --gate: #b3362b; --human: #6b6a64; --mem: #2f6f9f;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #a09f98; --line: #34332f; --fill: #6db3e6;
     --go: #4fbf86; --retry: #e58a4e; --ask: #9d93ff; --run: #6db3e6; --accent: #ecebe6;
+    --hf: #f2c14e; --gpu: #5cc28f; --tf: #a497ec; --gate: #f07a6c; --human: #a09f98; --mem: #6db3e6;
   }
 }
 * { box-sizing: border-box; }
@@ -63,7 +65,10 @@ table { border-collapse: collapse; width: 100%; font-size: .85rem; background: v
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 ul.rules { padding-left: 20px; }
 .arch { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 14px; }
-.arch > div { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font-size: .88rem; }
+.arch > div { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--c); border-radius: 12px; padding: 12px 14px; font-size: .88rem; }
+.hf { --c: var(--hf); } .gpu { --c: var(--gpu); } .tf { --c: var(--tf); } .gate { --c: var(--gate); } .human { --c: var(--human); } .mem { --c: var(--mem); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 0; font-size: .82rem; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; background: var(--c); }
 .arch b { display: block; } .arch .where { color: var(--muted); font-size: .8rem; margin-top: 6px; }
 .arch .rule { font-size: .8rem; margin-top: 4px; }
 .diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; overflow-x: auto; }
@@ -109,26 +114,44 @@ flowchart LR
   PL --> RUN --> BM --> G3
   G3 -->|pass| HU -->|new served policy| PF
   G3 -->|"DISCARD / KEEP"| LED
+  classDef hf fill:#fdf0c8,stroke:#d99a00,color:#3d2c00
+  classDef gpu fill:#d8f0e2,stroke:#2e7d4f,color:#123d25
+  classDef tf fill:#e6defb,stroke:#6a4fc4,color:#2a1d5c
+  classDef gate fill:#fbdcd8,stroke:#b3362b,color:#5a1510
+  classDef human fill:#ecebe6,stroke:#6b6a64,color:#1d1d1b
+  classDef mem fill:#dbe9f5,stroke:#2f6f9f,color:#12324a
+  class PF hf
+  class IN,PL,RUN,BM gpu
+  class NM tf
+  class G3 gate
+  class HU human
+  class LED mem
+  style HF fill:transparent,stroke:#d99a00
+  style A100 fill:transparent,stroke:#2e7d4f
+  style TF fill:transparent,stroke:#6a4fc4
 </pre></div>
+  <div class="legend"><span class="hf">Hugging Face Space</span><span class="gpu">GPU host (A100)</span>
+    <span class="tf">Nebius Token Factory (agent)</span><span class="gate">gate: code, not the agent</span>
+    <span class="human">human</span><span class="mem">memory</span></div>
   <div class="arch">
-    <div><b>Preflight</b>Rehearses the robot's policy in a twin of the scene; files every scene it won't clear.
+    <div class="hf"><b>Preflight</b>Rehearses the robot's policy in a twin of the scene; files every scene it won't clear.
       <div class="where">Hugging Face Space (CPU) + GPU job image</div></div>
-    <div><b>Intake</b>Sorts each refusal into the axis training could fix, or marks it unmet (perception).
+    <div class="gpu"><b>Intake</b>Sorts each refusal into the axis training could fix, or marks it unmet (perception).
       <div class="where">A100 · <code>npai autopilot intake</code></div></div>
-    <div><b>Planner</b>Ranks 5 tested recipes by failures they could win back per GPU hour; refusals first; closed
+    <div class="gpu"><b>Planner</b>Ranks 5 tested recipes by failures they could win back per GPU hour; refusals first; closed
       families out. <div class="rule">Can't run anything off the menu.</div>
       <div class="where">A100 · <code>npai autopilot plan</code></div></div>
-    <div><b>Nemotron 3 Ultra</b>Chooses one of the top three and says what would count as success.
+    <div class="tf"><b>Nemotron 3 Ultra</b>Chooses one of the top three and says what would count as success.
       <div class="rule">Never scores a result; a choice off the eligible list falls back to the ranking.</div>
       <div class="where">Nebius Token Factory</div></div>
-    <div><b>Runner</b>Launches detached, waits for free GPU memory, checks in every 30 min.
+    <div class="gpu"><b>Runner</b>Launches detached, waits for free GPU memory, checks in every 30 min.
       <div class="rule">Never displaces another job on the host.</div>
       <div class="where">A100 · autoresearch-wait + heartbeat</div></div>
-    <div><b>Benchmark + gate G3</b>Same 96 scenes per suite at seed 42; paired gain on the target suites, no suite
+    <div class="gate"><b>Benchmark + gate G3</b>Same 96 scenes per suite at seed 42; paired gain on the target suites, no suite
       worse. <div class="where">A100 · MuJoCo twin, LeRobot GR00T N1.7</div></div>
-    <div><b>Human</b>Approves promotion; the new policy becomes Preflight's and the next reference.
+    <div class="human"><b>Human</b>Approves promotion; the new policy becomes Preflight's and the next reference.
       <div class="where"><code>npai autopilot approve</code></div></div>
-    <div><b>Memory</b>Every event in <code>cycles.jsonl</code>; verdicts in <code>verdicts.yaml</code>, which closes
+    <div class="mem"><b>Memory</b>Every event in <code>cycles.jsonl</code>; verdicts in <code>verdicts.yaml</code>, which closes
       families for good. <div class="where">GitHub · W&amp;B · this page</div></div>
   </div>
 
