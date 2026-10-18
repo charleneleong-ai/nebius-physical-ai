@@ -242,6 +242,7 @@ class TestRunLoop:
          ("[08:30] round 7: serving next: /ckpt\n[08:30] round 7: DAGGER_ROUND_DONE: logs/dagger/r7/bench.json",
           ["logs/dagger/r7/bench.json"]),
          ("[05:08] round 7: fine-tuning\n[08:30] round 7: DAGGER_ROUND_DONE; serving next: x", ["logs/dagger/r7/bench.json"]),
+         ("[23:14] cotrain-r7: COTRAIN_DONE: logs/cotrain-r7/bench.json", ["logs/cotrain-r7/bench.json"]),
          ("[05:08] round 7: fine-tuning", None)],
     )  # fmt: skip
     def test_results_come_from_the_runs_last_line(self, log: str, results: list[str] | None) -> None:

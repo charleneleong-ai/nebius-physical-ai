@@ -100,6 +100,13 @@ class Action:
 RECOVERY_FAILURES = frozenset({"dropped", "pushed", "holding"})
 CONTACT_FAILURES = RECOVERY_FAILURES | {"no_contact"}
 HELD_OUT_TASKS = ("basket", "ring")
+# The recipe itself is cotrain.sh's defaults; what only the caller knows is which lineage to fine-tune and compare
+# against, which the DAgger state carries so an approved promotion feeds the next cycle. Mapping the names here rather
+# than sourcing the file inside cotrain.sh is deliberate: state.env's BASE is dagger's demos, cotrain's is a checkpoint.
+COTRAIN_CMD = (
+    ". logs/dagger/state.env && NAME=cotrain-r$ROUND BASE=$POLICY TWIN=$DATA REF_BENCH=$REF_BENCH "
+    f"WAIT_FOR='{GPU_GATE}' bash scripts/cotrain.sh"
+)
 MENU = (
     Action("dagger_round", "dagger", frozenset({"objects", "environments"}), RECOVERY_FAILURES,
            f"AUTOPILOT=1 TRAIN_WHEN='{GPU_GATE}' bash scripts/dagger_round.sh", hours=6.0),
@@ -108,8 +115,7 @@ MENU = (
       for task in HELD_OUT_TASKS),
     Action("failure_synthesis", "synthesis", frozenset({"objects"}), RECOVERY_FAILURES,
            f"STAGE=recover AUTOPILOT=1 TRAIN_WHEN='{GPU_GATE}' bash scripts/dagger_round.sh", hours=6.0),
-    Action("real_cotrain", "cotrain", frozenset({"environments"}), CONTACT_FAILURES,
-           f"WAIT_FOR='{GPU_GATE}' bash scripts/cotrain.sh", hours=6.0),
+    Action("real_cotrain", "cotrain", frozenset({"environments"}), CONTACT_FAILURES, COTRAIN_CMD, hours=6.0),
 )  # fmt: skip
 ACTIONS = {a.name: a for a in MENU}
 
@@ -347,7 +353,7 @@ def require(cycles: dict[int, dict[str, Any]], cycle: int, event: str) -> dict[s
     return cycles[cycle]
 
 
-DONE = re.compile(r"(?:TASK|DAGGER)_ROUND_DONE[:;]([^\n]*)")
+DONE = re.compile(r"[A-Z][A-Z_]*_DONE[:;]([^\n]*)")  # every recipe script ends with `<NAME>_DONE: <result paths>`
 STALL_S = 3 * 3600  # a run whose log stays silent this long counts as dead (GPU waits check in every 30 min)
 TAIL_BYTES = 65536
 
