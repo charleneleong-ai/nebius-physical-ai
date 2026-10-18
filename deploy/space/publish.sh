@@ -7,7 +7,7 @@ ctx=$(mktemp -d)
 trap 'rm -rf "$ctx"' EXIT
 cp -r src pyproject.toml uv.lock README.md "$ctx"/
 cp deploy/space/Dockerfile "$ctx"/Dockerfile
-cp deploy/space/README.md "$ctx"/README.md  # the Space's own card (front matter sets the Docker SDK and port)
+cp deploy/space/README.md deploy/space/thumbnail.png "$ctx"/  # the Space's own card (front matter sets the Docker SDK and port)
 mkdir "$ctx/gallery"
 shopt -s nullglob
 for scene in "$gallery"/*/result.json; do
