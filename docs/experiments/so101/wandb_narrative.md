@@ -1,6 +1,6 @@
 ## Highlights
 
-**Status, 14 Oct 2026 22:30 AEDT.** DAgger round 3 (retrained) is the served policy. RL-expert recoveries were tried in rounds 4 (×8, 471) and 5 (×2, 455) and are closed; v9 real-data co-training was discarded, and v11 (joint-calibrated block-stacking demos) is within noise of round 3 (472 vs 483), kept for the real arm; the DiVeR verifier (best-of-8 on round 3) is within noise and closes best-of-N. Everything is simulation; the physical SO-101 has not arrived.
+**Status, 18 Oct 2026 16:00 AEDT.** DAgger round 3 (retrained) is still the served policy, now published as [chaleong/preflight-gr00t-so101-dagger-r3](https://huggingface.co/chaleong/preflight-gr00t-so101-dagger-r3). Experiments now run through **Autopilot**, a closed loop that turns Preflight's refusals and the benchmark's failures into one training cycle at a time: Nemotron on Token Factory chooses the recipe, and a paired gate (G3) judges it. Cycle 1 (multi-task, basket trained, ring held out) taught the new task, 6 → 86 of 96, transferred nothing to ring (0 → 0) and cost stacking (441 vs 483), so it was discarded. Cycle 4, a DAgger round answering four Preflight refusals, is training. Failure-state synthesis was discarded (437). Everything is simulation; the physical SO-101 has not arrived. Live: [Preflight](https://huggingface.co/spaces/chaleong/preflight) · [Autopilot](https://huggingface.co/spaces/chaleong/autopilot) · [Preflight Experiments](https://huggingface.co/spaces/chaleong/preflight-experiments).
 
 | | Pooled (of 576) | held_out_objects (of 96) | so101-benchmark (of 50) |
 |---|---|---|---|
@@ -11,7 +11,8 @@
 - **Recoveries from the policy's own failure states are the only lever that moved the gate**: round 2 (+26 pooled over v5) and round 3 (+19 more on the retrain, which is now served).
 - **Upweighting matters more than volume**: round 1's recoveries were 3.5% of training and did nothing; ×8 (about a third) made round 2.
 - **Swapping the model or adding sampling did not help**: FLUX 3 Action LoRA 50/576; best-of-8 consensus and a trained DiVeR verifier both within noise.
-- **A residual RL expert recovers 74.0% of failure snapshots vs the scripted expert's 45.9%**, so it can feed DAgger states the script cannot recover.
+- **A residual RL expert recovers 74.0% of failure snapshots vs the scripted expert's 45.9%**, but its recoveries did not help in DAgger (rounds 4-5).
+- **A new task can be taught, task by task, at a price**: 400 demos took basket from 6 to 86 of 96, with no transfer to the held-out ring task and a 42-rehearsal stacking loss (Autopilot cycle 1).
 
 **Pooled progression (gate suites, 6 × 96)**
 
@@ -28,6 +29,8 @@
 | 12 Oct | DAgger r4 | RL expert records recoveries | 471 | 49 |
 | 13 Oct | DAgger r5 | RL recoveries weighted ×2 | 455 | 41 |
 | 14 Oct | v11 | r3 + 87 calibrated real block-stacking episodes (9%) | 472 | 57 |
+| 17 Oct | synthesis (r6) | expert recoveries from jittered failure states | 437 | 43 |
+| 18 Oct | Autopilot cycle 1 | multi-task: + 400 basket demos, ring held out (basket 6 → 86) | 441 | 47 |
 
 Companion page: [Preflight Generalisation Ledger](https://claude.ai/artifact/JUihdgT9xtqYc8a4ieJPQU). Report and experiment card: [docs/report.pdf](https://github.com/charleneleong-ai/nebius-physical-ai/blob/main/docs/report.pdf), [docs/experiment-card.md](https://github.com/charleneleong-ai/nebius-physical-ai/blob/main/docs/experiment-card.md).
 
@@ -47,6 +50,7 @@ The served policy is GR00T N1.7 (`hqfang/groot-so100_101`) fine-tuned with LeRob
 | A further DAgger round (round 3) | +17 / +19 pooled vs round 2 over two runs (the retrain passes the gate); held_out_objects +11 / +7 |
 | RL-expert recoveries (rounds 4-5) | 73% / 64% of kept states recovered vs the script's ~40%, but 471 (×8) and 455 (×2) vs 483 |
 | Residual RL on the scripted expert | snapshot recovery 45.9% → 74.0% |
+| New-task demos (Autopilot cycle 1) | trained task basket 6 → 86/96; held-out ring 0 → 0; stacking −42 pooled |
 
 **Closed / do not retry**
 
@@ -58,11 +62,12 @@ The served policy is GR00T N1.7 (`hqfang/groot-so100_101`) fine-tuned with LeRob
 - Plain PPO from scratch on privileged state: reward paid hovering; 1% recovery.
 - Uncalibrated real-data co-training (v9, 400 ArmnetBench demos of eight tasks at 23%): 373 vs 438, worse on three suites. Calibrated and restricted to block stacking (v11) it is neutral: 472 vs 483.
 - RL-expert recoveries in DAgger (rounds 4 and 5, at ×8 and ×2): 471 and 455 vs 483; new objects 49 then 41 vs 57.
+- Failure-state synthesis (round 6): 437 vs 483, worse on three suites.
+- Multi-task round at this mix (demos ×2, ~20% of episodes): teaches the trained task only and costs stacking. A gentler mix would be a new recipe.
 
 ## Next
 
-- Closed: RL-expert recoveries (rounds 4-5). Round 3 stays served.
-- Closed: best-of-N selection (medoid and DiVeR verifier).
-- Next candidates from the SOTA sweep: failure-state synthesis with the scripted expert (CARE, Recova).
-- Queued: DAgger round 4 with the residual RL expert recording recoveries; the scripted expert recovers 40% of kept states, the RL expert about 72%.
-- Deadline: hackathon submission 30 Oct 2026 17:00 UTC. The physical arm has not arrived; the repo will be updated with live results when it does.
+- Running: Autopilot cycle 4, a DAgger round (round 7) chosen by Nemotron. It answers four Preflight refusals: the new-colour task, the real photo and two hard layouts. Judged by G3 on the objects and environments suites.
+- Closed by the ledger, so Autopilot won't propose them: failure synthesis, multi-task at this mix, best-of-N, FLUX, v6, v7, RL-expert recoveries.
+- Candidates for the menu: a gentler multi-task mix, wider camera jitter on the stacking data, a wrist camera.
+- Freeze model work around 20 Oct. Submission deadline: 30 Oct 2026 17:00 UTC. The physical arm has not arrived; the repo will be updated with live results when it does.
