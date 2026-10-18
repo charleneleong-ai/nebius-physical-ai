@@ -129,7 +129,7 @@ def main(
     for suite, kind, caption in DEMOS:
         if (src := videos / suite / kind).exists():
             shutil.copy(src, out / f"{suite}_{kind}")
-            demos.append(f'<figure><video src="{suite}_{kind}" controls muted loop playsinline preload="metadata"></video>'
+            demos.append(f'<figure><video src="{suite}_{kind}" autoplay controls muted loop playsinline preload="metadata"></video>'
                          f"<figcaption>{e(caption)}</figcaption></figure>")  # fmt: skip
     requests, frames = read_jsonl(requests_log), set()
     for r in requests:
