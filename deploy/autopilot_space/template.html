@@ -62,6 +62,11 @@ figcaption { padding: 10px 12px; font-size: .85rem; }
 table { border-collapse: collapse; width: 100%; font-size: .85rem; background: var(--panel); }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 ul.rules { padding-left: 20px; }
+.arch { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 14px; }
+.arch div { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font-size: .88rem; }
+.arch b { display: block; } .arch .where { color: var(--muted); font-size: .8rem; margin-top: 6px; }
+.arch .rule { font-size: .8rem; margin-top: 4px; }
+.diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; overflow-x: auto; }
 footer { margin-top: 48px; color: var(--muted); font-size: .85rem; }
 @media (max-width: 640px) { .bar { grid-template-columns: 1fr 90px; } .bar .label { grid-column: 1 / 3; } .mix { grid-column: 1 / 3; } }
 </style>
@@ -76,6 +81,56 @@ footer { margin-top: 48px; color: var(--muted); font-size: .85rem; }
   <nav class="links">{{LINKS}}</nav>
 
   <div class="loop">{{STEPS}}</div>
+
+  <h2 id="architecture">Architecture: the agentic loop</h2>
+  <p class="stat">An agent proposes; code decides. The only free choice the agent makes is which tested recipe runs
+    next; everything that could flatter a result (the benchmark, the gate, promotion) is outside its reach.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  subgraph HF["Hugging Face Spaces"]
+    PF["Preflight<br/>perception + trust gate"]
+  end
+  subgraph A100["GPU host (A100)"]
+    IN["intake<br/>refusals to requests"]
+    PL["planner<br/>rank the menu"]
+    RUN["runner<br/>wait for GPU, train, heartbeat"]
+    BM["benchmark<br/>MuJoCo twin + GR00T, 96 paired / suite"]
+    G3{"gate G3<br/>paired McNemar"}
+  end
+  subgraph TF["Nebius Token Factory"]
+    NM["Nemotron 3 Ultra<br/>chooses 1 of top 3"]
+  end
+  LED[("verdicts.yaml<br/>closed families")]
+  HU(["human<br/>approves promotion"])
+  PF -->|"RETRY / ASK_HUMAN"| IN --> PL
+  BM -->|"served policy's failures"| PL
+  LED --> PL
+  PL -->|"eligible recipes"| NM -->|"choice + rationale"| PL
+  PL --> RUN --> BM --> G3
+  G3 -->|pass| HU -->|new served policy| PF
+  G3 -->|"DISCARD / KEEP"| LED
+</pre></div>
+  <div class="arch">
+    <div><b>Preflight</b>Rehearses the robot's policy in a twin of the scene; files every scene it won't clear.
+      <div class="where">Hugging Face Space (CPU) + GPU job image</div></div>
+    <div><b>Intake</b>Sorts each refusal into the axis training could fix, or marks it unmet (perception).
+      <div class="where">A100 · <code>npai autopilot intake</code></div></div>
+    <div><b>Planner</b>Ranks 5 tested recipes by failures they could win back per GPU hour; refusals first; closed
+      families out. <div class="rule">Can't run anything off the menu.</div>
+      <div class="where">A100 · <code>npai autopilot plan</code></div></div>
+    <div><b>Nemotron 3 Ultra</b>Chooses one of the top three and says what would count as success.
+      <div class="rule">Never scores a result; a choice off the eligible list falls back to the ranking.</div>
+      <div class="where">Nebius Token Factory</div></div>
+    <div><b>Runner</b>Launches detached, waits for free GPU memory, checks in every 30 min.
+      <div class="rule">Never displaces another job on the host.</div>
+      <div class="where">A100 · autoresearch-wait + heartbeat</div></div>
+    <div><b>Benchmark + gate G3</b>Same 96 scenes per suite at seed 42; paired gain on the target suites, no suite
+      worse. <div class="where">A100 · MuJoCo twin, LeRobot GR00T N1.7</div></div>
+    <div><b>Human</b>Approves promotion; the new policy becomes Preflight's and the next reference.
+      <div class="where"><code>npai autopilot approve</code></div></div>
+    <div><b>Memory</b>Every event in <code>cycles.jsonl</code>; verdicts in <code>verdicts.yaml</code>, which closes
+      families for good. <div class="where">GitHub · W&amp;B · this page</div></div>
+  </div>
 
   <h2>Where the policy fails now</h2>
   <p class="stat">The reference the latest cycle was planned against: 96 paired rehearsals per suite in the randomised
@@ -115,5 +170,9 @@ footer { margin-top: 48px; color: var(--muted); font-size: .85rem; }
   <footer>Built {{STATUS}} from the loop's own log. Simulation only: the physical SO-101 has not arrived, so every
     rehearsal is in the MuJoCo twin.</footer>
 </main>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+mermaid.initialize({ startOnLoad: true, theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "neutral" });
+</script>
 </body>
 </html>

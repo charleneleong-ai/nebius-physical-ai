@@ -8,6 +8,30 @@
 > policies, or process sensor data at scale, and Nebius Serverless Endpoints to serve real-time
 > inference when needed.
 
+**Live:** [Preflight](https://huggingface.co/spaces/chaleong/preflight) (the gate) ·
+[Autopilot](https://huggingface.co/spaces/chaleong/autopilot) (the loop that retrains on what Preflight refuses) ·
+[Preflight Experiments](https://huggingface.co/spaces/chaleong/preflight-experiments) (every experiment and verdict) ·
+[our checkpoint](https://huggingface.co/chaleong/preflight-gr00t-so101-dagger-r3) ·
+[HF collection](https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e) ·
+[W&B report](https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==)
+
+## Autopilot: learning from what Preflight refuses
+
+Preflight decides whether the robot should act; [Autopilot](src/nebius_physical_ai/autopilot.py) turns what it refuses
+into the next training cycle. Every scene Preflight won't clear becomes a learning request
+(`npai autopilot intake`); the planner ranks a fixed menu of tested recipes by the failures each could win back,
+requests first, and **Nemotron on Token Factory** chooses one of the top three. The run trains on the A100, and a
+paired gate (G3: gain on the target suites, no suite worse) decides; a human approves promotion. Cycle 1 taught a task
+the policy had never seen (eye drops into a basket, 6 → 86 of 96) but transferred nothing to the held-out ring task and
+cost stacking, so the gate discarded it; cycle 4, a DAgger round answering four Preflight refusals, is training.
+
+```bash
+npai autopilot intake ~/gallery --scenes ~/gallery/scenes.json
+npai autopilot plan --bench logs/dagger/r3/bench.json --bench logs/held-out-tasks/bench.json
+npai autopilot launch <cycle> && npai autopilot status
+npai autopilot judge <cycle> <candidate bench files>
+```
+
 ## How Preflight uses Nebius and NVIDIA
 
 A phone photographs the workspace, the scene is rebuilt as a MuJoCo twin of the SO-101 arm, a GR00T policy rehearses
@@ -123,7 +147,9 @@ and running counts in W&B, so a suite that takes hours on a shared GPU is visibl
 This repository's code is [Apache-2.0](LICENSE). The model weights are not covered by it:
 
 - **v5 and its base** derive from [nvidia/GR00T-N1.7-3B](https://huggingface.co/nvidia/GR00T-N1.7-3B) and are under the
-  NVIDIA licence that comes with it, which restricts use to research and evaluation. They are not redistributed here.
+  NVIDIA licence that comes with it, which restricts use to research and evaluation. The served checkpoint, DAgger
+  round 3, is published under that licence (with a copy of it) as
+  [chaleong/preflight-gr00t-so101-dagger-r3](https://huggingface.co/chaleong/preflight-gr00t-so101-dagger-r3).
 - **v1 to v4c** derive from GR00T N1.6 via the community checkpoint
   [quangnd58/GR00T-N1.6-3B-so101-multitask](https://huggingface.co/quangnd58/GR00T-N1.6-3B-so101-multitask), under the
   terms of its base model.

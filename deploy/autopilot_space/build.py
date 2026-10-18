@@ -20,6 +20,7 @@ LINKS = {
     "Hugging Face collection": "https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e",
     "Preflight Space": "https://huggingface.co/spaces/chaleong/preflight",
     "All experiments": "https://huggingface.co/spaces/chaleong/preflight-experiments",
+    "Our checkpoint": "https://huggingface.co/chaleong/preflight-gr00t-so101-dagger-r3",
     "Code (GitHub)": "https://github.com/charleneleong-ai/nebius-physical-ai",
     "Experiments (W&B report)": "https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==",
 }
