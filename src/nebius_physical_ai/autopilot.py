@@ -103,9 +103,12 @@ HELD_OUT_TASKS = ("basket", "ring")
 # The recipe itself is cotrain.sh's defaults; what only the caller knows is which lineage to fine-tune and compare
 # against, which the DAgger state carries so an approved promotion feeds the next cycle. Mapping the names here rather
 # than sourcing the file inside cotrain.sh is deliberate: state.env's BASE is dagger's demos, cotrain's is a checkpoint.
+# TWIN is the round's aggregate (base demos plus its recoveries upweighted), not state.env's DATA, which is the base
+# demos alone: cycle 5 fine-tuned the round-3 policy on data without the recoveries it was trained on and forgot them
+# (clean_many 88 -> 64, real_1_pomade_tin 87 -> 62, both p=0.000). cotrain.sh stops if the aggregate is not on disk.
 COTRAIN_CMD = (
-    ". logs/dagger/state.env && NAME=cotrain-r$ROUND BASE=$POLICY TWIN=$DATA REF_BENCH=$REF_BENCH "
-    f"WAIT_FOR='{GPU_GATE}' bash scripts/cotrain.sh"
+    ". logs/dagger/state.env && NAME=cotrain-r$ROUND BASE=$POLICY TWIN=$HOME/data/dagger_agg_r${ROUND}_v30 "
+    f"REF_BENCH=$REF_BENCH WAIT_FOR='{GPU_GATE}' bash scripts/cotrain.sh"
 )
 MENU = (
     Action("dagger_round", "dagger", frozenset({"objects", "environments"}), RECOVERY_FAILURES,
@@ -113,8 +116,10 @@ MENU = (
     *(Action(f"task_round:{task}", "multitask", frozenset({"tasks"}), CONTACT_FAILURES,
              f"TASK={task} bash scripts/task_round.sh", hours=5.0, trains=f"held_out_task_{task}")
       for task in HELD_OUT_TASKS),
-    Action("failure_synthesis", "synthesis", frozenset({"objects"}), RECOVERY_FAILURES,
-           f"STAGE=recover AUTOPILOT=1 TRAIN_WHEN='{GPU_GATE}' bash scripts/dagger_round.sh", hours=6.0),
+    # failure_synthesis is not here: it needs `dagger.py synthesise`, which lives on the unmerged synthesis branch
+    # (efca8d3). The entry that was here passed STAGE=recover, a `dagger.py` subcommand and not one of
+    # dagger_round.sh's stages, so it skipped harvest and aggregate and trained on a dataset nothing had built:
+    # cycles 6 and 7 each waited hours for the GPU and then died in 13 seconds. Restore it with the branch.
     Action("real_cotrain", "cotrain", frozenset({"environments"}), CONTACT_FAILURES, COTRAIN_CMD, hours=6.0),
 )  # fmt: skip
 ACTIONS = {a.name: a for a in MENU}
@@ -255,10 +260,11 @@ class Planner:
     budget_hours: float
     chooser: Chooser | None
     requests: list[LearningRequest] = field(default_factory=list)
+    menu: tuple[Action, ...] = MENU  # injectable so a test can rank a menu of its own rather than whatever ships
 
     def candidates(self, cells: dict[str, Cell]) -> list[Candidate]:
         ranked = []
-        for action in MENU:
+        for action in self.menu:
             reach = action.reach(cells)
             answers = [r.source for r in self.requests if action.axes & set(r.axes)]
             # a closed family comes back only for refusals it was never tried on, and ranks after open recipes

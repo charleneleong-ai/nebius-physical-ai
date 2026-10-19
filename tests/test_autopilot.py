@@ -7,6 +7,8 @@ from typer.testing import CliRunner
 
 from nebius_physical_ai.autopilot import (
     ACTIONS,
+    MENU,
+    RECOVERY_FAILURES,
     REQUESTS,
     Action,
     Candidate,
@@ -77,10 +79,13 @@ def test_closed_families_needs_every_row_discarded(tmp_path: Path) -> None:
 
 class TestPlanner:
     def test_ranks_by_reach_per_hour_and_explains_exclusions(self, ref: dict[str, Cell]) -> None:
-        ranked = Planner({"synthesis": "437"}, {"task_round:ring"}, budget_hours=5.5, chooser=None).candidates(ref)
+        closed = Action("shelved_recipe", "shelved", frozenset({"objects"}), RECOVERY_FAILURES, "true", 1.0)
+        ranked = Planner(
+            {"shelved": "437"}, {"task_round:ring"}, budget_hours=5.5, chooser=None, menu=(*MENU, closed)
+        ).candidates(ref)
         by_name = {c.action.name: c for c in ranked}
         assert ranked[0].action.name == "task_round:basket" and by_name["task_round:basket"].reach == 177
-        assert "closed" in by_name["failure_synthesis"].excluded
+        assert "closed" in by_name["shelved_recipe"].excluded
         assert "already judged" in by_name["task_round:ring"].excluded
         assert "budget" in by_name["dagger_round"].excluded
         assert [c.excluded is None for c in ranked] == sorted([c.excluded is None for c in ranked], reverse=True)
@@ -212,14 +217,16 @@ class TestLearningRequests:
 
     def test_a_closed_family_reopens_only_for_requests_and_ranks_after_open_ones(self, ref: dict[str, Cell]) -> None:
         new_colour = learning_request("new_task", record("RETRY", successes=8, n=32), TaskSpec("yellow", "red"))
-        closed = {"synthesis": "437/576, worse on three suites"}
-        quiet = {c.action.name: c for c in Planner(closed, set(), 8.0, None).candidates(ref)}
-        assert "closed" in quiet["failure_synthesis"].excluded
-        ranked = Planner(closed, set(), 8.0, None, [new_colour]).candidates(ref)
+        closed = {"shelved": "437/576, worse on three suites"}
+        menu = (*MENU, Action("shelved_recipe", "shelved", frozenset({"objects"}), RECOVERY_FAILURES, "true", 1.0))
+        quiet = {c.action.name: c for c in Planner(closed, set(), 8.0, None, menu=menu).candidates(ref)}
+        assert "closed" in quiet["shelved_recipe"].excluded
+        ranked = Planner(closed, set(), 8.0, None, [new_colour], menu=menu).candidates(ref)
         names = [c.action.name for c in ranked]
-        assert names.index("dagger_round") < names.index("failure_synthesis")
-        synthesis = ranked[names.index("failure_synthesis")]
-        assert synthesis.excluded is None and synthesis.reopened == closed["synthesis"]
+        # reopened only by the unanswered refusal, and behind every open recipe despite the cheapest hours on the menu
+        assert names.index("dagger_round") < names.index("shelved_recipe")
+        shelved = ranked[names.index("shelved_recipe")]
+        assert shelved.excluded is None and shelved.reopened == closed["shelved"]
 
     def test_intake_files_each_refused_scene_once(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(tmp_path)

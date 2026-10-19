@@ -53,6 +53,9 @@ if [ "$REAL_FILTER" = 1 ]; then
   $LR/python scripts/real_mix.py filter "$REAL" "$TWIN" "${REAL}_in_workspace" || die "filter failed"
   REAL=${REAL}_in_workspace
 fi
+# Fine-tuning a served policy on a set that drops the recoveries it was trained on makes it forget them, and the
+# run looks healthy the whole way: train it on what it was trained on, or stop before spending the GPU.
+[ -f "$TWIN/meta/info.json" ] || die "no twin dataset at $TWIN (dagger_round.sh builds the round aggregate)"
 say "mixing at real share $REAL_SHARE"
 rm -rf "$MIX"
 $LR/python scripts/real_mix.py mix "$TWIN" "$REAL" "$MIX" --real-share "$REAL_SHARE" ${EXTRA:+--extra "$EXTRA"} || die "mix failed"
