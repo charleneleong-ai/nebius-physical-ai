@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -282,3 +283,32 @@ class TestRunLoop:
         for event, cycle, *verdict in events:
             log.append(event, cycle, action="dagger_round", **({"verdict": verdict[0]} if verdict else {}))
         assert next_step(log.cycles(), flight, launched, max_cycles=2) == step
+
+
+class TestMenuMatchesItsScripts:
+    """failure_synthesis named a stage dagger_round.sh does not have, and two cycles each burned a GPU wait to find
+    out. A recipe is a string until something runs it, so check the two couplings a string can get wrong."""
+
+    @staticmethod
+    def script_of(action: Action) -> tuple[Path, str]:
+        found = re.search(r"bash (scripts/\S+\.sh)", action.command)
+        assert found, f"{action.name}: no script in {action.command!r}"
+        path = Path(found.group(1))
+        assert path.exists(), f"{action.name}: {path} does not exist"
+        return path, path.read_text()
+
+    @pytest.mark.parametrize("action", MENU, ids=lambda a: a.name)
+    def test_every_variable_a_recipe_sets_is_one_its_script_reads(self, action: Action) -> None:
+        path, source = self.script_of(action)
+        for name in re.findall(r"\b([A-Z][A-Z0-9_]*)=", action.command):
+            assert f"${{{name}" in source or f"${name}" in source, f"{action.name}: {path} never reads ${name}"
+
+    def test_a_stage_a_recipe_names_must_be_one_its_script_branches_on(self) -> None:
+        # the deleted entry, verbatim: STAGE=recover is a dagger.py subcommand, and dagger_round.sh branches on
+        # harvest and aggregate, so it skipped building the dataset and died on a Hub 404
+        source = Path("scripts/dagger_round.sh").read_text()
+        assert set(re.findall(r'"\$STAGE" = (\w+)', source)) == {"harvest", "aggregate"}
+        for action in MENU:
+            if stage := re.search(r"\bSTAGE=(\S+)", action.command):
+                _, source = self.script_of(action)
+                assert stage.group(1) in re.findall(r'"\$STAGE" = (\w+)', source), action.name

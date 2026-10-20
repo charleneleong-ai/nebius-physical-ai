@@ -365,6 +365,14 @@ class CycleLog:
         return folded
 
 
+def action_of(cycle: dict[str, Any], n: int) -> Action:
+    """The recipe a logged cycle ran, refused by name when the menu no longer carries it (a deleted entry, say),
+    because inside `run` a bare KeyError takes the whole unattended loop down with it."""
+    if (name := cycle["action"]) not in ACTIONS:
+        raise typer.BadParameter(f"cycle {n} ran '{name}', which is no longer on the menu")
+    return ACTIONS[name]
+
+
 def tried(cycles: dict[int, dict[str, Any]], refs: list[str]) -> set[str]:
     """Actions already judged against the same reference benchmark: rerunning one only re-measures it."""
     return {c["action"] for c in cycles.values() if c.get("refs") == refs and "verdict" in c}
@@ -507,7 +515,7 @@ def launch(
     """Start a planned cycle detached with a heartbeat; one cycle in flight at a time."""
     log = CycleLog()
     cycles = log.cycles()
-    action = ACTIONS[require(cycles, cycle, "planned")["action"]]
+    action = action_of(require(cycles, cycle, "planned"), cycle)
     if dry_run:
         console.print(action.command)
         return
@@ -543,7 +551,7 @@ def judge_cycle(
     """Score a finished cycle against its reference with the G3 gate; PROMOTE still waits for `approve`."""
     log = CycleLog()
     planned = require(log.cycles(), cycle, "launched")
-    result = judge(ACTIONS[planned["action"]], merged_cells([Path(p) for p in planned["refs"]]), merged_cells(results))
+    result = judge(action_of(planned, cycle), merged_cells([Path(p) for p in planned["refs"]]), merged_cells(results))
     log.append("judged", cycle, results=[str(p) for p in results], **asdict(result))
     for suite, line in result.suites.items():
         console.print(f"  {suite}: {line}")
@@ -632,8 +640,10 @@ def run(
                     return
             case "await_approval" | "stop":
                 return
-            case _:
+            case "wait":
                 time.sleep(every_min * 60)
+            case _:  # next_step returns a closed set; a new one must not quietly become a sleep
+                raise AssertionError(f"unknown step {step!r}")
 
 
 @app.command()
