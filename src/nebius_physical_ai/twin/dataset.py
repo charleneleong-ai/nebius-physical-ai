@@ -84,9 +84,10 @@ class LeRobotWriter:
         self.total_frames += n
 
     @staticmethod
-    def write_video(images: list[np.ndarray], path: Path) -> None:
+    def write_video(images: list[np.ndarray], path: Path, fps: int = CONTROL_HZ) -> None:
+        """RGB (H, W, 3) frames as an H.264 mp4."""
         with av.open(str(path), "w") as container:
-            stream = container.add_stream("libx264", rate=CONTROL_HZ)
+            stream = container.add_stream("libx264", rate=fps)
             stream.height, stream.width = images[0].shape[:2]
             stream.pix_fmt = "yuv420p"
             for image in images:
