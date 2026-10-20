@@ -3,7 +3,7 @@ import os
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Protocol, Self
 
 import mujoco
 import numpy as np
@@ -184,6 +184,12 @@ class TwinRenderer:
         self.renderer.close()
 
 
+class Fixture(Protocol):
+    name: str
+
+    def add(self, world: mujoco.MjsBody, layout: TwinLayout) -> None: ...
+
+
 @dataclass
 class Twin:
     """MuJoCo SO-101 scene rebuilt from perceived objects on the mat."""
@@ -191,6 +197,7 @@ class Twin:
     model: mujoco.MjModel
     data: mujoco.MjData
     blocks: dict[str, DetectedObject]
+    fixtures: tuple[Fixture, ...] = ()  # `twin.tasks`: static or free bodies beside the blocks, never re-sized
     renderers: dict[tuple[int, int], TwinRenderer] = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -202,8 +209,10 @@ class Twin:
         start_pose: np.ndarray | None = None,
         so101_xml: Path = SO101_XML,
         look: SceneLook | None = None,
+        fixtures: tuple[Fixture, ...] = (),
     ) -> "Twin":
-        """Blocks are named by label (suffixed when a colour repeats), so task checks don't depend on order."""
+        """Blocks are named by label (suffixed when a colour repeats), so task checks don't depend on order. `fixtures`
+        add their own bodies (a basket, a peg, a ring) before the scene is compiled."""
         layout, look = layout or TwinLayout(), look or SceneLook()
         spec = mujoco.MjSpec.from_file(str(so101_xml))
         for material in spec.materials:
@@ -224,9 +233,11 @@ class Twin:
         blocks = dict(zip(cls.block_names(objects), objects))
         for name, obj in blocks.items():
             cls.add_block(world, name, obj, layout, physics or BlockPhysics())
+        for fixture in fixtures:
+            fixture.add(world, layout)
         world.add_camera(name="front_cam", **(look.camera or layout.front_camera_spec()))  # checkpoint's "front"
         model = spec.compile()
-        twin = cls(model, mujoco.MjData(model), blocks)
+        twin = cls(model, mujoco.MjData(model), blocks, tuple(fixtures))
         mujoco.mj_forward(model, twin.data)  # poses (block_pos, cameras) are valid before the first step
         if start_pose is not None:
             twin.reset_arm(start_pose)
@@ -309,10 +320,14 @@ class Twin:
             body.quat[:] = model.qpos0[adr + 3 : adr + 7] = g.quat
         mujoco.mj_setConst(model, data)  # rebuild constants derived from the edited mass/size
         mujoco.mj_resetData(model, data)  # start from the edited qpos0
-        twin = type(self)(model, data, blocks)
+        twin = type(self)(model, data, blocks, self.fixtures)
         twin.reset_arm(start_pose)
         twin.settle(0.3)
         return twin
+
+    @property
+    def fixture_names(self) -> list[str]:
+        return [f.name for f in self.fixtures]
 
     def arm_qpos(self) -> np.ndarray:
         return np.array([self.data.joint(j).qpos[0] for j in ARM_JOINTS])
@@ -343,8 +358,9 @@ class Twin:
         mujoco.mj_step(self.model, self.data, nstep=round(seconds / self.model.opt.timestep))
 
     def block_pos(self, name: str) -> np.ndarray:
-        if name not in self.blocks:  # repeated colours are suffixed (red_0, red_1); fail with the real names
-            raise KeyError(f"no block {name!r}; the twin has {list(self.blocks)}")
+        """A block's or a fixture's position (world frame, metres)."""
+        if name not in self.blocks and name not in self.fixture_names:  # repeated colours are suffixed (red_0, red_1)
+            raise KeyError(f"no block {name!r}; the twin has {list(self.blocks)} and fixtures {self.fixture_names}")
         return self.data.body(name).xpos.copy()
 
     def project(self, world: np.ndarray, camera: str, size: tuple[int, int] = (480, 640)) -> np.ndarray:
@@ -359,7 +375,7 @@ class Twin:
 
     def hide_arm(self) -> None:
         """Make everything but the blocks and the floor invisible, for comparing objects with an arm-free photo."""
-        blocks = {self.model.body(name).id for name in self.blocks}
+        blocks = {self.model.body(name).id for name in (*self.blocks, *self.fixture_names)}
         for g in range(self.model.ngeom):
             if self.model.geom_bodyid[g] not in blocks and self.model.geom_type[g] != mujoco.mjtGeom.mjGEOM_PLANE:
                 self.model.geom_rgba[g, 3] = 0.0

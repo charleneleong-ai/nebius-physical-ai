@@ -45,7 +45,7 @@ from nebius_physical_ai.twin.rehearsal import (
     Perturbation,
     Variant,
 )
-from nebius_physical_ai.twin.rollout import CONTROL_HZ, FailureWatch, StackCheck
+from nebius_physical_ai.twin.rollout import CONTROL_HZ, Check, FailureWatch
 from nebius_physical_ai.twin.scene import Twin, TwinLayout, TwinRenderer
 
 CHECKPOINT = "black-forest-labs/flux-3-action-so101"
@@ -121,7 +121,7 @@ class FluxDriver:
 
 
 def rollout(
-    driver: FluxDriver, twin: Twin, check: StackCheck, prompt: str, renderer: TwinRenderer, record: bool = False
+    driver: FluxDriver, twin: Twin, check: Check, prompt: str, renderer: TwinRenderer, record: bool = False
 ) -> tuple[str, list[np.ndarray]]:
     """(empty string on success, else how it failed (FailureWatch); top-camera frames every FRAME_EVERY ticks)."""
     driver.reset()
@@ -144,13 +144,13 @@ def score_suite(driver: FluxDriver, suite: Suite, layout: TwinLayout) -> Cell:
     for case in suite.cases:
         case_layout, rng = case.layout(layout), np.random.default_rng(SEED)
         variants = [Variant.sample(case.objects, Perturbation(), rng) for _ in range(suite.variants)]
-        template = Twin.from_objects(case.objects, case_layout)
+        template = Twin.from_objects(case.objects, case_layout, fixtures=case.fixtures)
         renderer = TwinRenderer(template.model, REHEARSAL_IMAGE_SIZE)
         try:
             for i, v in enumerate(variants):
                 twin = template.variant(v.objects, case_layout, v.physics, v.start_pose)
                 record = len(examples) < 2
-                check = StackCheck(case.pick, case.place)
+                check = case.success()
                 failure, frames = rollout(driver, twin, check, case.prompt, renderer, record)
                 kind = "failure" if failure else "success"
                 if frames:

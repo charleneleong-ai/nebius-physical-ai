@@ -7,8 +7,8 @@ import numpy as np
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import Policy
 from nebius_physical_ai.twin.expert import start_pose
-from nebius_physical_ai.twin.rollout import BatchRollout, StackCheck
-from nebius_physical_ai.twin.scene import BlockPhysics, SceneLook, Twin, TwinLayout, TwinRenderer
+from nebius_physical_ai.twin.rollout import BatchRollout, Check
+from nebius_physical_ai.twin.scene import BlockPhysics, Fixture, SceneLook, Twin, TwinLayout, TwinRenderer
 
 # Successes after ~10.7 s of robot time are rare slow recoveries (3.5% in the first sweep); capping there cuts a
 # batch's wall time by a third because every batch waits for its slowest twin.
@@ -118,7 +118,7 @@ class Rehearsal:
         self,
         policy: Policy,
         task: str,
-        success: StackCheck,
+        success: Check,
         layout: TwinLayout,
         perturbation: Perturbation | None = None,
         batch_size: int = 16,
@@ -126,9 +126,12 @@ class Rehearsal:
         image_size: tuple[int, int] = REHEARSAL_IMAGE_SIZE,
         record_examples: bool = True,
         look: SceneLook | None = None,
+        fixtures: tuple[Fixture, ...] = (),
     ) -> None:
-        """`look` (floor texture, wrist camera) applies to every variant: they copy one compiled template."""
+        """`look` (floor texture, wrist camera) and `fixtures` (a basket, a peg) apply to every variant: they copy one
+        compiled template, and fixtures are not perturbed."""
         self.policy, self.task, self.success, self.layout, self.look = policy, task, success, layout, look
+        self.fixtures = fixtures
         self.perturbation = perturbation or Perturbation()
         self.batch_size, self.max_steps, self.image_size = batch_size, max_steps, image_size
         self.record_examples = record_examples
@@ -146,7 +149,9 @@ class Rehearsal:
         perturbation = perturbation or self.perturbation
         record_examples = self.record_examples if record_examples is None else record_examples
         variants = [Variant.sample(objects, perturbation, rng) for _ in range(n)]
-        template = Twin.from_objects(objects, self.layout, look=self.look)  # compiled once; variants copy and edit it
+        template = Twin.from_objects(
+            objects, self.layout, look=self.look, fixtures=self.fixtures
+        )  # compiled once; variants copy and edit it
         renderer = TwinRenderer(template.model, self.image_size)  # variants share its meshes
         outcomes, examples = [], {}
         try:
