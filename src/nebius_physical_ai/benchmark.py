@@ -223,7 +223,6 @@ def solvable_cases(
     name: str,
     draw: Callable[[], Case],
     layout: TwinLayout,
-    camera: dict[str, Any] | None,
     count: int = GENERATED_CASES,
 ) -> tuple[list[Case], int]:
     """Up to `count` cases from `draw` that the expert solves, and how many draws it did not."""
@@ -295,7 +294,7 @@ def held_out_task_suites(layout: TwinLayout) -> list[Suite]:
         ("held_out_task_ring", 31, "ring", "ring over a peg (ArmnetBench ring_insert)"),
     ):
         scenes = TaskScenes(layout, np.random.default_rng([SEED, stream]), camera)
-        cases, rejected = solvable_cases(name, getattr(scenes, kind), layout, camera)
+        cases, rejected = solvable_cases(name, getattr(scenes, kind), layout)
         suites.append(Suite(name, "held_out_tasks", cases, note, rejected))
     return suites
 
@@ -327,7 +326,7 @@ def held_out_suites(real: list[DetectedObject], layout: TwinLayout) -> list[Suit
         )
         sampler = SceneSampler(layout, seed=[SEED, seed])
         draw = episode_draw(randomizer, sampler, reals.get(place_on) if place_on else None)
-        cases, rejected = solvable_cases(name, lambda: Case("", *draw(), camera=camera), layout, camera)
+        cases, rejected = solvable_cases(name, lambda: Case("", *draw(), camera=camera), layout)
         return Suite(name, "held_out", cases, note, rejected)
 
     suites = [
@@ -359,7 +358,7 @@ def diagnostic_suites(layout: TwinLayout, real: list[DetectedObject] | None = No
         def draw() -> tuple[list[DetectedObject], str, str, str]:
             return add(randomizer, randomizer.standard_objects(sampler)), "blue", "red", STACK_TASK
 
-        cases, rejected = solvable_cases(name, lambda: Case("", *draw(), camera=camera), layout, camera)
+        cases, rejected = solvable_cases(name, lambda: Case("", *draw(), camera=camera), layout)
         return Suite(name, "diagnostic", cases, f"{name.removesuffix('_many')} in 12 random scenes", rejected)
 
     def keep(_: SceneRandomizer, objects: list[DetectedObject]) -> list[DetectedObject]:

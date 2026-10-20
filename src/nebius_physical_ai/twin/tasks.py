@@ -14,11 +14,7 @@ import mujoco
 import numpy as np
 
 from nebius_physical_ai.twin.expert import (
-    GRIP_CLOSED,
-    GRIP_OPEN,
-    PICK_HOVER_Z,
     PLACE_HOVER_Z,
-    REST_POSE,
     PickPlaceExpert,
     Segment,
 )
@@ -151,20 +147,4 @@ class TaskExpert(PickPlaceExpert):
 
     def waypoints(self) -> list[Segment]:
         pick, release = self.check.expert_points(self.twin)
-        hover_z = max(PLACE_HOVER_Z, release[2] + 0.01)
-        targets = {
-            "pick_hover": np.array([pick[0], pick[1], PICK_HOVER_Z]),
-            "pick": pick,
-            "place_hover": np.array([release[0], release[1], hover_z]),
-            "place": release,
-        }
-        q, joints = REST_POSE, {}
-        for name, target in targets.items():
-            joints[name] = q = self.solve(target, name, q)
-        return [
-            *self.grasp(joints["pick_hover"], joints["pick"]),
-            (joints["place_hover"], GRIP_CLOSED, 1.5),
-            (joints["place"], GRIP_CLOSED, 1.0),
-            (joints["place"], GRIP_OPEN, 0.8),
-            (joints["place_hover"], GRIP_OPEN, 1.0),
-        ]
+        return self.pick_place(pick, release, max(PLACE_HOVER_Z, release[2] + 0.01))

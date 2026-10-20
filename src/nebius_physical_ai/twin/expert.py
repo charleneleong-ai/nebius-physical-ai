@@ -91,11 +91,15 @@ class PickPlaceExpert:
         pick = self.twin.block_pos(self.pick)
         place = self.twin.block_pos(self.place)
         stack_z = place[2] + self.twin.geometry(self.place).half[2] + self.twin.geometry(self.pick).half[2]
+        return self.pick_place(pick, np.array([place[0], place[1], stack_z + 0.005]))
+
+    def pick_place(self, pick: np.ndarray, release: np.ndarray, hover_z: float = PLACE_HOVER_Z) -> list[Segment]:
+        """Lift from `pick`, carry over `hover_z` and open at `release`: the grasp sequence every task shares."""
         targets = {
             "pick_hover": np.array([pick[0], pick[1], PICK_HOVER_Z]),
             "pick": pick,
-            "place_hover": np.array([place[0], place[1], PLACE_HOVER_Z]),
-            "place": np.array([place[0], place[1], stack_z + 0.005]),
+            "place_hover": np.array([release[0], release[1], hover_z]),
+            "place": release,
         }
         q, joints = REST_POSE, {}
         for name, target in targets.items():
