@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from nebius_physical_ai import benchmark
 from nebius_physical_ai.benchmark import EYE_DROPS_MM, held_out_task_suites
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.twin.expert import start_pose
@@ -41,17 +42,21 @@ class TestTasks:
         before, after, _ = solve([], (ring, peg), PegCheck(ring, peg, angle))
         assert (before, after) == (False, True)
 
-    def test_fixtures_survive_variants_and_report_positions(self) -> None:
+    def test_fixtures_stay_put_across_variants(self) -> None:
+        # block_pos raises for a name the twin does not hold, so this also covers the fixture surviving at all.
         basket = Basket(MID_X + 55, REACH_Y)
-        twin = Twin.from_objects([drops(MID_X - 50)], LAYOUT, fixtures=(basket,))
-        copy = twin.variant(list(twin.blocks.values()), LAYOUT, BlockPhysics(), start_pose(np.random.default_rng(1)))
-        np.testing.assert_allclose(copy.block_pos("basket"), twin.block_pos("basket"))
-        assert copy.fixture_names == ["basket"]
+        with Twin.from_objects([drops(MID_X - 50)], LAYOUT, fixtures=(basket,)) as twin:
+            copy = twin.variant(
+                list(twin.blocks.values()), LAYOUT, BlockPhysics(), start_pose(np.random.default_rng(1))
+            )
+            np.testing.assert_allclose(copy.block_pos("basket"), twin.block_pos("basket"))
 
 
 def test_held_out_task_suites_keep_only_solvable_scenes() -> None:
     suites = held_out_task_suites(LAYOUT)
     assert [s.name for s in suites] == ["held_out_task_basket", "held_out_task_ring"]
+    start = start_pose(np.random.default_rng(benchmark.SEED))
     for suite in suites:
-        assert len(suite.cases) == 12 and suite.n == 96
-        assert all(case.check is not None and case.fixtures for case in suite.cases)
+        assert len(suite.cases) == benchmark.GENERATED_CASES
+        # the point of the suite: a policy miss means the policy, because the scripted expert can do every scene kept
+        assert benchmark.expert_solves(suite.cases[0], LAYOUT, start)
