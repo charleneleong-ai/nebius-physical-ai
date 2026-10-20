@@ -16,27 +16,34 @@ with lerobot-train's rename map and device applied. History-conditioned runs go 
 import sys
 from typing import Any
 
-from lerobot.policies.flux3 import modeling_flux3, processor_flux3
+from lerobot.policies.flux3 import configuration_flux3, modeling_flux3, processor_flux3
 from lerobot.scripts.lerobot_train import main
 
 checkpoint_loader = modeling_flux3.Flux3Policy.from_pretrained.__func__
 saved_processors = processor_flux3.make_flux3_pre_post_processors_from_pretrained
 
 
-def from_pretrained(cls: type, pretrained_name_or_path: str, **kwargs: Any) -> modeling_flux3.Flux3Policy:
+def from_pretrained(
+    cls: type[modeling_flux3.Flux3Policy], pretrained_name_or_path: str, **kwargs: Any
+) -> modeling_flux3.Flux3Policy:
     kwargs.setdefault("strict", False)
     return checkpoint_loader(cls, pretrained_name_or_path, **kwargs)
 
 
-def processors_from_pretrained(config: Any, pretrained_path: str, **kwargs: Any) -> tuple[Any, Any]:
+def processors_from_pretrained(
+    config: configuration_flux3.Flux3Config, pretrained_path: str, **kwargs: Any
+) -> tuple[Any, Any]:
     if config.conditioning == "history":
         return saved_processors(config, pretrained_path, **kwargs)
     pre, post = processor_flux3.make_flux3_pre_post_processors(config, kwargs.get("dataset_stats"))
-    overrides = kwargs.get("preprocessor_overrides") or {}
-    settings = {**overrides.get("rename_observations_processor", {}), **overrides.get("device_processor", {})}
-    for step in pre.steps:
+    # An override no step owns used to be a silent no-op, so a dropped rename map would train on the wrong
+    # observation key and look healthy throughout - the one thing this shim exists to prevent. Fail instead.
+    for group, settings in (kwargs.get("preprocessor_overrides") or {}).items():
         for attr, value in settings.items():
-            if hasattr(step, attr):
+            applied = [step for step in pre.steps if hasattr(step, attr)]
+            if not applied:
+                raise KeyError(f"preprocessor override {group}.{attr} matches no step in the flux3 pipeline")
+            for step in applied:
                 setattr(step, attr, value)
     return pre, post
 
