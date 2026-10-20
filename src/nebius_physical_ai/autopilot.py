@@ -153,9 +153,13 @@ class LearningRequest:
 
 
 def learning_request(source: str, record: dict[str, Any], task: TaskSpec) -> LearningRequest | None:
-    """None for a GO (or a failed run); otherwise why Preflight refused, sorted into trainable axes and the rest."""
-    if (verdict := record.get("verdict")) in (None, "GO"):
+    """None unless Preflight refused; otherwise why it did, sorted into trainable axes and the rest."""
+    # Only a refusal is a request. PERCEIVED means the gate passed without rehearsing, and a failed run has no
+    # verdict at all; filing either gave a request with no axes, which no action can answer and which still counted
+    # itself on the Autopilot page.
+    if record.get("verdict") not in ("RETRY", "ASK_HUMAN"):
         return None
+    verdict = record["verdict"]
     axes, unmet, reasons = [], [], []
     scene, rehearsal = record.get("scene"), record.get("rehearsal") or {}
     if not task.in_distribution:
@@ -178,6 +182,8 @@ def learning_request(source: str, record: dict[str, Any], task: TaskSpec) -> Lea
     elif rehearsal.get("n") and task.in_distribution:
         axes.append("environments")  # the trained task, failing in this arrangement
         reasons.append(f"only {rehearsal['successes']} of {rehearsal['n']} rehearsals succeeded in this layout")
+    if not (axes or unmet):  # refused for something training cannot fix, e.g. markers the camera never saw
+        return None
     return LearningRequest(source, verdict, task.instruction, axes, unmet, reasons)
 
 
@@ -280,23 +286,38 @@ class Planner:
         # demand first: a recipe that answers a real refusal outranks one that only moves the benchmark
         return sorted(ranked, key=lambda c: (c.excluded is not None, not c.answers, c.reopened is not None, -c.score))
 
-    def choose(self, cells: dict[str, Cell], diag: dict[str, Any]) -> tuple[list[Candidate], Candidate | None, str]:
+    def choose(
+        self, cells: dict[str, Cell], diag: dict[str, Any]
+    ) -> tuple[list[Candidate], Candidate | None, str, str]:
+        """The ranking, the pick, why, and who decided it - "nemotron" only when Nemotron's answer was used."""
         ranked = self.candidates(cells)
         eligible = [c for c in ranked if c.excluded is None][:CANDIDATES_SHOWN]
         if not eligible:
-            return ranked, None, "nothing on the menu is eligible: every family that could help is closed or tried"
+            return (
+                ranked,
+                None,
+                "nothing on the menu is eligible: every family that could help is closed or tried",
+                "ranking",
+            )
         if self.chooser is None:
             rationale = "the top-ranked candidate (Nemotron not asked)"
         else:
             try:
                 name, rationale = self.chooser.choose(diag, eligible, self.closed, self.requests)
                 if (pick := next((c for c in eligible if c.action.name == name), None)) is not None:
-                    return ranked, pick, rationale
+                    return ranked, pick, rationale, "nemotron"
                 rationale = f"Nemotron chose '{name}', which is not an eligible candidate; taking the top-ranked one"
             except (httpx.HTTPError, KeyError, ValueError, RuntimeError) as err:
                 rationale = f"Nemotron unavailable ({type(err).__name__}); taking the top-ranked candidate"
         top = eligible[0]
-        return ranked, top, f"{rationale}. {top.action.name} could win back up to {top.reach} failed rehearsals."
+        # the fallback is the ranking's pick, whether or not a chooser was configured: say so rather than claim
+        # Nemotron decided, because the cycle log is what the published Space attributes the decision from
+        return (
+            ranked,
+            top,
+            f"{rationale}. {top.action.name} could win back up to {top.reach} failed rehearsals.",
+            "ranking",
+        )
 
 
 @dataclass
@@ -459,8 +480,7 @@ def plan(
     requests = [LearningRequest(**r) for r in read_jsonl(REQUESTS)]
     planner = Planner(closed_families(verdicts), tried(cycles, refs), budget_hours, chooser, requests)
     if action is None:
-        ranked, pick, rationale = planner.choose(cells, diag)
-        chosen_by = "nemotron" if chooser else "ranking"
+        ranked, pick, rationale, chosen_by = planner.choose(cells, diag)
     else:
         ranked = planner.candidates(cells)
         if (pick := next((c for c in ranked if c.action.name == action), None)) is None or pick.excluded:

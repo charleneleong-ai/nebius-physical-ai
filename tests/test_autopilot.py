@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -92,18 +93,20 @@ class TestPlanner:
 
     @pytest.mark.parametrize(
         ("answer", "picked"),
-        [("dagger_round", "dagger_round"), ("failure_synthesis", "task_round:basket"),
+        [("dagger_round", "dagger_round"), ("real_cotrain", "task_round:basket"),
          ("rm -rf /", "task_round:basket"), (httpx.ConnectError("down"), "task_round:basket")],
     )  # fmt: skip
     def test_chooser_cannot_leave_the_eligible_set(
         self, ref: dict[str, Cell], answer: str | Exception, picked: str
     ) -> None:
-        _, pick, _ = Planner({"synthesis": "437"}, set(), 8.0, FixedChooser(answer)).choose(ref, diagnosis(ref))
+        _, pick, _, by = Planner({}, set(), 8.0, FixedChooser(answer)).choose(ref, diagnosis(ref))
         assert pick.action.name == picked
+        # only an answer that was actually used may be attributed to Nemotron on the published page
+        assert by == ("nemotron" if picked == answer else "ranking")
 
     def test_nothing_eligible(self, ref: dict[str, Cell]) -> None:
         families = {a.family: "closed" for a in ACTIONS.values()}
-        _, pick, why = Planner(families, set(), 8.0, None).choose(ref, diagnosis(ref))
+        _, pick, why, _ = Planner(families, set(), 8.0, None).choose(ref, diagnosis(ref))
         assert pick is None and "nothing" in why
 
 
@@ -201,10 +204,12 @@ class TestLearningRequests:
          (record("RETRY", successes=8, n=32), TaskSpec("yellow", "red"), ["objects"], []),  # gallery new_task
          (record("ASK_HUMAN", perception=0.24), TaskSpec("yellow", "red"), ["objects"], ["perception"]),  # real_photo
          (record("RETRY", successes=25, n=32), TaskSpec(), ["environments"], []),  # tight_gap
-         ({"verdict": "ASK_HUMAN", "scene": None}, TaskSpec(), [], ["perception"])],  # mat not located
+         ({"verdict": "ASK_HUMAN", "scene": None}, TaskSpec(), [], ["perception"]),  # mat not located
+         # the gate passed without rehearsing: a pass, not a refusal, so nothing is filed
+         (record("PERCEIVED", successes=31, n=32), TaskSpec(), None, None)],
     )  # fmt: skip
     def test_sorts_refusals_into_trainable_axes_and_the_rest(
-        self, result: dict, task: TaskSpec, axes: list[str] | None, unmet: list[str] | None
+        self, result: dict[str, Any], task: TaskSpec, axes: list[str] | None, unmet: list[str] | None
     ) -> None:
         request = learning_request("scene", result, task)
         assert (request.axes, request.unmet) == (axes, unmet) if axes is not None else request is None
