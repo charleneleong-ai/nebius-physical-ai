@@ -93,6 +93,14 @@ experiments:
     result: held_out_objects 4 vs 3 (p=1.0); clean_many 2 vs 9 (worse, p=0.039).
     verdict: DISCARD
     pr: 18
+  - label: FLUX with current-frame conditioning and absolute joint targets
+    family: flux3
+    runs: {jkfj2u1p: train, koghf3ss: bench}
+    baseline: FLUX LoRA fair (held_out 3, clean_many 9)
+    gate: S1
+    result: same 800 demos and LoRA recipe at a quarter of the fair run's budget (24k samples), action heads re-initialised. held_out_objects 21 vs 3 (+19/-1, p<0.001); clean_many 15 vs 9 (p=0.24). The fair LoRA's closed-loop collapse came largely from its 8-step self-history and integrated deltas; still far below round 3 (57, 88). Failures shift to pushed (48 of 75 on held_out_objects).
+    verdict: KEEP
+    pr: 32
   - label: Best-of-8 chunk consensus on round 2
     family: best-of-n
     runs: {dyvurfs6: bench}
