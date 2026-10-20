@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;700&family=JetBrains+Mono:wght@400;600&family=Public+Sans:wght@400;600&display=swap">
+<style>
+:root {
+  --bg: #090a0f; --panel: #12141c; --raised: #1a1d28; --ink: #f3f4f6; --muted: #9aa1b1; --line: #2a2e3d; --fill: #00ffaa;
+  --go: #00ffaa; --retry: #f5a524; --ask: #8ab4ff; --run: #8ab4ff; --accent: #00ffaa; --on: #05110b;
+  --hf: #f2c14e; --gpu: #00ffaa; --tf: #a497ec; --gate: #ff6b5e; --human: #9aa1b1; --mem: #8ab4ff;
+  --display: "Archivo Narrow", "Arial Narrow", sans-serif; --body: "Public Sans", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace; --snap: all .15s cubic-bezier(.4, 0, .2, 1);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--body); }
+main { max-width: 1200px; margin: 0 auto; padding: 48px 24px 72px; }
+h1, h2, h3 { font-family: var(--display); letter-spacing: .01em; }
+.tag { font: 600 11px/1 var(--mono); text-transform: uppercase; letter-spacing: .14em; color: var(--accent); }
+.split { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 3fr); gap: 32px; align-items: start; }
+@media (max-width: 860px) { .split { grid-template-columns: 1fr; } main { padding: 32px 16px 56px; } }
+h1 { font-size: clamp(3rem, 9vw, 6rem); line-height: .9; margin: 10px 0 0; text-transform: uppercase; }
+h2 { font-size: clamp(1.6rem, 3.2vw, 2.4rem); line-height: 1; margin: 56px 0 12px; }
+p.lede, .stat { color: var(--muted); }
+p.lede { margin: 20px 0 0; max-width: 62ch; font-size: 1.15rem; }
+.stat { font-size: .85rem; }
+a { color: inherit; }
+.links { display: grid; gap: 8px; }
+.links a { font: 12px/1.3 var(--mono); text-decoration: none; padding: 10px 12px; border: 1px solid var(--line); border-radius: 2px;
+  transition: var(--snap); }
+.links a:hover { border-color: var(--accent); color: var(--accent); }
+.links a.primary { background: var(--accent); color: var(--on); border-color: var(--accent); font-weight: 600; }
+.links a.primary:hover { background: transparent; color: var(--accent); }
+.loop { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0; margin-top: 40px;
+  border-top: 1px solid var(--line); }
+.loop .step { padding: 16px 16px 16px 0; font-size: .85rem; color: var(--muted); }
+.loop .step p { margin: 10px 0 0; color: #c9ced9; font-size: .82rem; }
+.loop .step .sofar { color: #00ffaa; }  /* what this step has actually done, not what it is for */
+.loop .step .sofar b { color: #8b93a7; font-weight: 600; text-transform: uppercase; font-size: .72rem;
+  letter-spacing: .08em; margin-right: 6px; }
+.loop b { display: block; color: var(--ink); font-family: var(--display); font-size: 1.05rem; margin-bottom: 4px; }
+.bar { display: grid; grid-template-columns: 210px 1fr 110px; gap: 4px 12px; align-items: center; margin: 10px 0; }
+.bar .label span { display: block; font-size: .8rem; color: var(--muted); }
+.track { height: 10px; background: var(--line); border-radius: 0; overflow: hidden; }
+.fill { height: 100%; background: var(--fill); }
+.num { font-variant-numeric: tabular-nums; font-size: .9rem; }
+.mix { grid-column: 2 / 4; font-size: .8rem; color: var(--muted); }
+.demos { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+video { width: 100%; display: block; background: #000; aspect-ratio: 4 / 3; object-fit: contain; }
+figcaption { padding: 16px 24px 24px; font-size: .85rem; color: var(--muted); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 24px; margin: 12px 0; }
+.card h3 { margin: 0 0 6px; font-size: 1.3rem; display: flex; justify-content: space-between; gap: 8px; }
+.card p { margin: 8px 0 0; font-size: .92rem; }
+.moved { margin: 4px 0 0; padding-left: 20px; font-size: .85rem; }
+.DROPPED { background: var(--muted); }
+.pill { display: inline-block; border-radius: 2px; padding: 3px 8px; font: 600 11px/1.2 var(--mono); letter-spacing: .08em; color: var(--on);
+  background: var(--muted); white-space: nowrap; }
+.PROMOTE { background: var(--go); } .KEEP { background: var(--ask); } .DISCARD { background: var(--retry); }
+.RUNNING, .QUEUED { background: var(--run); }
+.RETRY { background: var(--retry); } .ASK_HUMAN { background: var(--ask); }
+.request { display: grid; grid-template-columns: 160px 1fr; gap: 14px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 4px; padding: 24px; margin: 12px 0; }
+.request img { width: 100%; border-radius: 2px; aspect-ratio: 4 / 3; object-fit: cover; }
+.request h3 { margin: 0 0 4px; font-size: 1rem; display: flex; gap: 8px; align-items: center; }
+.request p { margin: 6px 0; font-size: .9rem; }
+@media (max-width: 640px) { .request { grid-template-columns: 1fr; } }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+ul.rules { padding-left: 20px; }
+.arch { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 14px; }
+.arch > div { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--c); border-radius: 4px; padding: 24px; font-size: .88rem; }
+.hf { --c: var(--hf); } .gpu { --c: var(--gpu); } .tf { --c: var(--tf); } .gate { --c: var(--gate); } .human { --c: var(--human); } .mem { --c: var(--mem); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 0; font-size: .82rem; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; background: var(--c); }
+.arch b { display: block; } .arch .where { color: var(--muted); font-size: .8rem; margin-top: 6px; }
+.arch .rule { font-size: .8rem; margin-top: 4px; }
+.diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 24px; overflow-x: auto; }
+.gatebox { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--gate); border-radius: 4px;
+  padding: 24px; margin-top: 16px; display: grid; grid-template-columns: minmax(260px, 1fr) 1.3fr; gap: 18px; }
+/* The worked gate example belongs to the gate component, but it is two columns wide, so rather than nest it in that
+   narrow card it stays a sibling and follows the card's own open state (hover to preview, click to pin). This has to
+   come after the rule above, which sets display at the same specificity. */
+.gatebox { display: none; }
+.arch:has(details.gate[open]) + .gatebox { display: grid; }
+.gatebox h3 { margin: 0 0 6px; font-size: 1rem; }
+.gatebox p { margin: 6px 0; font-size: .88rem; }
+.gatebox table { font-size: .82rem; }
+.gatebox td.win { color: var(--go); font-weight: 600; } .gatebox td.loss { color: var(--retry); font-weight: 600; }
+@media (max-width: 760px) { .gatebox { grid-template-columns: 1fr; } }
+details > summary { list-style: none; cursor: pointer; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary b::after { content: " +"; font: 600 12px var(--mono); color: var(--accent); }
+details[open] > summary b::after { content: " \2212"; }
+details[data-pinned] > summary b::after { content: " \2212  pinned"; }
+details[open] { border-color: #3d4356; }
+.arch details { color: var(--muted); }
+.arch details[open] { color: #c9ced9; }
+.expand-hint { font: 11px/1 var(--mono); color: var(--muted); margin: 8px 0 0; }
+footer { margin-top: 64px; border-top: 1px solid var(--line); padding-top: 24px; color: var(--muted); font: 12px/1.6 var(--mono); }
+@media (max-width: 640px) { .bar { grid-template-columns: 1fr 90px; } .bar .label { grid-column: 1 / 3; } .mix { grid-column: 1 / 3; } }
+</style>
+</head>
+<body>
+<main>
+  <header class="split">
+    <div>
+      <div class="tag">Preflight · the training loop</div>
+      <h1>Autopilot</h1>
+      <p class="lede">The self-improving half of Preflight. Preflight decides whether the SO-101 robot should act; Autopilot
+    learns from what fails. Each cycle reads the served GR00T N1.7 policy's benchmark, finds the generalisation axis
+    (new objects, tasks or environments) with the most failures a tested recipe could fix, trains it, and lets a paired
+    gate decide. Nemotron on Nebius Token Factory proposes; it never scores its own result.</p>
+    </div>
+    <nav class="links">{{LINKS}}</nav>
+  </header>
+
+  <div class="loop">{{STEPS}}</div>
+  <p class="expand-hint">Hover a step or component for detail; click to pin it open.</p>
+
+  <h2 id="architecture">Architecture: the agentic loop</h2>
+  <p class="stat">An agent proposes; code decides. The only free choice the agent makes is which tested recipe runs
+    next; everything that could flatter a result (the benchmark, the gate, promotion) is outside its reach.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  subgraph HF["Hugging Face Spaces"]
+    PF["Preflight<br/>perception + trust gate"]
+  end
+  subgraph A100["GPU host (A100)"]
+    IN["intake<br/>refusals to requests"]
+    PL["planner<br/>rank the menu"]
+    RUN["runner<br/>wait for GPU, train, heartbeat"]
+    BM["benchmark<br/>MuJoCo twin + GR00T, 96 paired / suite"]
+    G3{"gate G3<br/>paired McNemar"}
+  end
+  subgraph TF["Nebius Token Factory"]
+    NM["Nemotron 3 Ultra<br/>chooses 1 of top 3"]
+  end
+  LED[("verdicts.yaml<br/>closed families")]
+  HU(["human<br/>approves promotion"])
+  PF -->|"RETRY / ASK_HUMAN"| IN --> PL
+  BM -->|"served policy's failures"| PL
+  LED --> PL
+  PL -->|"eligible recipes"| NM -->|"choice + rationale"| PL
+  PL --> RUN --> BM --> G3
+  G3 -->|pass| HU -->|new served policy| PF
+  G3 -->|"DISCARD / KEEP"| LED
+  classDef hf fill:#12141c,stroke:#f2c14e,stroke-width:2px,color:#f3f4f6
+  classDef gpu fill:#12141c,stroke:#00ffaa,stroke-width:2px,color:#f3f4f6
+  classDef tf fill:#12141c,stroke:#a497ec,stroke-width:2px,color:#f3f4f6
+  classDef gate fill:#12141c,stroke:#ff6b5e,stroke-width:2px,color:#f3f4f6
+  classDef human fill:#12141c,stroke:#9aa1b1,stroke-width:2px,color:#f3f4f6
+  classDef mem fill:#12141c,stroke:#8ab4ff,stroke-width:2px,color:#f3f4f6
+  class PF hf
+  class IN,PL,RUN,BM gpu
+  class NM tf
+  class G3 gate
+  class HU human
+  class LED mem
+  style HF fill:transparent,stroke:#f2c14e
+  style A100 fill:transparent,stroke:#00ffaa
+  style TF fill:transparent,stroke:#a497ec
+</pre></div>
+  <div class="legend"><span class="hf">Hugging Face Space</span><span class="gpu">GPU host (A100)</span>
+    <span class="tf">Nebius Token Factory (agent)</span><span class="gate">gate: code, not the agent</span>
+    <span class="human">human</span><span class="mem">memory</span></div>
+  <div class="arch">
+    <details class="hf"><summary><b>Preflight</b></summary>Rehearses the robot's policy in a twin of the scene; files every scene it won't clear.
+      <div class="where">Hugging Face Space (CPU) + GPU job image</details>
+    <details class="gpu"><summary><b>Intake</b></summary>Sorts each refusal into the axis training could fix, or marks it unmet (perception).
+      <div class="where">A100 · <code>npai autopilot intake</code></details>
+    <details class="gpu"><summary><b>Planner</b></summary>Ranks 5 tested recipes by failures they could win back per GPU hour; refusals first; closed
+      families out. <div class="rule">Can't run anything off the menu.</div>
+      <div class="where">A100 · <code>npai autopilot plan</code></details>
+    <details class="tf"><summary><b>Nemotron 3 Ultra</b></summary>Chooses one of the top three and says what would count as success.
+      <div class="rule">Never scores a result; a choice off the eligible list falls back to the ranking.</div>
+      <div class="where">Nebius Token Factory</details>
+    <details class="gpu"><summary><b>Runner</b></summary>Launches detached, waits for free GPU memory, checks in every 30 min.
+      <div class="rule">Never displaces another job on the host.</div>
+      <div class="where">A100 · autoresearch-wait + heartbeat</details>
+    <details class="gate"><summary><b>Benchmark + gate G3</b></summary>Same 96 scenes per suite at seed 42; paired gain on the target suites, no suite
+      worse. The worked example below opens with this card. <div class="where">A100 · MuJoCo twin, LeRobot GR00T N1.7</details>
+    <details class="human"><summary><b>Human</b></summary>Approves promotion; the new policy becomes Preflight's and the next reference.
+      <div class="where"><code>npai autopilot approve</code></details>
+    <details class="mem"><summary><b>Memory</b></summary>Every event in <code>cycles.jsonl</code>; verdicts in <code>verdicts.yaml</code>, which closes
+      families until a new refusal reopens them. <div class="where">GitHub · W&amp;B · this page</details>
+  </div>
+
+  <div class="gatebox">
+    <div>
+      <h3>How the gate decides: paired McNemar</h3>
+      <p><b>Paired:</b> the old and new policy run the <i>same</i> 96 scenes per suite (seed 42: same objects, same
+        camera jitter), so they are compared scene by scene, not just as two totals.</p>
+      <table><tr><th></th><th>new succeeds</th><th>new fails</th></tr>
+        <tr><th>old succeeds</th><td>no information</td><td class="loss">new lost it</td></tr>
+        <tr><th>old fails</th><td class="win">new won it</td><td>no information</td></tr></table>
+      <p>Only scenes where they <b>disagree</b> count. If the new policy were no better, those would split like coin
+        flips; the p-value says how unlikely the actual split is under that. A suite moves only at p &lt; 0.05.</p>
+    </div>
+    <div>
+      <h3>Cycle 1, read through the gate</h3>
+      <table><tr><th>suite</th><th>won / lost</th><th>p</th><th>reads as</th></tr>
+        <tr><td>basket (trained)</td><td class="win">+82 / −2</td><td>&lt;0.001</td><td>real gain</td></tr>
+        <tr><td>ring (held out)</td><td>+0 / −0</td><td>1.0</td><td>no change: no transfer</td></tr>
+        <tr><td>clean_many</td><td class="loss">+2 / −14</td><td>0.004</td><td>real loss</td></tr>
+        <tr><td>real_1_pomade_tin</td><td class="loss">+2 / −21</td><td>&lt;0.001</td><td>real loss</td></tr>
+        <tr><td>held_out_objects</td><td>+9 / −19</td><td>0.087</td><td>leans worse, within noise</td></tr></table>
+      <p><b>G3</b> asks two things: the target suites pooled are better (paired), and no suite anywhere is worse. A
+        suite the recipe trains on directly doesn't count as a gain (basket), so cycle 1 had no target gain and two
+        losses: <b>DISCARD</b>. With only 96 rehearsals, comparing totals (57 vs 61) can't tell luck from progress;
+        pairing cancels each scene's difficulty, so small real differences show and luck doesn't count as a win.</p>
+    </div>
+  </div>
+
+  <h2>Where the policy fails now</h2>
+  <p class="stat">The reference the latest cycle was planned against: 96 paired rehearsals per suite in the randomised
+    twin. New tasks are the gap; seen scenes are the guard.</p>
+  {{BARS}}
+
+  <h2>What the loop is targeting</h2>
+  <div class="demos">{{DEMOS}}</div>
+
+  <h2 id="requests">Requests from Preflight</h2>
+  <p class="stat">Every scene <a href="https://huggingface.co/spaces/chaleong/preflight">Preflight</a> would not clear
+    is filed here as a learning request (<code>npai autopilot intake</code>). Recipes that answer one rank first. A refusal
+    caused by an untrustworthy twin is a perception problem: it is recorded as unmet, not turned into training.</p>
+  {{REQUESTS}}
+
+  <h2>Cycles</h2>
+  {{CYCLES}}
+
+  <h2>The menu, ranked</h2>
+  <p class="stat">Reach: failed rehearsals on a recipe's axes that fail the way it addresses. Nemotron chooses among the
+    top three eligible; families every past attempt of which was discarded are closed.</p>
+  <div class="scroll">{{MENU}}</div>
+
+  <h2>Rules the loop can't break</h2>
+  <ul class="rules">
+    <li>One change per cycle, so every gain is attributable.</li>
+    <li>A fixed menu of tested scripts; the agent can't write or run anything else.</li>
+    <li>The gate is code (paired McNemar on the same scenes), not the agent. G3 counts gains on suites the recipe did
+      not train on, and fails if any suite gets worse.</li>
+    <li>Closed families ({{CLOSED}}) are reopened only for refusals they were never tried on, rank after open
+      recipes, and Nemotron is shown what closed them.</li>
+    <li>Promotion needs a human. GPU use waits for free memory, so other jobs on the host are never displaced.</li>
+  </ul>
+
+  <h2>Every experiment so far</h2>
+  <div class="scroll">{{LEDGER}}</div>
+
+  <footer>Built {{STATUS}} from the loop's own log. Simulation only: the physical SO-101 has not arrived, so every
+    rehearsal is in the MuJoCo twin.</footer>
+</main>
+<script>
+// Steps and components open on hover; a click pins one open (click again to unpin). Touch: a tap toggles.
+const hover = matchMedia("(hover: hover)").matches;
+document.querySelectorAll(".loop details, .arch details").forEach(d => {
+  const summary = d.querySelector("summary");
+  summary.addEventListener("click", ev => {
+    if (!hover) return;
+    ev.preventDefault();
+    if (d.hasAttribute("data-pinned")) { d.removeAttribute("data-pinned"); d.open = false; }
+    else { d.setAttribute("data-pinned", ""); d.open = true; }
+  });
+  if (hover) {
+    d.addEventListener("mouseenter", () => { d.open = true; });
+    d.addEventListener("mouseleave", () => { if (!d.hasAttribute("data-pinned")) d.open = false; });
+  }
+});
+</script>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+mermaid.initialize({ startOnLoad: true, theme: "dark" });
+</script>
+</body>
+</html>

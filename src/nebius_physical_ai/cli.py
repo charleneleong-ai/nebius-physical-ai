@@ -13,6 +13,7 @@ import uvicorn
 from rich import print
 from rich.progress import track
 
+from nebius_physical_ai import autopilot
 from nebius_physical_ai.capture.camera import DEFAULT_CAMERA_MIX, CameraPose, MarkerCalibrator, parse_camera_mix
 from nebius_physical_ai.capture.lift import HeightLifter, MatView
 from nebius_physical_ai.capture.markers import DPI, render_marker_sheet
@@ -412,6 +413,7 @@ def evaluate(
 add_pipeline_cli(app)
 app.command("preflight-job")(preflight_job)
 app.command("demo")(serve_demo)
+app.add_typer(autopilot.app, name="autopilot")
 
 
 def marker_alignment(twin: Twin, layout: TwinLayout, image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

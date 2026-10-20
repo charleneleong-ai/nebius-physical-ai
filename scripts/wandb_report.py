@@ -17,22 +17,17 @@ from typing import Any
 import typer
 import wandb
 import wandb_workspaces.reports.v2 as wr
-import yaml
 from autoresearch.wandb_report import results_table, verdict_table
 
 from nebius_physical_ai.benchmark import HEADLINE_SUITES
+from nebius_physical_ai.verdicts import load_verdicts
 
 ENTITY, PROJECT = "chaleong", "preflight"
 REPORT_ID = "VmlldzoxODA5MDQ3Mg=="
-VERDICTS = Path("docs/experiments/so101/verdicts.yaml")
 NARRATIVE = Path("docs/experiments/so101/wandb_narrative.md")
 BEFORE_RESULTS, AFTER_RESULTS = ("Highlights", "Task", "Approach"), ("What we learned", "Next")
 
 app = typer.Typer(add_completion=False)
-
-
-def load_verdicts() -> dict[str, Any]:
-    return yaml.safe_load(VERDICTS.read_text())
 
 
 def narrative_sections() -> dict[str, str]:

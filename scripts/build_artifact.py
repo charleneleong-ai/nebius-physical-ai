@@ -22,6 +22,9 @@ SCORES = {  # successes of 96 per suite, seed 42
     "DAgger r4 (RL recoveries)": [49, 77, 86, 88, 83, 88],
     "DAgger r5 (RL x2)": [41, 78, 86, 84, 79, 87],
     "FLUX LoRA (fair)": [3, 11, 9, 17, 6, 4],
+    "v11 calibrated cotrain": [57, 79, 84, 80, 83, 89],
+    "Failure synthesis (r6)": [43, 75, 76, 85, 75, 83],
+    "Autopilot 1: multi-task": [47, 81, 76, 87, 68, 82],
 }
 # McNemar (+, -, p) of round 2 vs v5 per suite, from `scripts/benchmark.py compare` on the two bench JSONs
 PAIRED_R2 = [(12, 14, 0.85), (8, 7, 1.0), (7, 2, 0.18), (6, 4, 0.75), (14, 2, 0.004), (13, 5, 0.10)]  # (+, -, p) vs v5
@@ -35,6 +38,9 @@ FAILURES = {
     "DAgger r4": [39, 19, 25, 17, 5, 0],
     "DAgger r5": [28, 32, 39, 19, 2, 1],
     "FLUX LoRA": [358, 115, 22, 24, 0, 7],
+    "v11 cotrain": [31, 26, 24, 17, 6, 0],
+    "Synthesis (r6)": [35, 34, 33, 24, 12, 1],
+    "Autopilot 1": [35, 34, 34, 21, 10, 1],
 }
 FUNNELS = {  # rollouts, succeeded, recoverable failures, kept, recovered
     "Round 1 (v5)": [800, 456, 330, 207, 85],
@@ -81,7 +87,7 @@ def legend(items: list[str], x: float, y: float, step: float, cls: str) -> str:
 
 
 def pooled_bars() -> str:
-    rows, x0, scale = [], 170, 0.75
+    rows, x0, scale = [], 196, 0.72
     for i, (name, s) in enumerate(SCORES.items()):
         total, y = sum(s), 10 + i * 30
         cls = "b-good" if total > BASELINE else "b-bad" if total < 0.9 * BASELINE else "b-base"
