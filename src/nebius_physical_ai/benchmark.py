@@ -28,7 +28,13 @@ import numpy as np
 from nebius_physical_ai.capture.camera import CameraPose
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import Policy
-from nebius_physical_ai.twin.expert import PickPlaceExpert, SceneSampler, UnreachableTarget, start_pose
+from nebius_physical_ai.twin.expert import (
+    Frame,
+    PickPlaceExpert,
+    SceneSampler,
+    UnreachableTarget,
+    start_pose,
+)
 from nebius_physical_ai.twin.randomize import SEEED_WRIST, Randomization, SceneRandomizer
 from nebius_physical_ai.twin.rehearsal import Rehearsal, RehearsalResult
 from nebius_physical_ai.twin.roles import HELD_OUT_COLOURS, HELD_OUT_REAL, TRAIN_COLOURS
@@ -50,6 +56,8 @@ HEADLINE_SUITES = (  # the promotion gate's six suites (also listed in scripts/d
 OBLIQUE_ELEVATION_DEG = 65.0
 AZIMUTHS_DEG = (0.0, 90.0, 130.0, 160.0, 180.0)  # 0 = across the mat facing the robot, 180 = behind the arm
 GENERATED_CASES = 12
+SOLVE_IMAGE_SIZE = (24, 32)  # filtering only needs the verdict, so render the smallest frame that works
+SPOT_TRIES = 20_000  # ~400 draws per accepted layout, so this is 50x headroom before it means infeasible
 MAX_TRIES_PER_CASE = 20
 CLEAN_BLUE = DetectedObject("blue", 131.0, 151.0, 900.0)
 CLEAN_RED = DetectedObject("red", 221.0, 151.0, 1600.0)
@@ -201,22 +209,33 @@ def legacy_suites(real: list[DetectedObject], layout: TwinLayout, calibrated: Ca
     return suites
 
 
-def expert_solves(case: Case, layout: TwinLayout, start: np.ndarray) -> bool:
-    """Whether the scripted expert completes this case: if it can't, a policy miss says nothing about the policy."""
-    own = case.layout(layout)
+def run_expert(case: Case, layout: TwinLayout, start: np.ndarray, image_size: tuple[int, int]) -> list[Frame] | None:
+    """The scripted expert's frames for one case, or None when it cannot reach or complete it.
+
+    Filtering a suite only needs the None, recording demonstrations needs the frames; both need the same twin, the
+    same settle and the same success test, so they share this rather than keeping two copies in step. `image_size`
+    has no default because the two differ by 20x: a filter renders the smallest frame that works, a demonstration
+    renders the frames that are kept."""
     look = SceneLook(camera=case.camera)
-    with Twin.from_objects(case.objects, own, start_pose=start, look=look, fixtures=case.fixtures) as twin:
+    with Twin.from_objects(
+        case.objects, case.layout(layout), start_pose=start, look=look, fixtures=case.fixtures
+    ) as twin:
         expert = (
-            TaskExpert(twin, case.prompt, case.check, image_size=(24, 32))
+            TaskExpert(twin, case.prompt, case.check, image_size=image_size)
             if case.check
-            else PickPlaceExpert(twin, case.prompt, case.pick, case.place, image_size=(24, 32))
+            else PickPlaceExpert(twin, case.prompt, case.pick, case.place, image_size=image_size)
         )
         try:
-            list(expert.run())
+            frames = list(expert.run())
         except UnreachableTarget:
-            return False
+            return None
         twin.settle(0.5)
-        return case.success()(twin)
+        return frames if case.success()(twin) else None
+
+
+def expert_solves(case: Case, layout: TwinLayout, start: np.ndarray) -> bool:
+    """Whether the scripted expert completes this case: if it can't, a policy miss says nothing about the policy."""
+    return run_expert(case, layout, start, SOLVE_IMAGE_SIZE) is not None
 
 
 def solvable_cases(
@@ -258,11 +277,17 @@ class TaskScenes:
     def spots(self) -> np.ndarray:
         """Object, fixture and decoy positions (mat mm) inside reach: object and fixture TASK_GAP_MM apart."""
         s = self.sampler
-        while True:
+        # about 1 draw in 400 clears both gaps inside the reachable box, so this is a rejection sampler with a
+        # bound: widen a fixture or a gap far enough and it becomes infeasible, which should say so, not hang.
+        for _ in range(SPOT_TRIES):
             xy = self.rng.uniform([s.x_range[0], s.y_range[0]], [s.x_range[1], s.y_range[1]], (3, 2))
             gaps = np.linalg.norm(xy[:, None] - xy[None], axis=-1)
             if gaps[0, 1] >= TASK_GAP_MM and min(gaps[2, 0], gaps[2, 1]) >= DECOY_GAP_MM:
                 return xy
+        raise ValueError(
+            f"no layout in {SPOT_TRIES} draws with {TASK_GAP_MM} mm between object and fixture and "
+            f"{DECOY_GAP_MM} mm to the decoy, inside x{s.x_range} y{s.y_range}"
+        )
 
     def decoy(self, xy: np.ndarray) -> DetectedObject:
         return DetectedObject(str(self.rng.choice(TRAIN_COLOURS)), *np.round(xy, 1), DECOY_SIDE_MM**2)

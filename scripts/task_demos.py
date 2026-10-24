@@ -17,11 +17,16 @@ import numpy as np
 import typer
 from rich.progress import track
 
-from nebius_physical_ai.benchmark import OBLIQUE_ELEVATION_DEG, Case, TaskScenes, oblique_camera
+from nebius_physical_ai.benchmark import (
+    OBLIQUE_ELEVATION_DEG,
+    Case,
+    TaskScenes,
+    oblique_camera,
+    run_expert,
+)
 from nebius_physical_ai.twin.dataset import LeRobotWriter
-from nebius_physical_ai.twin.expert import UnreachableTarget, start_pose
-from nebius_physical_ai.twin.scene import SceneLook, Twin, TwinLayout
-from nebius_physical_ai.twin.tasks import TaskExpert
+from nebius_physical_ai.twin.expert import Frame, start_pose
+from nebius_physical_ai.twin.scene import TwinLayout
 
 PHRASINGS = {
     "basket": (
@@ -40,20 +45,13 @@ PHRASINGS = {
     ),
 }
 STREAMS = {"basket": 130, "ring": 131}  # away from the benchmark's held_out_tasks streams (30, 31)
+DEMO_IMAGE_SIZE = (480, 640)  # the expert's own default: demonstrations are kept, so they render full size
 app = typer.Typer(add_completion=False)
 
 
-def record(case: Case, layout: TwinLayout, rng: np.random.Generator) -> list | None:
-    """The expert's frames for one case, or None when it can't reach or complete the task."""
-    look = SceneLook(camera=case.camera)
-    with Twin.from_objects(case.objects, case.layout(layout), start_pose=start_pose(rng), look=look,
-                           fixtures=case.fixtures) as twin:  # fmt: skip
-        try:
-            frames = list(TaskExpert(twin, case.prompt, case.check).run())
-        except UnreachableTarget:
-            return None
-        twin.settle(0.5)
-        return frames if case.success()(twin) else None
+def record(case: Case, layout: TwinLayout, rng: np.random.Generator) -> list[Frame] | None:
+    """The expert's frames for one case at demonstration resolution, or None when it cannot complete the task."""
+    return run_expert(case, layout, start_pose(rng), image_size=DEMO_IMAGE_SIZE)
 
 
 @app.command()
