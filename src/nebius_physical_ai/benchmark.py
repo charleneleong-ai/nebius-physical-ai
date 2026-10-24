@@ -20,6 +20,7 @@ import math
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, fields, replace
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -314,12 +315,12 @@ def held_out_task_suites(layout: TwinLayout) -> list[Suite]:
     """Tasks no checkpoint here was trained on, after ArmnetBench's eye_drops_to_basket and ring_insert, in its own
     words. Variants perturb the eye drops and the decoy; every case is one the scripted expert solves (`TaskExpert`)."""
     camera, suites = oblique_camera(layout, OBLIQUE_ELEVATION_DEG, 0.0), []
-    for name, stream, kind, note in (
-        ("held_out_task_basket", 30, "basket", "eye drops into a basket (ArmnetBench eye_drops_to_basket)"),
-        ("held_out_task_ring", 31, "ring", "ring over a peg (ArmnetBench ring_insert)"),
+    for name, stream, draw, note in (
+        ("held_out_task_basket", 30, TaskScenes.basket, "eye drops into a basket (ArmnetBench eye_drops_to_basket)"),
+        ("held_out_task_ring", 31, TaskScenes.ring, "ring over a peg (ArmnetBench ring_insert)"),
     ):
         scenes = TaskScenes(layout, np.random.default_rng([SEED, stream]), camera)
-        cases, rejected = solvable_cases(name, getattr(scenes, kind), layout)
+        cases, rejected = solvable_cases(name, partial(draw, scenes), layout)
         suites.append(Suite(name, "held_out_tasks", cases, note, rejected))
     return suites
 
