@@ -19,12 +19,4 @@ for scene in "$gallery"/*/result.json; do
 done
 [ -f "$gallery/suites.json" ] && cp -r "$gallery/suites.json" "$gallery/suites" "$ctx/gallery/"
 find "$ctx" -name __pycache__ -prune -exec rm -rf {} +
-# huggingface_hub's API rather than the `hf` CLI, whose flags differ across versions
-${PYTHON:-python3} - "$space" "$ctx" <<'PY'
-import sys
-from huggingface_hub import create_repo, upload_folder
-space, ctx = sys.argv[1:3]
-create_repo(space, repo_type="space", space_sdk="docker", exist_ok=True)
-upload_folder(repo_id=space, repo_type="space", folder_path=ctx, commit_message="Preflight demo")
-PY
-echo "https://huggingface.co/spaces/$space"
+bash deploy/upload_space.sh "$space" "$ctx" docker "Preflight demo"
