@@ -1,10 +1,14 @@
 import json
+import re
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
+import typer
 from typer.testing import CliRunner
 
+from nebius_physical_ai import autopilot
 from nebius_physical_ai.autopilot import (
     ACTIONS,
     MENU,
@@ -17,13 +21,11 @@ from nebius_physical_ai.autopilot import (
     app,
     axis_of,
     diagnosis,
-    in_flight,
     judge,
     learning_request,
     next_step,
     read_jsonl,
     results_from_log,
-    tried,
 )
 from nebius_physical_ai.benchmark import Cell
 from nebius_physical_ai.task import TaskSpec
@@ -92,18 +94,20 @@ class TestPlanner:
 
     @pytest.mark.parametrize(
         ("answer", "picked"),
-        [("dagger_round", "dagger_round"), ("failure_synthesis", "task_round:basket"),
+        [("dagger_round", "dagger_round"), ("real_cotrain", "task_round:basket"),
          ("rm -rf /", "task_round:basket"), (httpx.ConnectError("down"), "task_round:basket")],
     )  # fmt: skip
     def test_chooser_cannot_leave_the_eligible_set(
         self, ref: dict[str, Cell], answer: str | Exception, picked: str
     ) -> None:
-        _, pick, _ = Planner({"synthesis": "437"}, set(), 8.0, FixedChooser(answer)).choose(ref, diagnosis(ref))
+        _, pick, _, by = Planner({}, set(), 8.0, FixedChooser(answer)).choose(ref, diagnosis(ref))
         assert pick.action.name == picked
+        # only an answer that was actually used may be attributed to Nemotron on the published page
+        assert by == ("nemotron" if picked == answer else "ranking")
 
     def test_nothing_eligible(self, ref: dict[str, Cell]) -> None:
         families = {a.family: "closed" for a in ACTIONS.values()}
-        _, pick, why = Planner(families, set(), 8.0, None).choose(ref, diagnosis(ref))
+        _, pick, why, _ = Planner(families, set(), 8.0, None).choose(ref, diagnosis(ref))
         assert pick is None and "nothing" in why
 
 
@@ -124,12 +128,17 @@ class TestJudge:
         assert result.verdict == "DISCARD" and "clean_many" in result.why
 
 
+def stop_planning(*_args: object, **_kwargs: object) -> None:
+    """Stand in for plan(), which run() catches typer.Exit from, to end the loop after one pass."""
+    raise typer.Exit()
+
+
 class TestCycleLog:
     def test_folds_events_and_tracks_tried_and_in_flight(self, tmp_path: Path) -> None:
         log = CycleLog(tmp_path / "cycles.jsonl")
         log.append("planned", 1, action="task_round:basket", refs=["r3.json"])
         log.append("launched", 1, log="x.log")
-        assert in_flight(log.cycles()) == [1] and tried(log.cycles(), ["r3.json"]) == set()
+        assert log.cycles().in_flight() == [1] and log.cycles().tried(["r3.json"]) == set()
         log.append("judged", 1, verdict="KEEP", why="within noise")
         with log.path.open("a") as f:
             f.write('{"event": "launch')  # an append cut off mid-write
@@ -139,8 +148,23 @@ class TestCycleLog:
             "task_round:basket",
             "KEEP",
         )
-        assert in_flight(cycles) == [] and tried(cycles, ["r3.json"]) == {"task_round:basket"}
-        assert tried(cycles, ["r4.json"]) == set()  # a new reference reopens every action
+        assert cycles.in_flight() == [] and cycles.tried(["r3.json"]) == {"task_round:basket"}
+        assert cycles.tried(["r4.json"]) == set()  # a new reference reopens every action
+
+    def test_a_cycle_whose_recipe_left_the_menu_does_not_stop_the_loop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """next_step always picks the lowest planned cycle, so one the menu can no longer run is a poison pill: the
+        daemon dies on it, restarts, picks it again. It has to be closed and stepped over, not raised through."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(autopilot, "plan", stop_planning)  # end the loop after it steps past the bad cycle
+        CycleLog().append("planned", 1, action="a_recipe_since_deleted", refs=["r3.json"])
+
+        result = CliRunner().invoke(app, ["run", "--bench", "r3.json"])
+
+        # exit 0 means the loop closed the bad cycle and carried on to planning, where stop_planning ended it
+        assert result.exit_code == 0, result.output
+        assert CycleLog().cycles()[1]["event"] == "dropped"  # closed, so next_step cannot pick it again
 
     def test_only_a_planned_cycle_can_be_dropped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(tmp_path)
@@ -201,10 +225,12 @@ class TestLearningRequests:
          (record("RETRY", successes=8, n=32), TaskSpec("yellow", "red"), ["objects"], []),  # gallery new_task
          (record("ASK_HUMAN", perception=0.24), TaskSpec("yellow", "red"), ["objects"], ["perception"]),  # real_photo
          (record("RETRY", successes=25, n=32), TaskSpec(), ["environments"], []),  # tight_gap
-         ({"verdict": "ASK_HUMAN", "scene": None}, TaskSpec(), [], ["perception"])],  # mat not located
+         ({"verdict": "ASK_HUMAN", "scene": None}, TaskSpec(), [], ["perception"]),  # mat not located
+         # the gate passed without rehearsing: a pass, not a refusal, so nothing is filed
+         (record("PERCEIVED", successes=31, n=32), TaskSpec(), None, None)],
     )  # fmt: skip
     def test_sorts_refusals_into_trainable_axes_and_the_rest(
-        self, result: dict, task: TaskSpec, axes: list[str] | None, unmet: list[str] | None
+        self, result: dict[str, Any], task: TaskSpec, axes: list[str] | None, unmet: list[str] | None
     ) -> None:
         request = learning_request("scene", result, task)
         assert (request.axes, request.unmet) == (axes, unmet) if axes is not None else request is None
@@ -277,3 +303,30 @@ class TestRunLoop:
         for event, cycle, *verdict in events:
             log.append(event, cycle, action="dagger_round", **({"verdict": verdict[0]} if verdict else {}))
         assert next_step(log.cycles(), flight, launched, max_cycles=2) == step
+
+
+class TestMenuMatchesItsScripts:
+    """failure_synthesis named a stage dagger_round.sh does not have, and two cycles each burned a GPU wait to find
+    out. A recipe is a string until something runs it, so check the two couplings a string can get wrong."""
+
+    @staticmethod
+    def script_of(action: Action) -> tuple[Path, str]:
+        found = re.search(r"bash (scripts/\S+\.sh)", action.command)
+        assert found, f"{action.name}: no script in {action.command!r}"
+        path = Path(found.group(1))
+        assert path.exists(), f"{action.name}: {path} does not exist"
+        return path, path.read_text()
+
+    @pytest.mark.parametrize("action", MENU, ids=lambda a: a.name)
+    def test_every_variable_a_recipe_sets_is_one_its_script_reads(self, action: Action) -> None:
+        path, source = self.script_of(action)
+        for name in re.findall(r"\b([A-Z][A-Z0-9_]*)=", action.command):
+            assert f"${{{name}" in source or f"${name}" in source, f"{action.name}: {path} never reads ${name}"
+
+    def test_a_stage_a_recipe_names_must_be_one_its_script_branches_on(self) -> None:
+        # the deleted entry, verbatim: STAGE=recover is a dagger.py subcommand, and dagger_round.sh branches on
+        # harvest and aggregate, so it skipped building the dataset and died on a Hub 404
+        for action in MENU:
+            if stage := re.search(r"\bSTAGE=(\S+)", action.command):
+                _, source = self.script_of(action)
+                assert stage.group(1) in re.findall(r'"\$STAGE" = (\w+)', source), action.name

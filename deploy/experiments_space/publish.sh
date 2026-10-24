@@ -15,11 +15,4 @@ trap 'rm -rf "$out"' EXIT
 } > "$out/index.html"
 cp deploy/experiments_space/README.md "$out/"
 [ -f deploy/experiments_space/thumbnail.png ] && cp deploy/experiments_space/thumbnail.png "$out/"
-${PYTHON:-python3} - "$space" "$out" <<'PY'
-import sys
-from huggingface_hub import create_repo, upload_folder
-space, out = sys.argv[1:3]
-create_repo(space, repo_type="space", space_sdk="static", exist_ok=True)
-upload_folder(repo_id=space, repo_type="space", folder_path=out, commit_message="Preflight experiments")
-PY
-echo "https://huggingface.co/spaces/$space"
+bash deploy/upload_space.sh "$space" "$out" static "Preflight experiments"

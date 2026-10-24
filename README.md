@@ -23,7 +23,7 @@ into the next training cycle. Every scene Preflight won't clear becomes a learni
 requests first, and **Nemotron on Token Factory** chooses one of the top three. The run trains on the A100, and a
 paired gate (G3: gain on the target suites, no suite worse) decides; a human approves promotion. Cycle 1 taught a task
 the policy had never seen (eye drops into a basket, 6 → 86 of 96) but transferred nothing to the held-out ring task and
-cost stacking, so the gate discarded it; cycle 4, a DAgger round answering four Preflight refusals, is training.
+cost stacking, so the gate discarded it; cycle 4, a DAgger round answering four Preflight refusals, scored 461/576 against 483 and was discarded too. Five cycles have run and none has been promoted.
 
 ```bash
 npai autopilot intake ~/gallery --scenes ~/gallery/scenes.json

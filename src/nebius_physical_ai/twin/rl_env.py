@@ -24,7 +24,7 @@ import numpy as np
 from nebius_physical_ai.twin.dagger import FailureSnapshot
 from nebius_physical_ai.twin.expert import Frame, PickPlaceExpert, SceneSampler, UnreachableTarget
 from nebius_physical_ai.twin.rollout import CONTROL_HZ, LIFTED_M, StackCheck
-from nebius_physical_ai.twin.scene import ARM_JOINTS, BlockPhysics, Twin, TwinLayout
+from nebius_physical_ai.twin.scene import ARM_JOINTS, FULL_IMAGE_SIZE, BlockPhysics, Twin, TwinLayout
 
 POLICY_HZ = 10
 MAX_DELTA_RAD = 0.06  # per policy step, about 34 degrees a second at full stick
@@ -190,7 +190,7 @@ class PickPlaceEnv(gym.Env):
 
 
 def record_residual_recovery(
-    snapshot: FailureSnapshot, act: Callable[[np.ndarray], np.ndarray], image_size: tuple[int, int] = (480, 640)
+    snapshot: FailureSnapshot, act: Callable[[np.ndarray], np.ndarray], image_size: tuple[int, int] = FULL_IMAGE_SIZE
 ) -> list[Frame] | None:
     """A recovery demo from the snapshot's state by a residual policy (`act` maps an observation to an action), in the
     same form as `dagger.record_recovery`: one camera frame and commanded target per control tick, or None on failure."""

@@ -7,7 +7,7 @@ import numpy as np
 from nebius_physical_ai.capture.mat import DetectedObject
 from nebius_physical_ai.policy.gr00t import Observation
 from nebius_physical_ai.twin.rollout import CONTROL_HZ
-from nebius_physical_ai.twin.scene import ARM_JOINTS, Twin, TwinLayout
+from nebius_physical_ai.twin.scene import ARM_JOINTS, FULL_IMAGE_SIZE, Twin, TwinLayout
 
 GRIP_OPEN, GRIP_CLOSED = 1.2, 0.1  # radians; closed < 0.2 holds a 30 mm cube
 # Fingertip heights; top-down reach tops out near 7.5 cm, so hover low rather than above the cubes' height.
@@ -82,7 +82,12 @@ class PickPlaceExpert:
     """Scripted top-down pick of `pick` and place onto `place`, interpolated in joint space at CONTROL_HZ."""
 
     def __init__(
-        self, twin: Twin, task: str, pick: str = "blue", place: str = "red", image_size: tuple[int, int] = (480, 640)
+        self,
+        twin: Twin,
+        task: str,
+        pick: str = "blue",
+        place: str = "red",
+        image_size: tuple[int, int] = FULL_IMAGE_SIZE,
     ) -> None:
         self.twin, self.task, self.pick, self.place, self.image_size = twin, task, pick, place, image_size
         self.ik = TopDownIK(twin.model)
@@ -91,11 +96,15 @@ class PickPlaceExpert:
         pick = self.twin.block_pos(self.pick)
         place = self.twin.block_pos(self.place)
         stack_z = place[2] + self.twin.geometry(self.place).half[2] + self.twin.geometry(self.pick).half[2]
+        return self.pick_place(pick, np.array([place[0], place[1], stack_z + 0.005]))
+
+    def pick_place(self, pick: np.ndarray, release: np.ndarray, hover_z: float = PLACE_HOVER_Z) -> list[Segment]:
+        """Lift from `pick`, carry over `hover_z` and open at `release`: the grasp sequence every task shares."""
         targets = {
             "pick_hover": np.array([pick[0], pick[1], PICK_HOVER_Z]),
             "pick": pick,
-            "place_hover": np.array([place[0], place[1], PLACE_HOVER_Z]),
-            "place": np.array([place[0], place[1], stack_z + 0.005]),
+            "place_hover": np.array([release[0], release[1], hover_z]),
+            "place": release,
         }
         q, joints = REST_POSE, {}
         for name, target in targets.items():

@@ -153,8 +153,11 @@ class LearningRequest:
 
 
 def learning_request(source: str, record: dict[str, Any], task: TaskSpec) -> LearningRequest | None:
-    """None for a GO (or a failed run); otherwise why Preflight refused, sorted into trainable axes and the rest."""
-    if (verdict := record.get("verdict")) in (None, "GO"):
+    """None unless Preflight refused; otherwise why it did, sorted into trainable axes and the rest."""
+    # Only a refusal is a request. PERCEIVED means the gate passed without rehearsing, and a failed run has no
+    # verdict at all; filing either gave a request with no axes, which no action can answer and which still counted
+    # itself on the Autopilot page.
+    if (verdict := record.get("verdict")) not in ("RETRY", "ASK_HUMAN"):
         return None
     axes, unmet, reasons = [], [], []
     scene, rehearsal = record.get("scene"), record.get("rehearsal") or {}
@@ -178,6 +181,8 @@ def learning_request(source: str, record: dict[str, Any], task: TaskSpec) -> Lea
     elif rehearsal.get("n") and task.in_distribution:
         axes.append("environments")  # the trained task, failing in this arrangement
         reasons.append(f"only {rehearsal['successes']} of {rehearsal['n']} rehearsals succeeded in this layout")
+    if not (axes or unmet):  # refused for something training cannot fix, e.g. markers the camera never saw
+        return None
     return LearningRequest(source, verdict, task.instruction, axes, unmet, reasons)
 
 
@@ -280,23 +285,38 @@ class Planner:
         # demand first: a recipe that answers a real refusal outranks one that only moves the benchmark
         return sorted(ranked, key=lambda c: (c.excluded is not None, not c.answers, c.reopened is not None, -c.score))
 
-    def choose(self, cells: dict[str, Cell], diag: dict[str, Any]) -> tuple[list[Candidate], Candidate | None, str]:
+    def choose(
+        self, cells: dict[str, Cell], diag: dict[str, Any]
+    ) -> tuple[list[Candidate], Candidate | None, str, str]:
+        """The ranking, the pick, why, and who decided it - "nemotron" only when Nemotron's answer was used."""
         ranked = self.candidates(cells)
         eligible = [c for c in ranked if c.excluded is None][:CANDIDATES_SHOWN]
         if not eligible:
-            return ranked, None, "nothing on the menu is eligible: every family that could help is closed or tried"
+            return (
+                ranked,
+                None,
+                "nothing on the menu is eligible: every family that could help is closed or tried",
+                "ranking",
+            )
         if self.chooser is None:
             rationale = "the top-ranked candidate (Nemotron not asked)"
         else:
             try:
                 name, rationale = self.chooser.choose(diag, eligible, self.closed, self.requests)
                 if (pick := next((c for c in eligible if c.action.name == name), None)) is not None:
-                    return ranked, pick, rationale
+                    return ranked, pick, rationale, "nemotron"
                 rationale = f"Nemotron chose '{name}', which is not an eligible candidate; taking the top-ranked one"
             except (httpx.HTTPError, KeyError, ValueError, RuntimeError) as err:
                 rationale = f"Nemotron unavailable ({type(err).__name__}); taking the top-ranked candidate"
         top = eligible[0]
-        return ranked, top, f"{rationale}. {top.action.name} could win back up to {top.reach} failed rehearsals."
+        # the fallback is the ranking's pick, whether or not a chooser was configured: say so rather than claim
+        # Nemotron decided, because the cycle log is what the published Space attributes the decision from
+        return (
+            ranked,
+            top,
+            f"{rationale}. {top.action.name} could win back up to {top.reach} failed rehearsals.",
+            "ranking",
+        )
 
 
 @dataclass
@@ -323,6 +343,35 @@ def utc_now(fmt: str = "%Y-%m-%dT%H:%M:%SZ") -> str:
     return time.strftime(fmt, time.gmtime())
 
 
+class Cycles(dict[int, dict[str, Any]]):
+    """Every cycle by number, each folded to what it is now: a mapping, plus the questions the loop asks of it."""
+
+    def tried(self, refs: list[str]) -> set[str]:
+        """Actions already judged against the same reference benchmark: rerunning one only re-measures it."""
+        return {c["action"] for c in self.values() if c.get("refs") == refs and "verdict" in c}
+
+    def in_flight(self) -> list[int]:
+        return [n for n, c in self.items() if c["event"] == "launched"]
+
+    def promoted(self) -> list[int]:
+        return [n for n, c in self.items() if c["event"] == "judged" and c.get("verdict") == "PROMOTE"]
+
+    def planned(self) -> list[int]:
+        return sorted(n for n, c in self.items() if c["event"] == "planned")
+
+    def action(self, cycle: int) -> Action:
+        """The recipe a cycle ran, refused by name when the menu no longer carries it (a deleted entry, say)."""
+        if (name := self[cycle]["action"]) not in ACTIONS:
+            raise typer.BadParameter(f"cycle {cycle} ran '{name}', which is no longer on the menu")
+        return ACTIONS[name]
+
+    def require(self, cycle: int, event: str) -> dict[str, Any]:
+        """The cycle, refused unless it is in `event`: each command that moves one is valid from a single state."""
+        if (state := self.get(cycle, {}).get("event")) != event:
+            raise typer.BadParameter(f"cycle {cycle} is {state or 'unknown'}, not {event}")
+        return self[cycle]
+
+
 class CycleLog:
     """Append-only events; a cycle is the fold of its events, its state the latest event (planned, launched, judged,
     approved)."""
@@ -336,27 +385,12 @@ class CycleLog:
         with self.path.open("a") as f:
             f.write(json.dumps(row) + "\n")
 
-    def cycles(self) -> dict[int, dict[str, Any]]:
-        folded: dict[int, dict[str, Any]] = {}
+    def cycles(self) -> Cycles:
+        folded = Cycles()
         for e in read_jsonl(self.path):
             stamp = {"planned_at": e["time"]} if e["event"] == "planned" else {}
             folded.setdefault(e["cycle"], {}).update(e, **stamp)
         return folded
-
-
-def tried(cycles: dict[int, dict[str, Any]], refs: list[str]) -> set[str]:
-    """Actions already judged against the same reference benchmark: rerunning one only re-measures it."""
-    return {c["action"] for c in cycles.values() if c.get("refs") == refs and "verdict" in c}
-
-
-def in_flight(cycles: dict[int, dict[str, Any]]) -> list[int]:
-    return [n for n, c in cycles.items() if c["event"] == "launched"]
-
-
-def require(cycles: dict[int, dict[str, Any]], cycle: int, event: str) -> dict[str, Any]:
-    if (state := cycles.get(cycle, {}).get("event")) != event:
-        raise typer.BadParameter(f"cycle {cycle} is {state or 'unknown'}, not {event}")
-    return cycles[cycle]
 
 
 DONE = re.compile(r"[A-Z][A-Z_]*_DONE[:;]([^\n]*)")  # every recipe script ends with `<NAME>_DONE: <result paths>`
@@ -388,9 +422,9 @@ def read_tail(log: Path) -> str:
     return log.read_text(errors="replace") if "DAGGER_ROUND_DONE;" in tail else tail
 
 
-def observe(cycles: dict[int, dict[str, Any]]) -> tuple[int, str, list[str]] | None:
+def observe(cycles: Cycles) -> tuple[int, str, list[str]] | None:
     """The cycle in flight, if any, as (cycle, "finished" | "dead" | "running", result files)."""
-    if not (busy := in_flight(cycles)):
+    if not (busy := cycles.in_flight()):
         return None
     n, log = busy[0], Path(cycles[busy[0]]["log"])
     if not log.exists():
@@ -406,19 +440,33 @@ def observe(cycles: dict[int, dict[str, Any]]) -> tuple[int, str, list[str]] | N
 
 
 def next_step(
-    cycles: dict[int, dict[str, Any]], flight: tuple[int, str, list[str]] | None, launched: int, max_cycles: int
+    cycles: Cycles, flight: tuple[int, str, list[str]] | None, launched: int, max_cycles: int
 ) -> tuple[str, int | None]:
     """The loop's one move: judge, fail, wait, stop at a PROMOTE for a human, launch what is planned, or plan."""
     if flight is not None:
         n, state, _ = flight
         return {"finished": "judge", "dead": "fail", "running": "wait"}[state], n
-    if promoted := [n for n, c in cycles.items() if c["event"] == "judged" and c.get("verdict") == "PROMOTE"]:
+    if promoted := cycles.promoted():
         return "await_approval", promoted[0]
     if launched >= max_cycles:
         return "stop", None
-    if planned := sorted(n for n, c in cycles.items() if c["event"] == "planned"):
+    if planned := cycles.planned():
         return "launch", planned[0]
     return "plan", None
+
+
+def end_cycle(cycle: int, was: str, why: str) -> None:
+    """Close a cycle in `was` without a verdict: one only planned is dropped, one that had launched failed."""
+    log = CycleLog()
+    log.cycles().require(cycle, was)
+    becomes = "dropped" if was == "planned" else "failed"
+    log.append(becomes, cycle, why=why)
+    console.print(f"cycle {cycle}: {becomes} ({why})")
+
+
+def abandon(cycle: int, why: str) -> None:
+    """Close a cycle the loop cannot act on at all, from whichever state it is in."""
+    end_cycle(cycle, CycleLog().cycles().get(cycle, {}).get("event", "planned"), why)
 
 
 def detach(command: list[str], log: Path) -> None:
@@ -457,10 +505,9 @@ def plan(
     cycles, diag, key = log.cycles(), diagnosis(cells), os.environ.get(TOKEN_FACTORY_KEY_ENV)
     chooser = None if offline or action or not key else Chooser(key)
     requests = [LearningRequest(**r) for r in read_jsonl(REQUESTS)]
-    planner = Planner(closed_families(verdicts), tried(cycles, refs), budget_hours, chooser, requests)
+    planner = Planner(closed_families(verdicts), cycles.tried(refs), budget_hours, chooser, requests)
     if action is None:
-        ranked, pick, rationale = planner.choose(cells, diag)
-        chosen_by = "nemotron" if chooser else "ranking"
+        ranked, pick, rationale, chosen_by = planner.choose(cells, diag)
     else:
         ranked = planner.candidates(cells)
         if (pick := next((c for c in ranked if c.action.name == action), None)) is None or pick.excluded:
@@ -487,11 +534,12 @@ def launch(
     """Start a planned cycle detached with a heartbeat; one cycle in flight at a time."""
     log = CycleLog()
     cycles = log.cycles()
-    action = ACTIONS[require(cycles, cycle, "planned")["action"]]
+    cycles.require(cycle, "planned")
+    action = cycles.action(cycle)
     if dry_run:
         console.print(action.command)
         return
-    if busy := in_flight(cycles):
+    if busy := cycles.in_flight():
         raise typer.BadParameter(f"cycle {busy[0]} is still running; judge it first")
     if adopt is not None:
         log.append("launched", cycle, log=str(adopt), adopted=True)
@@ -522,8 +570,10 @@ def judge_cycle(
 ) -> None:
     """Score a finished cycle against its reference with the G3 gate; PROMOTE still waits for `approve`."""
     log = CycleLog()
-    planned = require(log.cycles(), cycle, "launched")
-    result = judge(ACTIONS[planned["action"]], merged_cells([Path(p) for p in planned["refs"]]), merged_cells(results))
+    cycles = log.cycles()
+    planned = cycles.require(cycle, "launched")
+    action = cycles.action(cycle)
+    result = judge(action, merged_cells([Path(p) for p in planned["refs"]]), merged_cells(results))
     log.append("judged", cycle, results=[str(p) for p in results], **asdict(result))
     for suite, line in result.suites.items():
         console.print(f"  {suite}: {line}")
@@ -534,7 +584,7 @@ def judge_cycle(
 def approve(cycle: int, note: str = "") -> None:
     """A human's promotion of a cycle the gate passed."""
     log = CycleLog()
-    if (judged := require(log.cycles(), cycle, "judged"))["verdict"] != "PROMOTE":
+    if (judged := log.cycles().require(cycle, "judged"))["verdict"] != "PROMOTE":
         raise typer.BadParameter(f"cycle {cycle} was judged {judged['verdict']}, not PROMOTE")
     log.append("approved", cycle, note=note)
     console.print(f"cycle {cycle}: {judged['action']} approved for serving")
@@ -543,10 +593,7 @@ def approve(cycle: int, note: str = "") -> None:
 @app.command()
 def drop(cycle: int, why: Annotated[str, typer.Option(help="What changed since it was planned")]) -> None:
     """Withdraw a planned cycle that new evidence has overtaken; the log keeps it and the reason."""
-    log = CycleLog()
-    require(log.cycles(), cycle, "planned")
-    log.append("dropped", cycle, why=why)
-    console.print(f"cycle {cycle}: dropped ({why})")
+    end_cycle(cycle, "planned", why)
 
 
 @app.command()
@@ -574,10 +621,27 @@ def intake(
 @app.command()
 def fail(cycle: int, why: Annotated[str, typer.Option(help="Why the run is over without a result")]) -> None:
     """Close a launched cycle whose run died or stalled without a result; the log keeps it and the reason."""
-    log = CycleLog()
-    require(log.cycles(), cycle, "launched")
-    log.append("failed", cycle, why=why)
-    console.print(f"cycle {cycle}: failed ({why})")
+    end_cycle(cycle, "launched", why)
+
+
+def act_on(step: str, cycle: int, flight: tuple[int, str, list[str]] | None) -> int:
+    """Take a step that is about one cycle (next_step always names one for these), and report launches.
+
+    A cycle the loop cannot act on is closed rather than raised through: next_step always returns the lowest
+    planned cycle, so raising here would make one unrunnable cycle kill the daemon on every restart and block
+    every cycle behind it."""
+    try:
+        match step:
+            case "judge":
+                judge_cycle(cycle, [Path(p) for p in flight[2]] if flight else [])
+            case "fail":
+                fail(cycle, why="the run ended or fell silent without a result; see its log")
+            case "launch":
+                launch(cycle)
+                return 1
+    except typer.BadParameter as err:
+        abandon(cycle, f"the loop could not act on it: {err}")
+    return 0
 
 
 @app.command()
@@ -598,13 +662,8 @@ def run(
         step, n = next_step(cycles, flight, launched, max_cycles)
         console.print(f"[{utc_now()}] autopilot: {step} {n or ''}".rstrip())
         match step:
-            case "judge":
-                judge_cycle(n, [Path(p) for p in flight[2]])
-            case "fail":
-                fail(n, why="the run ended or fell silent without a result; see its log")
-            case "launch":
-                launch(n)
-                launched += 1
+            case "judge" | "fail" | "launch":
+                launched += act_on(step, n, flight)
             case "plan":
                 try:
                     plan(bench, budget_hours=budget_hours, verdicts=verdicts)
@@ -612,8 +671,10 @@ def run(
                     return
             case "await_approval" | "stop":
                 return
-            case _:
+            case "wait":
                 time.sleep(every_min * 60)
+            case _:  # next_step returns a closed set; a new one must not quietly become a sleep
+                raise AssertionError(f"unknown step {step!r}")
 
 
 @app.command()

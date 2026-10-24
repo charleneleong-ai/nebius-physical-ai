@@ -27,7 +27,7 @@ from nebius_physical_ai.twin.expert import Frame, PickPlaceExpert, SceneSampler,
 from nebius_physical_ai.twin.randomize import SceneRandomizer
 from nebius_physical_ai.twin.rehearsal import REHEARSAL_IMAGE_SIZE, REHEARSAL_MAX_STEPS, Perturbation, Variant
 from nebius_physical_ai.twin.rollout import STACK_TASK, BatchRollout, RolloutResult, StackCheck
-from nebius_physical_ai.twin.scene import ARM_JOINTS, BlockPhysics, SceneLook, Twin, TwinLayout
+from nebius_physical_ai.twin.scene import ARM_JOINTS, FULL_IMAGE_SIZE, BlockPhysics, SceneLook, Twin, TwinLayout
 
 # Still in the jaws at the end: the open-loop expert opens on its way to the pick and would drop it where it hangs.
 UNRECOVERABLE = ("holding",)
@@ -205,7 +205,7 @@ def select(
 
 
 def record_recovery(
-    snapshot: FailureSnapshot, layout: TwinLayout, image_size: tuple[int, int] = (480, 640)
+    snapshot: FailureSnapshot, layout: TwinLayout, image_size: tuple[int, int] = FULL_IMAGE_SIZE
 ) -> list[Frame] | None:
     """The expert's demo from the snapshot's state, or None when it can't reach or stack from there."""
     with snapshot.restore(layout) as twin:

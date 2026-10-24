@@ -34,6 +34,7 @@ FLOOR_RGBA = (0.6, 0.6, 0.6, 1.0)
 ARM_PRINT_RGBA = (0.93, 0.93, 0.91, 1.0)
 SERVO_RGBA = (0.08, 0.08, 0.08, 1.0)
 RENDER_ASPECT = 4 / 3  # GR00T's SO-101 checkpoint sees 640x480
+FULL_IMAGE_SIZE = (480, 640)  # what a kept frame renders at; rehearsals use the smaller REHEARSAL_IMAGE_SIZE
 ARM_JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")
 A3_MAT = MatSpec(width_mm=350.0, height_mm=227.0)  # the printed A3 sheet; MatSpec defaults to the A4 cut-outs
 
@@ -363,7 +364,7 @@ class Twin:
             raise KeyError(f"no block {name!r}; the twin has {list(self.blocks)} and fixtures {self.fixture_names}")
         return self.data.body(name).xpos.copy()
 
-    def project(self, world: np.ndarray, camera: str, size: tuple[int, int] = (480, 640)) -> np.ndarray:
+    def project(self, world: np.ndarray, camera: str, size: tuple[int, int] = FULL_IMAGE_SIZE) -> np.ndarray:
         """Pixel (u, v) of world points (N, 3) in `camera`'s render at `size` (height, width)."""
         mujoco.mj_forward(self.model, self.data)
         cam = self.model.camera(camera).id
@@ -381,7 +382,7 @@ class Twin:
                 self.model.geom_rgba[g, 3] = 0.0
 
     def render(
-        self, camera: str, size: tuple[int, int] = (480, 640), renderer: TwinRenderer | None = None
+        self, camera: str, size: tuple[int, int] = FULL_IMAGE_SIZE, renderer: TwinRenderer | None = None
     ) -> np.ndarray:
         """Uses a shared `renderer` if given, else this twin's own (one per image size)."""
         if renderer is None:
@@ -391,7 +392,7 @@ class Twin:
         return renderer.render(self.model, self.data, camera)
 
     def observe(
-        self, task: str, size: tuple[int, int] = (480, 640), renderer: TwinRenderer | None = None
+        self, task: str, size: tuple[int, int] = FULL_IMAGE_SIZE, renderer: TwinRenderer | None = None
     ) -> Observation:
         front, wrist = (self.render(f"{cam}_cam", size, renderer) for cam in CAMERA_KEYS)
         return Observation(front=front, wrist=wrist, joints=self.to_lerobot(self.arm_qpos()), task=task)
