@@ -51,11 +51,7 @@ line-length = 120
 target-version = "py313"
 
 [tool.ruff.lint]
-extend-select = ["ARG001", "ARG002", "C901", "PLR0915"]
-
-[tool.ruff.lint.per-file-ignores]
-# a test double has to match the signature it doubles, and a fixture is taken for its side effect
-"tests/*" = ["ARG001", "ARG002"]
+extend-select = ["C901", "PLR0915"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
