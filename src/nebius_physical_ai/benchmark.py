@@ -280,8 +280,9 @@ class TaskScenes:
         s = self.sampler
         # about 1 draw in 400 clears both gaps inside the reachable box, so this is a rejection sampler with a
         # bound: widen a fixture or a gap far enough and it becomes infeasible, which should say so, not hang.
+        lo, hi = np.array([s.x_range[0], s.y_range[0]]), np.array([s.x_range[1], s.y_range[1]])
         for _ in range(SPOT_TRIES):
-            xy = self.rng.uniform([s.x_range[0], s.y_range[0]], [s.x_range[1], s.y_range[1]], (3, 2))
+            xy = self.rng.uniform(lo, hi, (3, 2))
             gaps = np.linalg.norm(xy[:, None] - xy[None], axis=-1)
             if gaps[0, 1] >= TASK_GAP_MM and min(gaps[2, 0], gaps[2, 1]) >= DECOY_GAP_MM:
                 return xy

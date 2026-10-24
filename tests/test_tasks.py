@@ -57,6 +57,6 @@ def test_held_out_task_suites_keep_only_solvable_scenes() -> None:
     assert [s.name for s in suites] == ["held_out_task_basket", "held_out_task_ring"]
     start = start_pose(np.random.default_rng(benchmark.SEED))
     for suite in suites:
-        assert len(suite.cases) == benchmark.GENERATED_CASES
+        assert len(suite.cases) == 12
         # the point of the suite: a policy miss means the policy, because the scripted expert can do every scene kept
         assert benchmark.expert_solves(suite.cases[0], LAYOUT, start)

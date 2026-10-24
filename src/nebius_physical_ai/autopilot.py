@@ -157,9 +157,8 @@ def learning_request(source: str, record: dict[str, Any], task: TaskSpec) -> Lea
     # Only a refusal is a request. PERCEIVED means the gate passed without rehearsing, and a failed run has no
     # verdict at all; filing either gave a request with no axes, which no action can answer and which still counted
     # itself on the Autopilot page.
-    if record.get("verdict") not in ("RETRY", "ASK_HUMAN"):
+    if (verdict := record.get("verdict")) not in ("RETRY", "ASK_HUMAN"):
         return None
-    verdict = record["verdict"]
     axes, unmet, reasons = [], [], []
     scene, rehearsal = record.get("scene"), record.get("rehearsal") or {}
     if not task.in_distribution:
@@ -354,6 +353,18 @@ class Cycles(dict[int, dict[str, Any]]):
     def in_flight(self) -> list[int]:
         return [n for n, c in self.items() if c["event"] == "launched"]
 
+    def promoted(self) -> list[int]:
+        return [n for n, c in self.items() if c["event"] == "judged" and c.get("verdict") == "PROMOTE"]
+
+    def planned(self) -> list[int]:
+        return sorted(n for n, c in self.items() if c["event"] == "planned")
+
+    def action(self, cycle: int) -> Action:
+        """The recipe a cycle ran, refused by name when the menu no longer carries it (a deleted entry, say)."""
+        if (name := self[cycle]["action"]) not in ACTIONS:
+            raise typer.BadParameter(f"cycle {cycle} ran '{name}', which is no longer on the menu")
+        return ACTIONS[name]
+
     def require(self, cycle: int, event: str) -> dict[str, Any]:
         """The cycle, refused unless it is in `event`: each command that moves one is valid from a single state."""
         if (state := self.get(cycle, {}).get("event")) != event:
@@ -380,14 +391,6 @@ class CycleLog:
             stamp = {"planned_at": e["time"]} if e["event"] == "planned" else {}
             folded.setdefault(e["cycle"], {}).update(e, **stamp)
         return folded
-
-
-def action_of(cycle: dict[str, Any], n: int) -> Action:
-    """The recipe a logged cycle ran, refused by name when the menu no longer carries it (a deleted entry, say),
-    because inside `run` a bare KeyError takes the whole unattended loop down with it."""
-    if (name := cycle["action"]) not in ACTIONS:
-        raise typer.BadParameter(f"cycle {n} ran '{name}', which is no longer on the menu")
-    return ACTIONS[name]
 
 
 DONE = re.compile(r"[A-Z][A-Z_]*_DONE[:;]([^\n]*)")  # every recipe script ends with `<NAME>_DONE: <result paths>`
@@ -443,11 +446,11 @@ def next_step(
     if flight is not None:
         n, state, _ = flight
         return {"finished": "judge", "dead": "fail", "running": "wait"}[state], n
-    if promoted := [n for n, c in cycles.items() if c["event"] == "judged" and c.get("verdict") == "PROMOTE"]:
+    if promoted := cycles.promoted():
         return "await_approval", promoted[0]
     if launched >= max_cycles:
         return "stop", None
-    if planned := sorted(n for n, c in cycles.items() if c["event"] == "planned"):
+    if planned := cycles.planned():
         return "launch", planned[0]
     return "plan", None
 
@@ -531,7 +534,8 @@ def launch(
     """Start a planned cycle detached with a heartbeat; one cycle in flight at a time."""
     log = CycleLog()
     cycles = log.cycles()
-    action = action_of(cycles.require(cycle, "planned"), cycle)
+    cycles.require(cycle, "planned")
+    action = cycles.action(cycle)
     if dry_run:
         console.print(action.command)
         return
@@ -566,8 +570,10 @@ def judge_cycle(
 ) -> None:
     """Score a finished cycle against its reference with the G3 gate; PROMOTE still waits for `approve`."""
     log = CycleLog()
-    planned = log.cycles().require(cycle, "launched")
-    result = judge(action_of(planned, cycle), merged_cells([Path(p) for p in planned["refs"]]), merged_cells(results))
+    cycles = log.cycles()
+    planned = cycles.require(cycle, "launched")
+    action = cycles.action(cycle)
+    result = judge(action, merged_cells([Path(p) for p in planned["refs"]]), merged_cells(results))
     log.append("judged", cycle, results=[str(p) for p in results], **asdict(result))
     for suite, line in result.suites.items():
         console.print(f"  {suite}: {line}")

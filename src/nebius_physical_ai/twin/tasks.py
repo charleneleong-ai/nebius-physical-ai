@@ -101,6 +101,14 @@ class Ring:
     rgba: tuple[float, float, float, float] = (0.85, 0.2, 0.55, 1.0)
     name: str = "ring"
 
+    @property
+    def radius_m(self) -> float:
+        return self.radius_mm / 1000
+
+    @property
+    def tube_m(self) -> float:
+        return self.tube_mm / 1000
+
     def add(self, world: mujoco.MjsBody, layout: TwinLayout) -> None:
         r, tube = self.radius_m, self.tube_m
         body = world.add_body(name=self.name, pos=[*layout.mat_to_world(self.x_mm, self.y_mm), tube + 1e-3])
@@ -112,17 +120,8 @@ class Ring:
                           mass=self.mass_kg / self.segments, rgba=self.rgba, friction=[1.0, 0.005, 0.0001])  # fmt: skip
 
     @property
-    def radius_m(self) -> float:
-        """Centreline radius."""
-        return self.radius_mm / 1000
-
-    @property
-    def tube_m(self) -> float:
-        return self.tube_mm / 1000
-
-    @property
     def hole_m(self) -> float:
-        """Clear radius through the middle: what has to fit over the peg (subtracted in mm, so it rounds once)."""
+        """Clear radius through the middle: what has to fit over the peg."""
         return (self.radius_mm - self.tube_mm) / 1000
 
 

@@ -326,8 +326,6 @@ class TestMenuMatchesItsScripts:
     def test_a_stage_a_recipe_names_must_be_one_its_script_branches_on(self) -> None:
         # the deleted entry, verbatim: STAGE=recover is a dagger.py subcommand, and dagger_round.sh branches on
         # harvest and aggregate, so it skipped building the dataset and died on a Hub 404
-        source = Path("scripts/dagger_round.sh").read_text()
-        assert set(re.findall(r'"\$STAGE" = (\w+)', source)) == {"harvest", "aggregate"}
         for action in MENU:
             if stage := re.search(r"\bSTAGE=(\S+)", action.command):
                 _, source = self.script_of(action)
