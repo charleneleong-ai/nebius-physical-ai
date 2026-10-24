@@ -452,12 +452,18 @@ def next_step(
     return "plan", None
 
 
-def close(cycle: int, was: str, becomes: str, why: str) -> None:
-    """End a cycle that is in `was` without a verdict, keeping why in the log."""
+def end_cycle(cycle: int, was: str, why: str) -> None:
+    """Close a cycle in `was` without a verdict: one only planned is dropped, one that had launched failed."""
     log = CycleLog()
     log.cycles().require(cycle, was)
+    becomes = "dropped" if was == "planned" else "failed"
     log.append(becomes, cycle, why=why)
     console.print(f"cycle {cycle}: {becomes} ({why})")
+
+
+def abandon(cycle: int, why: str) -> None:
+    """Close a cycle the loop cannot act on at all, from whichever state it is in."""
+    end_cycle(cycle, CycleLog().cycles().get(cycle, {}).get("event", "planned"), why)
 
 
 def detach(command: list[str], log: Path) -> None:
@@ -581,7 +587,7 @@ def approve(cycle: int, note: str = "") -> None:
 @app.command()
 def drop(cycle: int, why: Annotated[str, typer.Option(help="What changed since it was planned")]) -> None:
     """Withdraw a planned cycle that new evidence has overtaken; the log keeps it and the reason."""
-    close(cycle, "planned", "dropped", why)
+    end_cycle(cycle, "planned", why)
 
 
 @app.command()
@@ -609,7 +615,27 @@ def intake(
 @app.command()
 def fail(cycle: int, why: Annotated[str, typer.Option(help="Why the run is over without a result")]) -> None:
     """Close a launched cycle whose run died or stalled without a result; the log keeps it and the reason."""
-    close(cycle, "launched", "failed", why)
+    end_cycle(cycle, "launched", why)
+
+
+def act_on(step: str, cycle: int, flight: tuple[int, str, list[str]] | None) -> int:
+    """Take a step that is about one cycle (next_step always names one for these), and report launches.
+
+    A cycle the loop cannot act on is closed rather than raised through: next_step always returns the lowest
+    planned cycle, so raising here would make one unrunnable cycle kill the daemon on every restart and block
+    every cycle behind it."""
+    try:
+        match step:
+            case "judge":
+                judge_cycle(cycle, [Path(p) for p in flight[2]] if flight else [])
+            case "fail":
+                fail(cycle, why="the run ended or fell silent without a result; see its log")
+            case "launch":
+                launch(cycle)
+                return 1
+    except typer.BadParameter as err:
+        abandon(cycle, f"the loop could not act on it: {err}")
+    return 0
 
 
 @app.command()
@@ -630,13 +656,8 @@ def run(
         step, n = next_step(cycles, flight, launched, max_cycles)
         console.print(f"[{utc_now()}] autopilot: {step} {n or ''}".rstrip())
         match step:
-            case "judge":
-                judge_cycle(n, [Path(p) for p in flight[2]])
-            case "fail":
-                fail(n, why="the run ended or fell silent without a result; see its log")
-            case "launch":
-                launch(n)
-                launched += 1
+            case "judge" | "fail" | "launch":
+                launched += act_on(step, n, flight)
             case "plan":
                 try:
                     plan(bench, budget_hours=budget_hours, verdicts=verdicts)

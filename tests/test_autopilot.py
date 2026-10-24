@@ -5,8 +5,10 @@ from typing import Any
 
 import httpx
 import pytest
+import typer
 from typer.testing import CliRunner
 
+from nebius_physical_ai import autopilot
 from nebius_physical_ai.autopilot import (
     ACTIONS,
     MENU,
@@ -126,6 +128,11 @@ class TestJudge:
         assert result.verdict == "DISCARD" and "clean_many" in result.why
 
 
+def stop_planning(*_args: object, **_kwargs: object) -> None:
+    """Stand in for plan(), which run() catches typer.Exit from, to end the loop after one pass."""
+    raise typer.Exit()
+
+
 class TestCycleLog:
     def test_folds_events_and_tracks_tried_and_in_flight(self, tmp_path: Path) -> None:
         log = CycleLog(tmp_path / "cycles.jsonl")
@@ -143,6 +150,21 @@ class TestCycleLog:
         )
         assert cycles.in_flight() == [] and cycles.tried(["r3.json"]) == {"task_round:basket"}
         assert cycles.tried(["r4.json"]) == set()  # a new reference reopens every action
+
+    def test_a_cycle_whose_recipe_left_the_menu_does_not_stop_the_loop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """next_step always picks the lowest planned cycle, so one the menu can no longer run is a poison pill: the
+        daemon dies on it, restarts, picks it again. It has to be closed and stepped over, not raised through."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(autopilot, "plan", stop_planning)  # end the loop after it steps past the bad cycle
+        CycleLog().append("planned", 1, action="a_recipe_since_deleted", refs=["r3.json"])
+
+        result = CliRunner().invoke(app, ["run", "--bench", "r3.json"])
+
+        # exit 0 means the loop closed the bad cycle and carried on to planning, where stop_planning ended it
+        assert result.exit_code == 0, result.output
+        assert CycleLog().cycles()[1]["event"] == "dropped"  # closed, so next_step cannot pick it again
 
     def test_only_a_planned_cycle_can_be_dropped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(tmp_path)
