@@ -344,6 +344,23 @@ def utc_now(fmt: str = "%Y-%m-%dT%H:%M:%SZ") -> str:
     return time.strftime(fmt, time.gmtime())
 
 
+class Cycles(dict[int, dict[str, Any]]):
+    """Every cycle by number, each folded to what it is now: a mapping, plus the questions the loop asks of it."""
+
+    def tried(self, refs: list[str]) -> set[str]:
+        """Actions already judged against the same reference benchmark: rerunning one only re-measures it."""
+        return {c["action"] for c in self.values() if c.get("refs") == refs and "verdict" in c}
+
+    def in_flight(self) -> list[int]:
+        return [n for n, c in self.items() if c["event"] == "launched"]
+
+    def require(self, cycle: int, event: str) -> dict[str, Any]:
+        """The cycle, refused unless it is in `event`: each command that moves one is valid from a single state."""
+        if (state := self.get(cycle, {}).get("event")) != event:
+            raise typer.BadParameter(f"cycle {cycle} is {state or 'unknown'}, not {event}")
+        return self[cycle]
+
+
 class CycleLog:
     """Append-only events; a cycle is the fold of its events, its state the latest event (planned, launched, judged,
     approved)."""
@@ -357,8 +374,8 @@ class CycleLog:
         with self.path.open("a") as f:
             f.write(json.dumps(row) + "\n")
 
-    def cycles(self) -> dict[int, dict[str, Any]]:
-        folded: dict[int, dict[str, Any]] = {}
+    def cycles(self) -> Cycles:
+        folded = Cycles()
         for e in read_jsonl(self.path):
             stamp = {"planned_at": e["time"]} if e["event"] == "planned" else {}
             folded.setdefault(e["cycle"], {}).update(e, **stamp)
@@ -371,21 +388,6 @@ def action_of(cycle: dict[str, Any], n: int) -> Action:
     if (name := cycle["action"]) not in ACTIONS:
         raise typer.BadParameter(f"cycle {n} ran '{name}', which is no longer on the menu")
     return ACTIONS[name]
-
-
-def tried(cycles: dict[int, dict[str, Any]], refs: list[str]) -> set[str]:
-    """Actions already judged against the same reference benchmark: rerunning one only re-measures it."""
-    return {c["action"] for c in cycles.values() if c.get("refs") == refs and "verdict" in c}
-
-
-def in_flight(cycles: dict[int, dict[str, Any]]) -> list[int]:
-    return [n for n, c in cycles.items() if c["event"] == "launched"]
-
-
-def require(cycles: dict[int, dict[str, Any]], cycle: int, event: str) -> dict[str, Any]:
-    if (state := cycles.get(cycle, {}).get("event")) != event:
-        raise typer.BadParameter(f"cycle {cycle} is {state or 'unknown'}, not {event}")
-    return cycles[cycle]
 
 
 DONE = re.compile(r"[A-Z][A-Z_]*_DONE[:;]([^\n]*)")  # every recipe script ends with `<NAME>_DONE: <result paths>`
@@ -417,9 +419,9 @@ def read_tail(log: Path) -> str:
     return log.read_text(errors="replace") if "DAGGER_ROUND_DONE;" in tail else tail
 
 
-def observe(cycles: dict[int, dict[str, Any]]) -> tuple[int, str, list[str]] | None:
+def observe(cycles: Cycles) -> tuple[int, str, list[str]] | None:
     """The cycle in flight, if any, as (cycle, "finished" | "dead" | "running", result files)."""
-    if not (busy := in_flight(cycles)):
+    if not (busy := cycles.in_flight()):
         return None
     n, log = busy[0], Path(cycles[busy[0]]["log"])
     if not log.exists():
@@ -435,7 +437,7 @@ def observe(cycles: dict[int, dict[str, Any]]) -> tuple[int, str, list[str]] | N
 
 
 def next_step(
-    cycles: dict[int, dict[str, Any]], flight: tuple[int, str, list[str]] | None, launched: int, max_cycles: int
+    cycles: Cycles, flight: tuple[int, str, list[str]] | None, launched: int, max_cycles: int
 ) -> tuple[str, int | None]:
     """The loop's one move: judge, fail, wait, stop at a PROMOTE for a human, launch what is planned, or plan."""
     if flight is not None:
@@ -448,6 +450,14 @@ def next_step(
     if planned := sorted(n for n, c in cycles.items() if c["event"] == "planned"):
         return "launch", planned[0]
     return "plan", None
+
+
+def close(cycle: int, was: str, becomes: str, why: str) -> None:
+    """End a cycle that is in `was` without a verdict, keeping why in the log."""
+    log = CycleLog()
+    log.cycles().require(cycle, was)
+    log.append(becomes, cycle, why=why)
+    console.print(f"cycle {cycle}: {becomes} ({why})")
 
 
 def detach(command: list[str], log: Path) -> None:
@@ -486,7 +496,7 @@ def plan(
     cycles, diag, key = log.cycles(), diagnosis(cells), os.environ.get(TOKEN_FACTORY_KEY_ENV)
     chooser = None if offline or action or not key else Chooser(key)
     requests = [LearningRequest(**r) for r in read_jsonl(REQUESTS)]
-    planner = Planner(closed_families(verdicts), tried(cycles, refs), budget_hours, chooser, requests)
+    planner = Planner(closed_families(verdicts), cycles.tried(refs), budget_hours, chooser, requests)
     if action is None:
         ranked, pick, rationale, chosen_by = planner.choose(cells, diag)
     else:
@@ -515,11 +525,11 @@ def launch(
     """Start a planned cycle detached with a heartbeat; one cycle in flight at a time."""
     log = CycleLog()
     cycles = log.cycles()
-    action = action_of(require(cycles, cycle, "planned"), cycle)
+    action = action_of(cycles.require(cycle, "planned"), cycle)
     if dry_run:
         console.print(action.command)
         return
-    if busy := in_flight(cycles):
+    if busy := cycles.in_flight():
         raise typer.BadParameter(f"cycle {busy[0]} is still running; judge it first")
     if adopt is not None:
         log.append("launched", cycle, log=str(adopt), adopted=True)
@@ -550,7 +560,7 @@ def judge_cycle(
 ) -> None:
     """Score a finished cycle against its reference with the G3 gate; PROMOTE still waits for `approve`."""
     log = CycleLog()
-    planned = require(log.cycles(), cycle, "launched")
+    planned = log.cycles().require(cycle, "launched")
     result = judge(action_of(planned, cycle), merged_cells([Path(p) for p in planned["refs"]]), merged_cells(results))
     log.append("judged", cycle, results=[str(p) for p in results], **asdict(result))
     for suite, line in result.suites.items():
@@ -562,7 +572,7 @@ def judge_cycle(
 def approve(cycle: int, note: str = "") -> None:
     """A human's promotion of a cycle the gate passed."""
     log = CycleLog()
-    if (judged := require(log.cycles(), cycle, "judged"))["verdict"] != "PROMOTE":
+    if (judged := log.cycles().require(cycle, "judged"))["verdict"] != "PROMOTE":
         raise typer.BadParameter(f"cycle {cycle} was judged {judged['verdict']}, not PROMOTE")
     log.append("approved", cycle, note=note)
     console.print(f"cycle {cycle}: {judged['action']} approved for serving")
@@ -571,10 +581,7 @@ def approve(cycle: int, note: str = "") -> None:
 @app.command()
 def drop(cycle: int, why: Annotated[str, typer.Option(help="What changed since it was planned")]) -> None:
     """Withdraw a planned cycle that new evidence has overtaken; the log keeps it and the reason."""
-    log = CycleLog()
-    require(log.cycles(), cycle, "planned")
-    log.append("dropped", cycle, why=why)
-    console.print(f"cycle {cycle}: dropped ({why})")
+    close(cycle, "planned", "dropped", why)
 
 
 @app.command()
@@ -602,10 +609,7 @@ def intake(
 @app.command()
 def fail(cycle: int, why: Annotated[str, typer.Option(help="Why the run is over without a result")]) -> None:
     """Close a launched cycle whose run died or stalled without a result; the log keeps it and the reason."""
-    log = CycleLog()
-    require(log.cycles(), cycle, "launched")
-    log.append("failed", cycle, why=why)
-    console.print(f"cycle {cycle}: failed ({why})")
+    close(cycle, "launched", "failed", why)
 
 
 @app.command()

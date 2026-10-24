@@ -19,13 +19,11 @@ from nebius_physical_ai.autopilot import (
     app,
     axis_of,
     diagnosis,
-    in_flight,
     judge,
     learning_request,
     next_step,
     read_jsonl,
     results_from_log,
-    tried,
 )
 from nebius_physical_ai.benchmark import Cell
 from nebius_physical_ai.task import TaskSpec
@@ -133,7 +131,7 @@ class TestCycleLog:
         log = CycleLog(tmp_path / "cycles.jsonl")
         log.append("planned", 1, action="task_round:basket", refs=["r3.json"])
         log.append("launched", 1, log="x.log")
-        assert in_flight(log.cycles()) == [1] and tried(log.cycles(), ["r3.json"]) == set()
+        assert log.cycles().in_flight() == [1] and log.cycles().tried(["r3.json"]) == set()
         log.append("judged", 1, verdict="KEEP", why="within noise")
         with log.path.open("a") as f:
             f.write('{"event": "launch')  # an append cut off mid-write
@@ -143,8 +141,8 @@ class TestCycleLog:
             "task_round:basket",
             "KEEP",
         )
-        assert in_flight(cycles) == [] and tried(cycles, ["r3.json"]) == {"task_round:basket"}
-        assert tried(cycles, ["r4.json"]) == set()  # a new reference reopens every action
+        assert cycles.in_flight() == [] and cycles.tried(["r3.json"]) == {"task_round:basket"}
+        assert cycles.tried(["r4.json"]) == set()  # a new reference reopens every action
 
     def test_only_a_planned_cycle_can_be_dropped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(tmp_path)
