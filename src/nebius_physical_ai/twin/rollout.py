@@ -4,7 +4,7 @@ from typing import Protocol
 import numpy as np
 
 from nebius_physical_ai.policy.gr00t import Policy
-from nebius_physical_ai.twin.scene import Twin, TwinRenderer
+from nebius_physical_ai.twin.scene import FULL_IMAGE_SIZE, Twin, TwinRenderer
 
 CONTROL_HZ = 30  # LeRobot SO-101 recording rate: one action per control tick
 STACK_TASK = "Pick blue cube and place on red cube"  # verbatim prompt the checkpoint was fine-tuned on
@@ -99,7 +99,7 @@ class BatchRollout:
         twins: list[Twin],
         policy: Policy,
         task: str | list[str],
-        image_size: tuple[int, int] = (480, 640),
+        image_size: tuple[int, int] = FULL_IMAGE_SIZE,
         renderer: TwinRenderer | None = None,
         record: bool = False,
         record_decisions: bool = False,

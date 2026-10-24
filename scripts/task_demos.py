@@ -19,14 +19,13 @@ from rich.progress import track
 
 from nebius_physical_ai.benchmark import (
     OBLIQUE_ELEVATION_DEG,
-    Case,
     TaskScenes,
     oblique_camera,
     run_expert,
 )
 from nebius_physical_ai.twin.dataset import LeRobotWriter
-from nebius_physical_ai.twin.expert import Frame, start_pose
-from nebius_physical_ai.twin.scene import TwinLayout
+from nebius_physical_ai.twin.expert import start_pose
+from nebius_physical_ai.twin.scene import FULL_IMAGE_SIZE, TwinLayout
 
 PHRASINGS = {
     "basket": (
@@ -45,13 +44,7 @@ PHRASINGS = {
     ),
 }
 STREAMS = {"basket": 130, "ring": 131}  # away from the benchmark's held_out_tasks streams (30, 31)
-DEMO_IMAGE_SIZE = (480, 640)  # the expert's own default: demonstrations are kept, so they render full size
 app = typer.Typer(add_completion=False)
-
-
-def record(case: Case, layout: TwinLayout, rng: np.random.Generator) -> list[Frame] | None:
-    """The expert's frames for one case at demonstration resolution, or None when it cannot complete the task."""
-    return run_expert(case, layout, start_pose(rng), image_size=DEMO_IMAGE_SIZE)
 
 
 @app.command()
@@ -76,7 +69,7 @@ def main(
             camera = oblique_camera(layout, elevation, rng.uniform(-azimuth_deg, azimuth_deg))
             prompt = str(rng.choice(PHRASINGS[task]))
             case = getattr(TaskScenes(layout, rng, camera), task)(prompt)
-            if (frames := record(case, layout, rng)) is not None:
+            if (frames := run_expert(case, layout, start_pose(rng), FULL_IMAGE_SIZE)) is not None:
                 writer.add_episode(frames, prompt)
                 prompts[prompt] += 1
                 break

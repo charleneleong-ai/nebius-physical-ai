@@ -11,7 +11,7 @@ import pyarrow.parquet as pq
 from nebius_physical_ai.policy.gr00t import CAMERA_KEYS, LAYOUTS
 from nebius_physical_ai.twin.expert import Frame
 from nebius_physical_ai.twin.rollout import CONTROL_HZ
-from nebius_physical_ai.twin.scene import ARM_JOINTS
+from nebius_physical_ai.twin.scene import ARM_JOINTS, FULL_IMAGE_SIZE
 
 JOINT_NAMES = [f"{j}.pos" for j in ARM_JOINTS]
 CAMERAS = {name: f"observation.images.{name}" for name in CAMERA_KEYS}
@@ -44,7 +44,7 @@ class LeRobotWriter:
     root: Path
     robot_type: str = "so101_follower"
     layout: str = "stock"  # joint layout written to modality.json (see `modality`)
-    image_size: tuple[int, int] = (480, 640)
+    image_size: tuple[int, int] = FULL_IMAGE_SIZE
     tasks: list[str] = field(default_factory=list)
     episodes: list[dict[str, Any]] = field(default_factory=list)
     total_frames: int = 0

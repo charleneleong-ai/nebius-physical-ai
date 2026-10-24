@@ -19,7 +19,7 @@ from nebius_physical_ai.twin.expert import (
     Segment,
 )
 from nebius_physical_ai.twin.rollout import Check
-from nebius_physical_ai.twin.scene import Twin, TwinLayout
+from nebius_physical_ai.twin.scene import FULL_IMAGE_SIZE, Twin, TwinLayout
 
 WICKER = (0.62, 0.45, 0.25, 1.0)
 WOOD = (0.55, 0.38, 0.22, 1.0)
@@ -170,7 +170,7 @@ class TaskCheck(Check, Protocol):
 class TaskExpert(PickPlaceExpert):
     """The scripted top-down pick and place, with grasp and release points from the task's check."""
 
-    def __init__(self, twin: Twin, task: str, check: TaskCheck, image_size: tuple[int, int] = (480, 640)) -> None:
+    def __init__(self, twin: Twin, task: str, check: TaskCheck, image_size: tuple[int, int] = FULL_IMAGE_SIZE) -> None:
         super().__init__(twin, task, check.top, check.bottom, image_size)
         self.check = check
 
