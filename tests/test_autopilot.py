@@ -151,6 +151,23 @@ class TestCycleLog:
         assert cycles.in_flight() == [] and cycles.tried(["r3.json"]) == {"task_round:basket"}
         assert cycles.tried(["r4.json"]) == set()  # a new reference reopens every action
 
+    def test_a_recipe_that_dies_twice_stops_being_picked(self, tmp_path: Path) -> None:
+        """A failed cycle records no verdict, so `tried` never excludes it and the planner picks the same broken
+        recipe again: cycles 6 and 7 both ran failure_synthesis, 8 and 9 both real_cotrain. One failure can be a
+        flake; two in a row is the recipe."""
+        log = CycleLog(tmp_path / "cycles.jsonl")
+        refs = ["r3.json"]
+        for cycle in (1, 2):
+            log.append("planned", cycle, action="real_cotrain", refs=refs)
+            log.append("launched", cycle, log="x.log")
+            if cycle == 1:
+                assert log.cycles().failing(refs) == set()  # one death is not yet the recipe's fault
+            log.append("failed", cycle, why="the run ended without a result")
+
+        assert log.cycles().failing(refs) == {"real_cotrain"}
+        assert log.cycles().tried(refs) == set()  # and it is still unjudged, which is why `tried` cannot catch it
+        assert log.cycles().failing(["r4.json"]) == set()  # a new reference starts the count over
+
     def test_a_voided_cycle_stops_closing_the_recipe_it_never_tested(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -266,6 +266,8 @@ class Planner:
     chooser: Chooser | None
     requests: list[LearningRequest] = field(default_factory=list)
     menu: tuple[Action, ...] = MENU  # injectable so a test can rank a menu of its own rather than whatever ships
+    # keyword-only: a planner that does not care about failures still reads as Planner(closed, tried, budget, chooser)
+    failing: set[str] = field(default_factory=set, kw_only=True)
 
     def candidates(self, cells: dict[str, Cell]) -> list[Candidate]:
         ranked = []
@@ -277,6 +279,7 @@ class Planner:
             why = (
                 f"family '{action.family}' closed in verdicts.yaml" if action.family in self.closed and not answers
                 else "already judged against this reference" if action.name in self.tried
+                else "its last two runs died without a result; see the cycle log" if action.name in self.failing
                 else f"{action.hours:.0f} h is over the {self.budget_hours:.0f} h budget" if action.hours > self.budget_hours
                 else "no failures it addresses" if not reach
                 else None
@@ -356,6 +359,18 @@ class Cycles(dict[int, dict[str, Any]]):
             for c in self.values()
             if c.get("refs") == refs and "verdict" in c and c["event"] != "invalidated"
         }
+
+    def failing(self, refs: list[str], times: int = 2) -> set[str]:
+        """Actions that have died `times` times against this reference without ever reaching a verdict.
+
+        A failed cycle records no verdict, so `tried` does not exclude it and the planner picks the same recipe
+        again: cycles 6 and 7 both ran failure_synthesis, 8 and 9 both real_cotrain, each pair dying the same way.
+        One failure can be a flake; two in a row is the recipe, so it steps aside until a human looks."""
+        counts = Counter(
+            c["action"] for c in self.values()
+            if c.get("refs") == refs and c["event"] == "failed" and "verdict" not in c
+        )  # fmt: skip
+        return {action for action, n in counts.items() if n >= times}
 
     def in_flight(self) -> list[int]:
         return [n for n, c in self.items() if c["event"] == "launched"]
@@ -512,7 +527,9 @@ def plan(
     cycles, diag, key = log.cycles(), diagnosis(cells), os.environ.get(TOKEN_FACTORY_KEY_ENV)
     chooser = None if offline or action or not key else Chooser(key)
     requests = [LearningRequest(**r) for r in read_jsonl(REQUESTS)]
-    planner = Planner(closed_families(verdicts), cycles.tried(refs), budget_hours, chooser, requests)
+    planner = Planner(
+        closed_families(verdicts), cycles.tried(refs), budget_hours, chooser, requests, failing=cycles.failing(refs)
+    )
     if action is None:
         ranked, pick, rationale, chosen_by = planner.choose(cells, diag)
     else:
