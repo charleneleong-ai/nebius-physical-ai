@@ -151,6 +151,30 @@ class TestCycleLog:
         assert cycles.in_flight() == [] and cycles.tried(["r3.json"]) == {"task_round:basket"}
         assert cycles.tried(["r4.json"]) == set()  # a new reference reopens every action
 
+    def test_a_voided_cycle_stops_closing_the_recipe_it_never_tested(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cycle 5 pointed co-training at the base demos instead of the round aggregate, so its 409/576 measured
+        forgetting, not the recipe. A verdict like that must not keep the recipe closed."""
+        monkeypatch.chdir(tmp_path)
+        log = CycleLog()
+        log.append("planned", 1, action="real_cotrain", refs=["r3.json"])
+        log.append("launched", 1, log="x.log")
+        log.append("judged", 1, verdict="DISCARD", why="worse on three suites")
+        assert log.cycles().tried(["r3.json"]) == {"real_cotrain"}
+
+        assert CliRunner().invoke(app, ["invalidate", "1", "--why", "trained on the wrong dataset"]).exit_code == 0
+
+        assert log.cycles().tried(["r3.json"]) == set()  # the recipe is open again
+        voided = log.cycles()[1]
+        assert voided["verdict"] == "DISCARD" and voided["voided"] == "DISCARD"  # the judgement is still on record
+        assert log.cycles().in_flight() == [] and log.cycles().planned() == []  # and the cycle is inert
+
+    def test_only_a_judged_cycle_can_be_invalidated(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        CycleLog().append("planned", 1, action="real_cotrain", refs=["r3.json"])
+        assert CliRunner().invoke(app, ["invalidate", "1", "--why", "x"]).exit_code != 0
+
     def test_a_cycle_whose_recipe_left_the_menu_does_not_stop_the_loop(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -6,6 +6,8 @@
 #       suites, excluding the suite the action trains on directly, and no shared suite significantly worse. Fixed
 #       18 Oct 2026, before the first cycle (multi-task basket, ring held out) was scored.
 #   S1  screen: paired McNemar per suite against the reference on the suites run; adopted only on a significant gain.
+# Verdicts: PROMOTE (shipped, a new best), KEEP (kept for later work), DISCARD (closed), VOID (the run did not test
+#   the recipe it named, so it answers nothing; it never counts towards closing a family).
 pr_base: https://github.com/charleneleong-ai/nebius-physical-ai/pull
 experiments:
   - label: v5 fine-tune (800 scripted twin demos)
@@ -191,6 +193,20 @@ experiments:
     result: 461/576. 800 rollouts, 123 failure states kept, 32 recovered (26%); held_out_objects 59 (+11/-9, within noise) but real_1_pomade_tin 87 -> 77 (p=0.013) and in_path_pomade_tin 88 -> 79 (p=0.049) worse. DAgger is near saturation on these failure modes.
     verdict: DISCARD
     pr: 35
+  - label: "Autopilot cycle 5: real co-training on the served policy -- VOID, the run was misconfigured"
+    family: cotrain
+    runs: {dgj9m8i7: train, 6ahwotsi: bench}
+    baseline: round 3 483
+    gate: G3
+    result: >-
+      409/576, worse on clean_many (88 -> 64, p<0.001), real_1_pomade_tin_many (87 -> 62, p<0.001) and
+      in_path_pomade_tin_many (88 -> 79, p=0.035). Not a test of co-training: the recipe passed the base demos as the
+      twin dataset instead of the round-3 aggregate, so the fine-tune dropped the recoveries round 3 was built on and
+      the run measured forgetting. Nemotron was not consulted either -- the daemon was launched without
+      NEBIUS_API_KEY, so the action came from the ranking, which the cycle log recorded as chosen_by=ranking.
+      The lineage is fixed in #36; the cycle was voided on 2026-10-25 so the recipe can be tried for the first time.
+    verdict: VOID
+    pr: 36
 superseded:  # killed, crashed on launch, or relaunched; tagged `superseded`
   [te8xslg6, uf547kdi, 5vzuj6cz, 9mq1zp6u, 7wdlq67i, cl3ltozz, z0etzlli, 15i8w2eg, rhicuin5, 9p93rb37, 30r7i00q, ap8n1409,
    r83f86xc, kog76yhz, 2duwptwy, 9xe5clfu, 3fysf7vw, ypcoha4l, 6njr9qet]

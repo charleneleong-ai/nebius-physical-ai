@@ -347,8 +347,15 @@ class Cycles(dict[int, dict[str, Any]]):
     """Every cycle by number, each folded to what it is now: a mapping, plus the questions the loop asks of it."""
 
     def tried(self, refs: list[str]) -> set[str]:
-        """Actions already judged against the same reference benchmark: rerunning one only re-measures it."""
-        return {c["action"] for c in self.values() if c.get("refs") == refs and "verdict" in c}
+        """Actions already judged against the same reference benchmark: rerunning one only re-measures it.
+
+        A cycle voided by `invalidate` does not count: its run never tested the recipe it named, so the recipe is
+        still unanswered and the planner should be free to pick it again."""
+        return {
+            c["action"]
+            for c in self.values()
+            if c.get("refs") == refs and "verdict" in c and c["event"] != "invalidated"
+        }
 
     def in_flight(self) -> list[int]:
         return [n for n, c in self.items() if c["event"] == "launched"]
@@ -622,6 +629,21 @@ def intake(
 def fail(cycle: int, why: Annotated[str, typer.Option(help="Why the run is over without a result")]) -> None:
     """Close a launched cycle whose run died or stalled without a result; the log keeps it and the reason."""
     end_cycle(cycle, "launched", why)
+
+
+@app.command()
+def invalidate(
+    cycle: int, why: Annotated[str, typer.Option(help="Why the run did not test the recipe it named")]
+) -> None:
+    """Void a judged cycle whose run was misconfigured, so its action can be planned again.
+
+    A verdict is an answer about a recipe. When the run measured something else -- a wrong dataset, a wrong
+    checkpoint -- the number is real but it answers nothing, and leaving it in place closes the recipe on evidence
+    that was never about it. The judgement stays in the log; it simply stops counting as tried."""
+    log = CycleLog()
+    judged = log.cycles().require(cycle, "judged")
+    log.append("invalidated", cycle, why=why, voided=judged.get("verdict"))
+    console.print(f"cycle {cycle}: invalidated ({why}); {judged['action']} can be planned again")
 
 
 def act_on(step: str, cycle: int, flight: tuple[int, str, list[str]] | None) -> int:
