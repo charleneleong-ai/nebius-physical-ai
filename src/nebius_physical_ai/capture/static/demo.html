@@ -111,11 +111,11 @@ footer { border-top: 1px solid var(--line); padding-top: 24px; color: var(--mute
       <div><b>483 / 576</b><span>served policy, six benchmark suites</span></div>
       <div><b>32×</b><span>rehearsals per scene before a verdict</span></div>
       <nav class="links">
-        <a class="primary" href="https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e">Hugging Face collection</a>
-        <a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot: the loop that retrains it</a>
-        <a href="https://huggingface.co/spaces/chaleong/preflight-experiments">All experiments</a>
-        <a href="https://github.com/charleneleong-ai/nebius-physical-ai">Code (GitHub)</a>
-        <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==">W&amp;B report</a>
+        <a class="primary" href="https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e" target="_blank" rel="noopener">Hugging Face collection</a>
+        <a href="https://huggingface.co/spaces/chaleong/autopilot" target="_blank" rel="noopener">Autopilot: the loop that retrains it</a>
+        <a href="https://huggingface.co/spaces/chaleong/preflight-experiments" target="_blank" rel="noopener">All experiments</a>
+        <a href="https://github.com/charleneleong-ai/nebius-physical-ai" target="_blank" rel="noopener">Code (GitHub)</a>
+        <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==" target="_blank" rel="noopener">W&amp;B report</a>
       </nav>
     </aside>
   </header>
@@ -172,7 +172,7 @@ footer { border-top: 1px solid var(--line); padding-top: 24px; color: var(--mute
 
   <section id="architecture">
     <div class="head"><div><div class="tag">04 · Architecture</div><h2 style="margin-top:10px">What runs where</h2></div>
-      <p class="stat">One photo in, one verdict out. Models are linked from the <a href="https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e">collection</a>.</p></div>
+      <p class="stat">One photo in, one verdict out. Models are linked from the <a href="https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e" target="_blank" rel="noopener">collection</a>.</p></div>
     <table class="stages">
       <tr><th>Stage</th><th>What happens</th><th>Where it runs</th></tr>
       <tr><td>01</td><td><b>Phone photo</b>Top-down frame of the A3 mat with four ArUco corner markers.</td><td class="where">your browser, uploaded to this Space</td></tr>
@@ -181,12 +181,12 @@ footer { border-top: 1px solid var(--line); padding-top: 24px; color: var(--mute
       <tr><td>04</td><td><b>Trust gate</b>Low twin fidelity: ASK_HUMAN before anything is rehearsed, because a rehearsal in a twin that does not match the table measures nothing. A task outside training is flagged and still rehearsed - the success rate is the answer to whether it works.</td><td class="where">this Space</td></tr>
       <tr><td>05</td><td><b>Rehearsal</b>The robot's own policy, GR00T N1.7 fine-tuned by DAgger, runs randomised rollouts in the twin.</td><td class="where">GPU job (job.Dockerfile); A100 for the gallery</td></tr>
       <tr><td>06</td><td><b>Verdict</b>GO / RETRY / ASK_HUMAN from the success rate and its 95% interval, in plain words.</td><td class="where">Nemotron 3 Ultra, Nebius Token Factory</td></tr>
-      <tr><td>&rarr;</td><td><b>Autopilot</b>What fails here becomes the next training cycle; a paired gate decides, a human approves.</td><td class="where"><a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot Space</a>; A100 trains</td></tr>
+      <tr><td>&rarr;</td><td><b>Autopilot</b>What fails here becomes the next training cycle; a paired gate decides, a human approves.</td><td class="where"><a href="https://huggingface.co/spaces/chaleong/autopilot" target="_blank" rel="noopener">Autopilot Space</a>; A100 trains</td></tr>
     </table>
   </section>
 
   <footer>Simulation only: the physical SO-101 has not arrived, so every rehearsal is in the twin.
-    Code and results: <a href="https://github.com/charleneleong-ai/nebius-physical-ai">github.com/charleneleong-ai/nebius-physical-ai</a>.</footer>
+    Code and results: <a href="https://github.com/charleneleong-ai/nebius-physical-ai" target="_blank" rel="noopener">github.com/charleneleong-ai/nebius-physical-ai</a>.</footer>
 </main>
 <script>
 const el = (tag, attrs = {}, ...kids) => {
