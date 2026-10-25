@@ -149,6 +149,7 @@ class SceneRandomizer:
         camera_mix: tuple[float, float, float] = DEFAULT_CAMERA_MIX,
         role_agnostic: bool = False,
         colours: tuple[str, ...] = roles.TRAIN_COLOURS,
+        pair: tuple[str, str] | None = None,
         exclude_real: tuple[str, ...] | None = None,
     ) -> None:
         """`real_objects` (e.g. `npai lift` output) are placed as distractors half the time, so demos see real clutter.
@@ -163,6 +164,11 @@ class SceneRandomizer:
         """
         self.layout, self.ranges = layout, ranges or Randomization()
         self.role_agnostic, self.colours = role_agnostic, colours
+        if pair and not set(pair) <= set(colours):
+            raise ValueError(f"pinned pair {pair} is not drawn from the training colours {colours}")
+        if pair and not role_agnostic:
+            raise ValueError("a pinned pair needs role_agnostic: nothing else names the objects in the prompt")
+        self.pair = pair  # when set, every described episode asks for this pick on this place
         if exclude_real is None:
             exclude_real = roles.HELD_OUT_REAL if role_agnostic else ()
         skipped = (*TASK_LABELS, *exclude_real)
@@ -364,7 +370,10 @@ class SceneRandomizer:
         out exactly one object each. Pick objects are always synthetic: the real ones are wider than the jaws open."""
         pick_at, place_at = sampler.sample()
         r = self.ranges
-        pick_colour, place_colour = (str(c) for c in self.rng.choice(self.colours, 2, replace=False))
+        if self.pair:  # a pinned pair draws nothing: its episodes vary in all but what is asked for
+            pick_colour, place_colour = self.pair
+        else:
+            pick_colour, place_colour = (str(c) for c in self.rng.choice(self.colours, 2, replace=False))
         pick = self.block(
             pick_colour, r.pick_width_mm, r.pick_height_mm, r.pick_length_mm, (pick_at.x_mm, pick_at.y_mm)
         )

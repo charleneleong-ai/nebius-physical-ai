@@ -47,8 +47,9 @@ from nebius_physical_ai.pipeline import (
     parse_json_object,
     reply_text,
 )
-from nebius_physical_ai.task import DEFAULT_TASK, TaskSpec
+from nebius_physical_ai.task import DEFAULT_TASK, TaskSpec, slug
 from nebius_physical_ai.trust.verdict import TrustPolicy
+from nebius_physical_ai.twin import roles
 from nebius_physical_ai.twin.rollout import FailureWatch
 from nebius_physical_ai.verdicts import VERDICTS, closed_families
 
@@ -122,11 +123,14 @@ MENU = (
     # cycles 6 and 7 each waited hours for the GPU and then died in 13 seconds. Restore it with the branch.
     Action("real_cotrain", "cotrain", frozenset({"environments"}), CONTACT_FAILURES, COTRAIN_CMD, hours=6.0),
 )  # fmt: skip
-ACTIONS = {a.name: a for a in MENU}
 
 
 def merged_cells(benches: list[Path]) -> dict[str, Cell]:
     return {suite: cell for path in benches for suite, cell in load_cells(path)[1].items()}
+
+
+def open_requests() -> list["LearningRequest"]:
+    return [LearningRequest(**r) for r in read_jsonl(REQUESTS)]
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -150,6 +154,20 @@ class LearningRequest:
     axes: list[str]
     unmet: list[str]
     reasons: list[str]
+    pick: str = ""  # defaulted: requests filed before pair_round existed carry neither half
+    place: str = ""
+
+    @property
+    def trainable_pair(self) -> tuple[str, str] | None:
+        """The pair this refusal asked for, or None when it cannot be trained as one.
+
+        None covers three cases that must not become a recipe: a request filed before the halves were
+        recorded, one with no trainable axis, and one naming an object outside the training vocabulary --
+        demos of a held-out colour would train on exactly what `held_out_objects` measures."""
+        pair = (slug(self.pick), slug(self.place))
+        if not (self.pick and self.place and self.axes):
+            return None
+        return pair if all(c in roles.TRAIN_COLOURS for c in pair) else None
 
 
 def learning_request(source: str, record: dict[str, Any], task: TaskSpec) -> LearningRequest | None:
@@ -183,7 +201,38 @@ def learning_request(source: str, record: dict[str, Any], task: TaskSpec) -> Lea
         reasons.append(f"only {rehearsal['successes']} of {rehearsal['n']} rehearsals succeeded in this layout")
     if not (axes or unmet):  # refused for something training cannot fix, e.g. markers the camera never saw
         return None
-    return LearningRequest(source, verdict, task.instruction, axes, unmet, reasons)
+    return LearningRequest(source, verdict, task.instruction, axes, unmet, reasons, task.pick, task.place)
+
+
+def pair_actions(requests: list[LearningRequest]) -> tuple[Action, ...]:
+    """One recipe for the refusals that name a pick and a place, grouped by the pair they asked for.
+
+    Several photos usually refuse the same instruction, and a run per photo would pay the same GPU cost for the
+    same demos. Grouping gives one dataset over the distinct pairs, each pair's share of the episodes set by how
+    many refusals asked for it, so demand decides the mixture. Empty when nothing has been refused that way."""
+    trainable = [(pair, r) for r in requests if (pair := r.trainable_pair)]
+    if not trainable:
+        return ()
+    demand = Counter(pair for pair, _ in trainable)
+    pairs = ",".join(f"{pick}:{place}:{n}" for (pick, place), n in demand.most_common())
+    axes = frozenset(a for _, r in trainable for a in r.axes)
+    # no `trains`: every pair is drawn from roles.TRAIN_COLOURS (see LearningRequest.trainable_pair), so none of
+    # them is what held_out_objects measures and the gate has no suite to exclude -- a gain here is transfer.
+    return (Action("pair_round", "pairs", axes, CONTACT_FAILURES,
+                   f"PAIRS='{pairs}' bash scripts/pair_round.sh", hours=5.0),)  # fmt: skip
+
+
+def menu(requests: list[LearningRequest] | None = None) -> tuple[Action, ...]:
+    """Every recipe on offer: the fixed ones, plus the pair round the open refusals ask for.
+
+    One definition, because a name has to resolve the same way in `plan` (which ranks it) and in
+    `Cycles.action` (which `launch` and `judge` resolve it through afterwards). A registry built at import
+    could only ever hold the fixed half, so a planned pair_round cycle was unlaunchable."""
+    return MENU + pair_actions(requests if requests is not None else open_requests())
+
+
+def actions(requests: list[LearningRequest] | None = None) -> dict[str, Action]:
+    return {a.name: a for a in menu(requests)}
 
 
 def diagnosis(cells: dict[str, Cell]) -> dict[str, dict[str, Any]]:
@@ -383,9 +432,10 @@ class Cycles(dict[int, dict[str, Any]]):
 
     def action(self, cycle: int) -> Action:
         """The recipe a cycle ran, refused by name when the menu no longer carries it (a deleted entry, say)."""
-        if (name := self[cycle]["action"]) not in ACTIONS:
+        on_offer = actions()
+        if (name := self[cycle]["action"]) not in on_offer:
             raise typer.BadParameter(f"cycle {cycle} ran '{name}', which is no longer on the menu")
-        return ACTIONS[name]
+        return on_offer[name]
 
     def require(self, cycle: int, event: str) -> dict[str, Any]:
         """The cycle, refused unless it is in `event`: each command that moves one is valid from a single state."""
@@ -526,10 +576,11 @@ def plan(
     log, cells, refs = CycleLog(), merged_cells(bench), [str(p) for p in bench]
     cycles, diag, key = log.cycles(), diagnosis(cells), os.environ.get(TOKEN_FACTORY_KEY_ENV)
     chooser = None if offline or action or not key else Chooser(key)
-    requests = [LearningRequest(**r) for r in read_jsonl(REQUESTS)]
+    requests = open_requests()
     planner = Planner(
-        closed_families(verdicts), cycles.tried(refs), budget_hours, chooser, requests, failing=cycles.failing(refs)
-    )
+        closed_families(verdicts), cycles.tried(refs), budget_hours, chooser, requests,
+        menu=menu(requests), failing=cycles.failing(refs),
+    )  # fmt: skip
     if action is None:
         ranked, pick, rationale, chosen_by = planner.choose(cells, diag)
     else:
