@@ -210,7 +210,7 @@ def main(
             frames.add(r["source"])
     page = (HERE / "template.html").read_text()
     fills = {
-        "LINKS": "".join(f'<a href="{u}"{" class=primary" if i == 0 else ""}>{e(k)}</a>' for i, (k, u) in enumerate(LINKS.items())),
+        "LINKS": "".join(f'<a href="{u}" target="_blank" rel="noopener"{" class=primary" if i == 0 else ""}>{e(k)}</a>' for i, (k, u) in enumerate(LINKS.items())),
         "STEPS": "".join(f'<details class="step"><summary><b>{i}. {e(t)}</b>{e(d)}</summary><p>{e(more)}</p>'
                          f'<p class="sofar"><b>So far</b> {e(s)}</p></details>'
                          for i, ((t, d, more), s) in enumerate(zip(STEPS, so_far(cycles, requests), strict=True), 1)),

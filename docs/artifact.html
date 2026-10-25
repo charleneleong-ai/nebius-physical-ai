@@ -13,11 +13,11 @@
   color-scheme: dark;
 }
 body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--body); padding-inline: 16px; }
-main { max-width: 1100px; margin: 0 auto; padding-block: 48px 72px; display: grid; gap: 56px; }
+main { max-width: 1320px; margin: 0 auto; padding-block: 48px 72px; display: grid; gap: 56px; }
 h1, h2 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: 0.01em; }
 h1 { font-size: clamp(2.4rem, 6vw, 4rem); line-height: .98; }
 h2 { font-size: clamp(1.6rem, 3vw, 2.2rem); line-height: 1; margin-bottom: 14px; }
-p { margin: 0 0 12px; max-width: 68ch; }
+p { margin: 0 0 12px; max-width: 74ch; }
 .eyebrow { font: 600 11px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.14em; color: var(--accent); margin-bottom: 12px; }
 .lede { font-size: 1.08rem; color: var(--muted); }
 .takeaway { font-weight: 600; }
@@ -67,11 +67,11 @@ footer { font-size: 13px; color: var(--muted); }
     <div><b>0–1 / 50</b><span>so101-benchmark, every policy</span></div>
   </div>
   <nav class="links">
-    <a href="https://huggingface.co/spaces/chaleong/preflight">Preflight Space: the live gate</a>
-    <a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot Space: the training loop</a>
-    <a href="https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e">Hugging Face collection</a>
-    <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==">W&amp;B report</a>
-    <a href="https://github.com/charleneleong-ai/nebius-physical-ai">Code</a>
+    <a href="https://huggingface.co/spaces/chaleong/preflight" target="_blank" rel="noopener">Preflight Space: the live gate</a>
+    <a href="https://huggingface.co/spaces/chaleong/autopilot" target="_blank" rel="noopener">Autopilot Space: the training loop</a>
+    <a href="https://huggingface.co/collections/chaleong/preflight-rehearse-before-the-robot-moves-6ad409a5fccdebd3c38eea7e" target="_blank" rel="noopener">Hugging Face collection</a>
+    <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==" target="_blank" rel="noopener">W&amp;B report</a>
+    <a href="https://github.com/charleneleong-ai/nebius-physical-ai" target="_blank" rel="noopener">Code</a>
   </nav>
 </header>
 
@@ -128,7 +128,7 @@ flowchart LR
 <section>
   <h2>Autopilot: the loop that trains on what Preflight refuses</h2>
   <p class="takeaway">The first cycle taught a task the policy had never seen, 6 → 86 of 96, and transferred nothing to the task it held out (ring, 0 → 0). It also cost stacking (clean_many 88 → 76, real_1_pomade_tin 87 → 68), so the gate discarded it.</p>
-  <p>Every scene Preflight won't clear becomes a learning request. Autopilot ranks a fixed menu of tested recipes by the failures each could win back. Requests from real refusals rank first. Nemotron on Token Factory picks one of the top three; it never scores the result. The paired gate G3 judges it, and a human approves promotion. After cycle 1, Nemotron's proposed ring round was dropped as overtaken by the evidence. Cycle 4, a DAgger round answering four Preflight refusals, was discarded: no gain on new objects and both real-object suites worse. Live on the <a href="https://huggingface.co/spaces/chaleong/autopilot">Autopilot Space</a>.</p>
+  <p>Every scene Preflight won't clear becomes a learning request. Autopilot ranks a fixed menu of tested recipes by the failures each could win back. Requests from real refusals rank first. Nemotron on Token Factory picks one of the top three; it never scores the result. The paired gate G3 judges it, and a human approves promotion. After cycle 1, Nemotron's proposed ring round was dropped as overtaken by the evidence. Cycle 4, a DAgger round answering four Preflight refusals, was discarded: no gain on new objects and both real-object suites worse. Live on the <a href="https://huggingface.co/spaces/chaleong/autopilot" target="_blank" rel="noopener">Autopilot Space</a>.</p>
   <pre class="mermaid">
 flowchart LR
   PF["Preflight: RETRY / ASK_HUMAN"] -->|learning request| AP["Autopilot: rank menu"]
@@ -181,6 +181,6 @@ flowchart LR
 </section>
 
 <footer>
-  Sources: <a href="https://github.com/charleneleong-ai/nebius-physical-ai">charleneleong-ai/nebius-physical-ai</a> — <code>docs/report.pdf</code>, <code>docs/experiment-card.md</code>, <code>docs/generalisation-diagnosis.md</code>; rebuilt by <code>scripts/build_artifact.py</code>. Runs: <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==">W&amp;B report</a>.
+  Sources: <a href="https://github.com/charleneleong-ai/nebius-physical-ai" target="_blank" rel="noopener">charleneleong-ai/nebius-physical-ai</a> — <code>docs/report.pdf</code>, <code>docs/experiment-card.md</code>, <code>docs/generalisation-diagnosis.md</code>; rebuilt by <code>scripts/build_artifact.py</code>. Runs: <a href="https://wandb.ai/chaleong/preflight/reports/Preflight:-SO-101-generalisation-experiments--VmlldzoxODA5MDQ3Mg==" target="_blank" rel="noopener">W&amp;B report</a>.
 </footer>
 </main>

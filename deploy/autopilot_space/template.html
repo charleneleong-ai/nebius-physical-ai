@@ -17,7 +17,7 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--body); }
-main { max-width: 1200px; margin: 0 auto; padding: 48px 24px 72px; }
+main { max-width: 1440px; margin: 0 auto; padding: 48px 24px 72px; }
 h1, h2, h3 { font-family: var(--display); letter-spacing: .01em; }
 .tag { font: 600 11px/1 var(--mono); text-transform: uppercase; letter-spacing: .14em; color: var(--accent); }
 .split { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 3fr); gap: 32px; align-items: start; }
@@ -25,7 +25,7 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: .01em; }
 h1 { font-size: clamp(3rem, 9vw, 6rem); line-height: .9; margin: 10px 0 0; text-transform: uppercase; }
 h2 { font-size: clamp(1.6rem, 3.2vw, 2.4rem); line-height: 1; margin: 56px 0 12px; }
 p.lede, .stat { color: var(--muted); }
-p.lede { margin: 20px 0 0; max-width: 62ch; font-size: 1.15rem; }
+p.lede { margin: 20px 0 0; max-width: 70ch; font-size: 1.15rem; }
 .stat { font-size: .85rem; }
 a { color: inherit; }
 .links { display: grid; gap: 8px; }
@@ -225,7 +225,7 @@ flowchart LR
   <div class="demos">{{DEMOS}}</div>
 
   <h2 id="requests">Requests from Preflight</h2>
-  <p class="stat">Every scene <a href="https://huggingface.co/spaces/chaleong/preflight">Preflight</a> would not clear
+  <p class="stat">Every scene <a href="https://huggingface.co/spaces/chaleong/preflight" target="_blank" rel="noopener">Preflight</a> would not clear
     is filed here as a learning request (<code>npai autopilot intake</code>). Recipes that answer one rank first. A refusal
     caused by an untrustworthy twin is a perception problem: it is recorded as unmet, not turned into training.</p>
   {{REQUESTS}}
