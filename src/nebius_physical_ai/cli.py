@@ -26,6 +26,7 @@ from nebius_physical_ai.policy.gr00t import DEFAULT_PORT, LAYOUTS, Gr00tClient
 from nebius_physical_ai.tracking import Tracker
 from nebius_physical_ai.trust.plots import StressPlots
 from nebius_physical_ai.trust.stress import StressCase, StressReport
+from nebius_physical_ai.twin import roles
 from nebius_physical_ai.twin.dataset import LeRobotWriter
 from nebius_physical_ai.twin.expert import MISTAKES, Frame, PickPlaceExpert, SceneSampler, UnreachableTarget
 from nebius_physical_ai.twin.randomize import Episode, Randomization, SceneRandomizer
@@ -79,6 +80,22 @@ def serve(
     )
 
 
+def demo_pair(pick: str | None, place: str | None, role_agnostic: bool) -> tuple[str, str] | None:
+    """The pick/place pair the described episodes should ask for, or None to draw one per episode."""
+    if bool(pick) != bool(place):
+        raise typer.BadParameter("--pick and --place go together: a pair needs both halves")
+    if not (pick and place):
+        return None
+    if not role_agnostic:
+        raise typer.BadParameter("--pick/--place need --role-agnostic, which is what names them in the prompt")
+    if pick == place:
+        raise typer.BadParameter(f"--pick and --place name the same object: {pick!r}")
+    # the pair is painted by palette name and must stay inside the split the benchmark holds out against
+    if unknown := [c for c in (pick, place) if c not in roles.TRAIN_COLOURS]:
+        raise typer.BadParameter(f"--pick/--place must be training colours {list(roles.TRAIN_COLOURS)}, got {unknown}")
+    return (pick, place)
+
+
 def build_randomizer(
     sampler: SceneSampler,
     seed: int,
@@ -90,6 +107,7 @@ def build_randomizer(
     lookalikes: int = 0,
     texture_share: float = 0.0,
     wrist_randomize: bool = False,
+    pair: tuple[str, str] | None = None,
 ) -> SceneRandomizer:
     """The demo randomiser: real objects as distractors, and cameras centred on a calibrated pose when one is given.
 
@@ -116,6 +134,7 @@ def build_randomizer(
         camera_pose=pose,
         camera_mix=mix,
         role_agnostic=role_agnostic,
+        pair=pair,
     )
 
 
@@ -194,6 +213,12 @@ def demos(
     wrist_randomize: Annotated[
         bool, typer.Option(help="With --randomize, draw the wrist camera between the menagerie and Seeed mounts")
     ] = False,
+    pick: Annotated[
+        str | None, typer.Option(help="With --role-agnostic, ask for this colour every episode (needs --place)")
+    ] = None,
+    place: Annotated[
+        str | None, typer.Option(help="With --role-agnostic, place on this colour every episode (needs --pick)")
+    ] = None,
     width_mm: WidthOpt = A3_MAT.width_mm,
     height_mm: HeightOpt = A3_MAT.height_mm,
 ) -> None:
@@ -201,8 +226,10 @@ def demos(
 
     With --role-agnostic each episode is told what to pick and where to put it in its own words (`Pick green can and
     place on red box`), and a quarter keep the original blue and red cubes and prompt."""
-    if (camera or role_agnostic or lookalikes or texture_share or wrist_randomize) and not randomize:
-        raise typer.BadParameter("--camera, --role-agnostic, --lookalikes and the visual options need --randomize")
+    if (camera or role_agnostic or lookalikes or texture_share or wrist_randomize or pick) and not randomize:
+        raise typer.BadParameter(
+            "--camera, --role-agnostic, --lookalikes, --pick/--place and the visual options need --randomize"
+        )
     sampler = SceneSampler(TwinLayout(MatSpec(width_mm, height_mm)), seed=seed)
     randomizer = (
         build_randomizer(
@@ -216,6 +243,7 @@ def demos(
             lookalikes=lookalikes,
             texture_share=texture_share,
             wrist_randomize=wrist_randomize,
+            pair=demo_pair(pick, place, role_agnostic),
         )
         if randomize
         else None

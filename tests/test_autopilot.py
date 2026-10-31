@@ -10,20 +10,23 @@ from typer.testing import CliRunner
 
 from nebius_physical_ai import autopilot
 from nebius_physical_ai.autopilot import (
-    ACTIONS,
     MENU,
     RECOVERY_FAILURES,
     REQUESTS,
     Action,
     Candidate,
     CycleLog,
+    LearningRequest,
     Planner,
+    actions,
     app,
     axis_of,
     diagnosis,
     judge,
     learning_request,
+    menu,
     next_step,
+    pair_actions,
     read_jsonl,
     results_from_log,
 )
@@ -106,7 +109,7 @@ class TestPlanner:
         assert by == ("nemotron" if picked == answer else "ranking")
 
     def test_nothing_eligible(self, ref: dict[str, Cell]) -> None:
-        families = {a.family: "closed" for a in ACTIONS.values()}
+        families = {a.family: "closed" for a in menu([])}
         _, pick, why, _ = Planner(families, set(), 8.0, None).choose(ref, diagnosis(ref))
         assert pick is None and "nothing" in why
 
@@ -114,9 +117,9 @@ class TestPlanner:
 class TestJudge:
     def test_transfer_counts_but_the_trained_task_does_not(self, ref: dict[str, Cell]) -> None:
         new = dict(ref) | {"held_out_task_basket": cell("held_out_task_basket", "held_out_tasks", 6, flips=60)}
-        assert judge(ACTIONS["task_round:basket"], ref, new).verdict == "KEEP"
+        assert judge(actions()["task_round:basket"], ref, new).verdict == "KEEP"
         new["held_out_task_ring"] = cell("held_out_task_ring", "held_out_tasks", 0, flips=20)
-        result = judge(ACTIONS["task_round:basket"], ref, new)
+        result = judge(actions()["task_round:basket"], ref, new)
         assert result.verdict == "PROMOTE" and "held_out_task_ring" in result.why
 
     def test_any_suite_worse_discards(self, ref: dict[str, Cell]) -> None:
@@ -124,13 +127,56 @@ class TestJudge:
             "held_out_task_ring": cell("held_out_task_ring", "held_out_tasks", 0, flips=30),
             "clean_many": cell("clean_many", "diagnostic", 70),
         }
-        result = judge(ACTIONS["task_round:basket"], ref, new)
+        result = judge(actions()["task_round:basket"], ref, new)
         assert result.verdict == "DISCARD" and "clean_many" in result.why
 
 
 def stop_planning(*_args: object, **_kwargs: object) -> None:
     """Stand in for plan(), which run() catches typer.Exit from, to end the loop after one pass."""
     raise typer.Exit()
+
+
+PAIRED_REQUESTS = [LearningRequest("s", "RETRY", "i", ["objects"], [], ["refused"], "yellow", "red")]
+
+
+def record(verdict: str, perception: float = 0.89, successes: int = 0, n: int = 0) -> dict:
+    """A Preflight result.json, as npai preflight-job writes it."""
+    rehearsal = {"successes": successes, "n": n} if n else {}
+    return {"verdict": verdict, "scene": {"perception": perception}, "rehearsal": rehearsal}
+
+
+class TestRefusedPairsBecomeARecipe:
+    """A refusal names a pick and a place; the recipe that could answer it is built from the outstanding ones."""
+
+    @staticmethod
+    def request(source: str, pick: str, place: str, axes: tuple[str, ...] = ("objects",)) -> LearningRequest:
+        return LearningRequest(
+            source, "RETRY", f"Pick {pick} and place on {place}", list(axes), [], ["refused"], pick, place
+        )
+
+    def test_requests_are_grouped_by_pair_and_weighted_by_how_many_asked(self) -> None:
+        requests = [self.request(s, "yellow", "red") for s in "abc"] + [self.request("d", "blue", "yellow")]
+        (action,) = pair_actions(requests)
+        # one run over both pairs, each pair's share of the episodes set by its demand
+        assert "PAIRS='yellow:red:3,blue:yellow:1'" in action.command
+        assert action.family == "pairs"  # a family no verdict has closed, so demand alone decides
+
+    @pytest.mark.parametrize(
+        ("why", "requests"),
+        [("nothing refused", []),
+         ("no trainable axis", [LearningRequest("x", "ASK_HUMAN", "i", [], ["perception"], ["no twin"], "blue", "red")]),
+         ("filed before the halves were recorded", [LearningRequest("y", "RETRY", "i", ["objects"], [], ["refused"])]),
+         ("a held-out colour, which held_out_objects measures",
+          [LearningRequest("z", "RETRY", "i", ["objects"], [], ["refused"], "mint", "red")])],
+        ids=lambda v: v if isinstance(v, str) else "",
+    )  # fmt: skip
+    def test_no_recipe_without_a_pair_it_may_train_on(self, why: str, requests: list[LearningRequest]) -> None:
+        assert pair_actions(requests) == (), why
+
+    def test_a_refusal_records_the_pair_it_asked_for(self) -> None:
+        filed = learning_request("new_task", record("RETRY", successes=7, n=32), TaskSpec(pick="yellow", place="red"))
+        assert filed is not None and (filed.pick, filed.place) == ("yellow", "red")
+        assert pair_actions([filed])[0].command.startswith("PAIRS='yellow:red:1'")
 
 
 class TestCycleLog:
@@ -253,12 +299,6 @@ class TestPlanCommand:
         assert result.exit_code != 0 and not CycleLog().cycles()
 
 
-def record(verdict: str, perception: float = 0.89, successes: int = 0, n: int = 0) -> dict:
-    """A Preflight result.json, as npai preflight-job writes it."""
-    rehearsal = {"successes": successes, "n": n} if n else {}
-    return {"verdict": verdict, "scene": {"perception": perception}, "rehearsal": rehearsal}
-
-
 class TestLearningRequests:
     @pytest.mark.parametrize(
         ("result", "task", "axes", "unmet"),
@@ -358,7 +398,7 @@ class TestMenuMatchesItsScripts:
         assert path.exists(), f"{action.name}: {path} does not exist"
         return path, path.read_text()
 
-    @pytest.mark.parametrize("action", MENU, ids=lambda a: a.name)
+    @pytest.mark.parametrize("action", menu(PAIRED_REQUESTS), ids=lambda a: a.name)
     def test_every_variable_a_recipe_sets_is_one_its_script_reads(self, action: Action) -> None:
         path, source = self.script_of(action)
         for name in re.findall(r"\b([A-Z][A-Z0-9_]*)=", action.command):

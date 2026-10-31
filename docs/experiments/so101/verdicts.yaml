@@ -207,6 +207,24 @@ experiments:
       The lineage is fixed in #36; the cycle was voided on 2026-10-25 so the recipe can be tried for the first time.
     verdict: VOID
     pr: 36
+  - label: "Autopilot: grouped pair round, the yellow-on-red pair Preflight refused"
+    family: pairs
+    runs: {06cz93sb: train, rdhhc1xv: bench}
+    baseline: round 3 483
+    gate: G3
+    result: >-
+      First run of the recipe that turns a refusal into training data. 120 demos of yellow on red (6 shards x 20)
+      repeated x2 beside the policy's own mix (2,400 base demos + 216 recoveries x8): 4,368 episodes / 1,126,944
+      frames, 4k steps at lr 1e-5. 453/576 against 483 - down 30 pooled with no suite significantly worse
+      (held_out_objects 53 vs 57, seen_vocabulary 76 vs 78, clean_many 80 vs 88 p=0.057, clean_top_down_many 81
+      vs 85, real_1_pomade_tin_many 79 vs 87 p=0.057, in_path_pomade_tin_many 84 vs 88). Two caveats found after
+      the run, both fixed in #42: only 86 of the 120 demos (71.7%) actually asked for yellow on red, the rest
+      keeping the blue/red prompt through original_share=0.25; and the recipe was launched by hand because a
+      generated action could not resolve through the import-time registry, so no autopilot cycle could have run
+      it. What this does NOT answer: none of the six gate suites rehearses yellow on red, so whether the refusal
+      was closed is unmeasured - the run shows only what the pair cost the skill the policy already had.
+    verdict: DISCARD
+    pr: 42
 superseded:  # killed, crashed on launch, or relaunched; tagged `superseded`
   [te8xslg6, uf547kdi, 5vzuj6cz, 9mq1zp6u, 7wdlq67i, cl3ltozz, z0etzlli, 15i8w2eg, rhicuin5, 9p93rb37, 30r7i00q, ap8n1409,
    r83f86xc, kog76yhz, 2duwptwy, 9xe5clfu, 3fysf7vw, ypcoha4l, 6njr9qet]
