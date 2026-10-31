@@ -42,6 +42,8 @@ die() { say "$*"; exit 1; }
 SERVER=""
 trap '[ -n "$SERVER" ] && kill $SERVER 2>/dev/null' EXIT
 
+# before anything reads it: without this the first use is a pandas "No objects to concatenate" ten frames deep
+[ -f "$TWIN/meta/info.json" ] || die "no twin dataset at $TWIN (dagger_round.sh builds the round aggregate)"
 if [ ! -f "$REAL/meta/info.json" ]; then
   say "converting ArmnetBench teleoperation"
   nice -n 10 $LR/python scripts/real_mix.py convert "$REAL" --like "$TWIN" ${TASK:+--task "$TASK"} ${CACHE:+--cache "$CACHE"} ${ROLLOUTS:+--rollouts} \
@@ -55,7 +57,6 @@ if [ "$REAL_FILTER" = 1 ]; then
 fi
 # Fine-tuning a served policy on a set that drops the recoveries it was trained on makes it forget them, and the
 # run looks healthy the whole way: train it on what it was trained on, or stop before spending the GPU.
-[ -f "$TWIN/meta/info.json" ] || die "no twin dataset at $TWIN (dagger_round.sh builds the round aggregate)"
 say "mixing at real share $REAL_SHARE"
 rm -rf "$MIX"
 $LR/python scripts/real_mix.py mix "$TWIN" "$REAL" "$MIX" --real-share "$REAL_SHARE" ${EXTRA:+--extra "$EXTRA"} || die "mix failed"
